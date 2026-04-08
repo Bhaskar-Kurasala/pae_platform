@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from pydantic import SecretStr
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
+from pydantic import SecretStr
 
 from app.agents.base_agent import AgentState, BaseAgent
 from app.agents.registry import register

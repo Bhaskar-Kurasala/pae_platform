@@ -1,17 +1,20 @@
 """Master Orchestrator Agent (MOA) — LangGraph StateGraph.
 
 Flow:
-  classify_intent → route → [SocraticTutor | CodeReview | AdaptiveQuiz] → evaluate_response → END
+  classify_intent → route → [specific agent] → END
+
+All 20 agents are registered and routable. The classifier uses fast keyword
+matching first, then falls back to claude-haiku-4-5 for nuanced cases.
 """
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 import structlog
-from pydantic import SecretStr
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
+from pydantic import SecretStr
 from typing_extensions import TypedDict
 
 from app.agents.base_agent import AgentState
@@ -19,20 +22,80 @@ from app.core.config import settings
 
 log = structlog.get_logger()
 
+# All routable agent names
+ROUTABLE_AGENTS = [
+    "socratic_tutor",
+    "code_review",
+    "adaptive_quiz",
+    "mcq_factory",
+    "coding_assistant",
+    "student_buddy",
+    "content_ingestion",
+    "curriculum_mapper",
+    "deep_capturer",
+    "spaced_repetition",
+    "knowledge_graph",
+    "adaptive_path",
+    "project_evaluator",
+    "progress_report",
+    "mock_interview",
+    "portfolio_builder",
+    "job_match",
+    "disrupt_prevention",
+    "peer_matching",
+    "community_celebrator",
+]
+
 _CLASSIFIER_PROMPT = """You are the Master Orchestrator for a production AI engineering learning platform.
 
-Your job: classify the student's message and choose the right agent to handle it.
+Your job: classify the student's message and choose the right agent.
 
-Available agents:
-- socratic_tutor: For conceptual questions, "what is X", "explain Y", "help me understand Z"
-- code_review: For code submissions, "review my code", "is this correct", code blocks in message
-- adaptive_quiz: For practice/testing, "quiz me", "test my knowledge", "MCQ", "practice"
+Available agents and their purposes:
+- socratic_tutor: conceptual questions, "what is X", "explain Y", "how does Z work"
+- code_review: reviewing code for correctness and production readiness
+- adaptive_quiz: MCQ practice, "quiz me", "test my knowledge", "multiple choice"
+- mcq_factory: generating new questions from content
+- coding_assistant: coding help, debugging, "fix my code", "PR review"
+- student_buddy: quick explanations, "tldr", "eli5", "summarize briefly"
+- content_ingestion: ingesting YouTube/GitHub content
+- curriculum_mapper: curriculum updates, lesson ordering
+- deep_capturer: weekly synthesis, concept connections
+- spaced_repetition: flashcard review, "due cards", "spaced repetition"
+- knowledge_graph: concept mastery updates, "skill map"
+- adaptive_path: learning path, "what should I study next", "study plan"
+- project_evaluator: capstone evaluation, "grade my project"
+- progress_report: "how am I doing", "my progress", "weekly report"
+- mock_interview: interview practice, "system design", "mock interview"
+- portfolio_builder: "build my portfolio", "showcase project"
+- job_match: "find jobs", "job listings", "career opportunities"
+- disrupt_prevention: re-engagement messages, inactive students
+- peer_matching: "study partner", "find peers", "study group"
+- community_celebrator: celebrations, milestones, "I finished", "I passed"
 
-Respond with ONLY one of: socratic_tutor, code_review, adaptive_quiz
+Respond with ONLY the agent name. No explanation.
 
 Student message: {message}
 
 Agent:"""
+
+# Fast keyword routing — avoids LLM call for the most common patterns
+_KEYWORD_MAP: list[tuple[list[str], str]] = [
+    (["def ", "class ", "import ", "```python", "review my code", "check my code"], "code_review"),
+    (["quiz me", "mcq", "multiple choice", "test my knowledge"], "adaptive_quiz"),
+    (["interview", "system design", "mock interview", "interview prep"], "mock_interview"),
+    (["portfolio", "showcase", "build my portfolio"], "portfolio_builder"),
+    (["jobs", "job listing", "career opportun", "find jobs", "hiring"], "job_match"),
+    (["study partner", "find peer", "study group", "peer match"], "peer_matching"),
+    (["celebrate", "i finished", "i passed", "milestone achieved", "completed course"], "community_celebrator"),
+    (["weekly report", "progress report", "how am i doing"], "progress_report"),
+    (["spaced repetition", "due cards", "flashcard", "review cards"], "spaced_repetition"),
+    (["learning path", "what should i study", "study plan", "adapt path"], "adaptive_path"),
+    (["help with code", "debug", "fix my code", "pr review", "coding help"], "coding_assistant"),
+    (["tldr", "eli5", "brief", "quick explanation", "summarize"], "student_buddy"),
+    (["ingest", "youtube.com", "github.com/", "new video", "process content"], "content_ingestion"),
+    (["generate question", "create mcq", "make quiz", "question bank"], "mcq_factory"),
+    (["capstone", "grade my project", "evaluate project"], "project_evaluator"),
+]
 
 
 class MOAGraphState(TypedDict):
@@ -45,75 +108,58 @@ class MOAGraphState(TypedDict):
 
 def _build_classifier() -> ChatAnthropic:
     return ChatAnthropic(  # type: ignore[call-arg]
-        model="claude-haiku-4-5",  # Use Haiku for fast, cheap classification
+        model="claude-haiku-4-5",
         anthropic_api_key=SecretStr(settings.anthropic_api_key) if settings.anthropic_api_key else None,
-        max_tokens=20,
+        max_tokens=30,
     )
+
+
+def _keyword_route(task: str) -> str | None:
+    lowered = task.lower()
+    for keywords, agent in _KEYWORD_MAP:
+        if any(kw in lowered for kw in keywords):
+            return agent
+    return None
 
 
 async def classify_intent(state: MOAGraphState) -> dict[str, Any]:
     """Classify the student's intent and pick an agent."""
-    agent_st = state["agent_state"]
-    task = agent_st.task
+    task = state["agent_state"].task
 
-    # Fast keyword check first (avoids LLM call for obvious cases)
-    lowered = task.lower()
-    if any(w in lowered for w in ("review", "check my code", "```", "def ", "class ", "import ")):
-        routed = "code_review"
-    elif any(w in lowered for w in ("quiz", "test me", "mcq", "multiple choice", "practice")):
-        routed = "adaptive_quiz"
-    elif settings.anthropic_api_key:
-        # Use Haiku for nuanced classification
+    # 1. Fast keyword check
+    routed = _keyword_route(task)
+
+    # 2. LLM classification for nuanced cases
+    if not routed and settings.anthropic_api_key:
         try:
             llm = _build_classifier()
             resp = await llm.ainvoke(
                 [HumanMessage(content=_CLASSIFIER_PROMPT.format(message=task))]
             )
-            routed = str(resp.content).strip().lower()
-            if routed not in {"socratic_tutor", "code_review", "adaptive_quiz"}:
-                routed = "socratic_tutor"
-        except Exception:
-            routed = "socratic_tutor"
-    else:
-        routed = "socratic_tutor"
+            candidate = str(resp.content).strip().lower().split()[0]
+            routed = candidate if candidate in ROUTABLE_AGENTS else None
+        except Exception as exc:
+            log.warning("moa.classify.llm_failed", error=str(exc))
 
-    log.info("moa.classify", routed_to=routed, task_preview=task[:50])
+    # 3. Default fallback
+    routed = routed or "socratic_tutor"
+
+    log.info("moa.classify", routed_to=routed, task_preview=task[:60])
     return {"routed_to": routed}
 
 
-def route_to_agent(state: MOAGraphState) -> Literal["socratic_tutor", "code_review", "adaptive_quiz"]:
-    """LangGraph conditional edge: reads routed_to and returns the next node name."""
-    return state["routed_to"]  # type: ignore[return-value]
+async def _run_any_agent(state: MOAGraphState) -> dict[str, Any]:
+    """Generic node that runs whichever agent was routed to."""
+    from app.agents.registry import _ensure_registered, get_agent
 
+    _ensure_registered()
+    agent_name = state["routed_to"]
+    try:
+        agent = get_agent(agent_name)
+    except KeyError:
+        agent_name = "socratic_tutor"
+        agent = get_agent(agent_name)
 
-async def run_socratic_tutor(state: MOAGraphState) -> dict[str, Any]:
-    from app.agents.socratic_tutor import SocraticTutorAgent
-
-    agent = SocraticTutorAgent()
-    result = await agent.run(state["agent_state"])
-    return {
-        "agent_state": result,
-        "final_response": result.response or "",
-        "evaluation_score": result.evaluation_score or 0.0,
-    }
-
-
-async def run_code_review(state: MOAGraphState) -> dict[str, Any]:
-    from app.agents.code_review import CodeReviewAgent
-
-    agent = CodeReviewAgent()
-    result = await agent.run(state["agent_state"])
-    return {
-        "agent_state": result,
-        "final_response": result.response or "",
-        "evaluation_score": result.evaluation_score or 0.0,
-    }
-
-
-async def run_adaptive_quiz(state: MOAGraphState) -> dict[str, Any]:
-    from app.agents.adaptive_quiz import AdaptiveQuizAgent
-
-    agent = AdaptiveQuizAgent()
     result = await agent.run(state["agent_state"])
     return {
         "agent_state": result,
@@ -123,32 +169,23 @@ async def run_adaptive_quiz(state: MOAGraphState) -> dict[str, Any]:
 
 
 def build_moa_graph() -> Any:
-    """Build and compile the LangGraph MOA StateGraph."""
+    """Build and compile the LangGraph MOA StateGraph.
+
+    Uses a single generic 'run_agent' node that dispatches to any registered
+    agent — avoids adding a new node for every new agent.
+    """
     graph = StateGraph(MOAGraphState)
 
     graph.add_node("classify_intent", classify_intent)
-    graph.add_node("socratic_tutor", run_socratic_tutor)
-    graph.add_node("code_review", run_code_review)
-    graph.add_node("adaptive_quiz", run_adaptive_quiz)
+    graph.add_node("run_agent", _run_any_agent)
 
     graph.set_entry_point("classify_intent")
-    graph.add_conditional_edges(
-        "classify_intent",
-        route_to_agent,
-        {
-            "socratic_tutor": "socratic_tutor",
-            "code_review": "code_review",
-            "adaptive_quiz": "adaptive_quiz",
-        },
-    )
-    graph.add_edge("socratic_tutor", END)
-    graph.add_edge("code_review", END)
-    graph.add_edge("adaptive_quiz", END)
+    graph.add_edge("classify_intent", "run_agent")
+    graph.add_edge("run_agent", END)
 
     return graph.compile()
 
 
-# Singleton graph instance — compiled once at startup
 _moa_graph: Any = None
 
 

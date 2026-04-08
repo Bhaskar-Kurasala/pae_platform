@@ -33,6 +33,23 @@ def list_agents() -> list[dict[str, str]]:
 
 def _ensure_registered() -> None:
     """Force import of all agent modules so they register themselves."""
+    import app.agents.adaptive_path  # noqa: F401
     import app.agents.adaptive_quiz  # noqa: F401
     import app.agents.code_review  # noqa: F401
+    import app.agents.coding_assistant  # noqa: F401
+    import app.agents.community_celebrator  # noqa: F401
+    import app.agents.content_ingestion  # noqa: F401
+    import app.agents.curriculum_mapper  # noqa: F401
+    import app.agents.deep_capturer  # noqa: F401
+    import app.agents.disrupt_prevention  # noqa: F401
+    import app.agents.job_match  # noqa: F401
+    import app.agents.knowledge_graph  # noqa: F401
+    import app.agents.mcq_factory  # noqa: F401
+    import app.agents.mock_interview  # noqa: F401
+    import app.agents.peer_matching  # noqa: F401
+    import app.agents.portfolio_builder  # noqa: F401
+    import app.agents.progress_report  # noqa: F401
+    import app.agents.project_evaluator  # noqa: F401
     import app.agents.socratic_tutor  # noqa: F401
+    import app.agents.spaced_repetition  # noqa: F401
+    import app.agents.student_buddy  # noqa: F401
