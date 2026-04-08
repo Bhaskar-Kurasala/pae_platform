@@ -9,9 +9,16 @@ describe("LandingPage", () => {
     expect(screen.getAllByText(/AI Engineering/i).length).toBeGreaterThan(0);
   });
 
-  it("renders CTA buttons", () => {
+  it("renders CTA links", () => {
     render(<LandingPage />);
-    expect(screen.getByRole("link", { name: /get started/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /browse courses/i })).toBeInTheDocument();
+    // "Start Learning Free" is the primary CTA
+    expect(screen.getByRole("link", { name: /start learning free/i })).toBeInTheDocument();
+    // "Browse Courses" appears multiple times — just confirm at least one exists
+    expect(screen.getAllByRole("link", { name: /browse courses/i }).length).toBeGreaterThan(0);
+  });
+
+  it("renders email capture form", () => {
+    render(<LandingPage />);
+    expect(screen.getByRole("textbox", { name: /email address/i })).toBeInTheDocument();
   });
 });

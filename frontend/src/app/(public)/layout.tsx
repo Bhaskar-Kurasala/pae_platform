@@ -1,3 +1,5 @@
-export default function PublicLayout({ children }: { children: React.ReactNode }) {
-  return <div className="min-h-screen bg-background">{children}</div>;
+import { PublicLayout } from "@/components/layouts/public-layout";
+
+export default function Layout({ children }: { children: React.ReactNode }) {
+  return <PublicLayout>{children}</PublicLayout>;
 }
