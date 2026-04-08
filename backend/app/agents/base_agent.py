@@ -3,126 +3,98 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 import structlog
+from pydantic import BaseModel, Field
 
 log = structlog.get_logger()
 
 
-class AgentInput(dict):  # type: ignore[type-arg]
-    """Typed dict for agent inputs."""
+class AgentState(BaseModel):
+    """Shared state that flows through every agent and the MOA graph."""
 
-
-class AgentOutput(dict):  # type: ignore[type-arg]
-    """Typed dict for agent outputs."""
+    student_id: str
+    conversation_history: list[dict[str, Any]] = Field(default_factory=list)
+    task: str
+    context: dict[str, Any] = Field(default_factory=dict)
+    response: str | None = None
+    tools_used: list[str] = Field(default_factory=list)
+    evaluation_score: float | None = None
+    agent_name: str | None = None
+    error: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class BaseAgent(ABC):
     """Abstract base class for all platform agents.
 
-    All 18+ agents must subclass this and implement `execute()`.
-    The log() method persists actions to agent_actions table.
-    The evaluate() method assesses output quality before delivery.
+    Subclasses must implement `execute(state)` and define:
+      - name: str           — unique identifier used by the registry
+      - description: str    — shown in the UI and used by MOA routing
+      - trigger_conditions  — list of intent patterns for MOA routing
+      - model: str          — Claude model ID to use
     """
 
     name: str = "base_agent"
     description: str = "Base agent"
+    trigger_conditions: list[str] = []
+    model: str = "claude-sonnet-4-6"
 
     def __init__(self) -> None:
-        self.log = structlog.get_logger().bind(agent=self.name)
+        self._log = structlog.get_logger().bind(agent=self.name)
 
     @abstractmethod
-    async def execute(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """Execute the agent's main logic.
-
-        Args:
-            input_data: Structured input for this agent.
-
-        Returns:
-            Structured output from the agent.
-        """
+    async def execute(self, state: AgentState) -> AgentState:
+        """Execute the agent's main logic and return updated state."""
         ...
 
-    async def evaluate(self, output: dict[str, Any]) -> dict[str, Any]:
-        """Evaluate the quality of the agent output before delivery.
+    async def evaluate(self, state: AgentState) -> AgentState:
+        """Quality-check the response. Override per agent.
 
-        Override in subclasses for agent-specific quality checks.
-        Returns the output dict with an optional `quality_score` key.
+        Default: pass-through with score 0.8.
         """
-        return {**output, "quality_score": 1.0}
+        return state.model_copy(update={"evaluation_score": 0.8})
 
-    async def run(
-        self,
-        input_data: dict[str, Any],
-        student_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Orchestrated run: execute → evaluate → log.
-
-        Args:
-            input_data: Structured input for this agent.
-            student_id: Optional ID of the student this action is for.
-
-        Returns:
-            Evaluated and logged agent output.
-        """
-        start_ms = int(time.monotonic() * 1000)
-        status = "completed"
-        error_message: str | None = None
-        output: dict[str, Any] = {}
-
-        try:
-            self.log.info("agent.run.start", input_keys=list(input_data.keys()))
-            output = await self.execute(input_data)
-            output = await self.evaluate(output)
-            self.log.info("agent.run.complete", output_keys=list(output.keys()))
-        except Exception as exc:
-            status = "error"
-            error_message = str(exc)
-            self.log.exception("agent.run.error", error=error_message)
-            raise
-        finally:
-            duration_ms = int(time.monotonic() * 1000) - start_ms
-            await self._persist_action(
-                student_id=student_id,
-                input_data=input_data,
-                output_data=output,
-                status=status,
-                error_message=error_message,
-                duration_ms=duration_ms,
-                tokens_used=output.get("tokens_used"),
-            )
-
-        return output
-
-    async def _persist_action(
-        self,
-        student_id: str | None,
-        input_data: dict[str, Any],
-        output_data: dict[str, Any],
-        status: str,
-        error_message: str | None,
-        duration_ms: int,
-        tokens_used: int | None,
-    ) -> None:
-        """Persist agent action to database. No-op if DB unavailable."""
+    async def log_action(self, state: AgentState, status: str = "completed", duration_ms: int = 0) -> None:
+        """Persist agent action to agent_actions table. Non-blocking."""
         try:
             from app.core.database import AsyncSessionLocal
             from app.models.agent_action import AgentAction
 
-            safe_input = {k: v for k, v in input_data.items() if k != "secret"}
-            safe_output = {k: v for k, v in output_data.items() if k != "tokens_used"}
-
             async with AsyncSessionLocal() as session:
                 action = AgentAction(
                     agent_name=self.name,
-                    student_id=student_id,
+                    student_id=state.student_id or None,
                     action_type="execute",
-                    input_data=safe_input,
-                    output_data=safe_output,
+                    input_data={"task": state.task, "context_keys": list(state.context.keys())},
+                    output_data={
+                        "response_length": len(state.response or ""),
+                        "tools_used": state.tools_used,
+                        "evaluation_score": state.evaluation_score,
+                    },
                     status=status,
-                    error_message=error_message,
+                    error_message=state.error,
                     duration_ms=duration_ms,
-                    tokens_used=tokens_used,
                 )
                 session.add(action)
                 await session.commit()
         except Exception as exc:
-            self.log.warning("agent.persist.failed", error=str(exc))
+            self._log.warning("agent.log_action.failed", error=str(exc))
+
+    async def run(self, state: AgentState) -> AgentState:
+        """Full pipeline: execute → evaluate → log_action."""
+        start_ms = int(time.monotonic() * 1000)
+        status = "completed"
+        try:
+            self._log.info("agent.run.start", task_length=len(state.task))
+            state = await self.execute(state)
+            state = await self.evaluate(state)
+            state = state.model_copy(update={"agent_name": self.name})
+            self._log.info("agent.run.complete", score=state.evaluation_score)
+        except Exception as exc:
+            status = "error"
+            state = state.model_copy(update={"error": str(exc), "agent_name": self.name})
+            self._log.exception("agent.run.error", error=str(exc))
+            raise
+        finally:
+            duration_ms = int(time.monotonic() * 1000) - start_ms
+            await self.log_action(state, status=status, duration_ms=duration_ms)
+        return state

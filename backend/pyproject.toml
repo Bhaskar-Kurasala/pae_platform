@@ -15,6 +15,7 @@ dependencies = [
     "gunicorn>=25.3.0",
     "httpx>=0.28.1",
     "langchain>=1.2.15",
+    "langchain-anthropic>=1.4.0",
     "langgraph>=1.1.6",
     "passlib[bcrypt]>=1.7.4",
     "pydantic-settings>=2.13.1",

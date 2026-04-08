@@ -39,6 +39,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
 
     # API v1
+    from app.api.v1.routes.agents import router as agents_router
     from app.api.v1.routes.auth import router as auth_router
     from app.api.v1.routes.courses import router as courses_router
     from app.api.v1.routes.exercises import router as exercises_router
@@ -53,6 +54,7 @@ def create_app() -> FastAPI:
         exercises_router,
         students_router,
         webhooks_router,
+        agents_router,
     ]
     for r in api_routers:
         app.include_router(r, prefix="/api/v1")
