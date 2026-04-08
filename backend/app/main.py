@@ -33,9 +33,29 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Health (root level)
     from app.api.v1.routes.health import router as health_router
 
     app.include_router(health_router)
+
+    # API v1
+    from app.api.v1.routes.auth import router as auth_router
+    from app.api.v1.routes.courses import router as courses_router
+    from app.api.v1.routes.exercises import router as exercises_router
+    from app.api.v1.routes.lessons import router as lessons_router
+    from app.api.v1.routes.students import router as students_router
+    from app.api.v1.routes.webhooks import router as webhooks_router
+
+    api_routers = [
+        auth_router,
+        courses_router,
+        lessons_router,
+        exercises_router,
+        students_router,
+        webhooks_router,
+    ]
+    for r in api_routers:
+        app.include_router(r, prefix="/api/v1")
 
     return app
 

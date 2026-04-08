@@ -19,9 +19,7 @@ class Enrollment(Base, UUIDMixin, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("courses.id", ondelete="CASCADE"), nullable=False
     )
     status: Mapped[str] = mapped_column(String(50), default="active", nullable=False)
-    enrolled_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     progress_pct: Mapped[float] = mapped_column(default=0.0, nullable=False)
     payment_id: Mapped[uuid.UUID | None] = mapped_column(

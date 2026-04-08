@@ -21,9 +21,7 @@ class Course(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     lessons: Mapped[list["Lesson"]] = relationship(
         back_populates="course", lazy="select", order_by="Lesson.order"
     )
-    enrollments: Mapped[list["Enrollment"]] = relationship(
-        back_populates="course", lazy="select"
-    )
+    enrollments: Mapped[list["Enrollment"]] = relationship(back_populates="course", lazy="select")
 
 
 from app.models.enrollment import Enrollment  # noqa: E402

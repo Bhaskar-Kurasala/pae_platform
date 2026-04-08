@@ -1,7 +1,7 @@
 import uuid
 
-from sqlalchemy import ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import JSON, ForeignKey, String, Text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -15,11 +15,11 @@ class MCQBank(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         UUID(as_uuid=True), ForeignKey("lessons.id"), nullable=True
     )
     question: Mapped[str] = mapped_column(Text, nullable=False)
-    options: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    options: Mapped[dict] = mapped_column(JSON, nullable=False)
     correct_answer: Mapped[str] = mapped_column(String(10), nullable=False)
     explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
     difficulty: Mapped[str] = mapped_column(String(50), default="medium", nullable=False)
-    tags: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
     source: Mapped[str] = mapped_column(String(50), default="ai_generated", nullable=False)
 
     lesson: Mapped["Lesson | None"] = relationship(lazy="select")

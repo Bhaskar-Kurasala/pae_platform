@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -20,8 +20,8 @@ class QuizResult(Base, UUIDMixin, TimestampMixin):
     )
     score: Mapped[int] = mapped_column(Integer, nullable=False)
     max_score: Mapped[int] = mapped_column(Integer, nullable=False)
-    answers: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    questions_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    answers: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    questions_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     time_spent_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

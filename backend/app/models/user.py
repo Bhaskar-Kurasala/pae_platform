@@ -25,9 +25,7 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     submissions: Mapped[list["ExerciseSubmission"]] = relationship(
         back_populates="student", lazy="select"
     )
-    notifications: Mapped[list["Notification"]] = relationship(
-        back_populates="user", lazy="select"
-    )
+    notifications: Mapped[list["Notification"]] = relationship(back_populates="user", lazy="select")
     payments: Mapped[list["Payment"]] = relationship(back_populates="user", lazy="select")
 
 

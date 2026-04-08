@@ -1,7 +1,7 @@
 import uuid
 
-from sqlalchemy import ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import JSON, ForeignKey, Integer, String
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -23,7 +23,7 @@ class Payment(Base, UUIDMixin, TimestampMixin):
     currency: Mapped[str] = mapped_column(String(10), default="usd", nullable=False)
     status: Mapped[str] = mapped_column(String(50), default="pending", nullable=False)
     payment_method: Mapped[str] = mapped_column(String(50), default="card", nullable=False)
-    metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="payments")
     enrollment: Mapped["Enrollment | None"] = relationship(back_populates="payment")

@@ -1,3 +1,4 @@
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -13,6 +14,7 @@ from app.core.database import get_db
 log = structlog.get_logger()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token")
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token", auto_error=False)
 
 
 def create_access_token(data: dict[str, Any], expires_delta: timedelta | None = None) -> str:
@@ -46,10 +48,7 @@ def verify_token(token: str) -> dict[str, Any]:
         ) from exc
 
 
-async def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_db),
-) -> Any:
+async def _resolve_user(token: str, db: AsyncSession) -> Any:
     payload = verify_token(token)
     user_id: str | None = payload.get("sub")
     if not user_id:
@@ -57,11 +56,10 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token payload",
         )
-
     from app.repositories.user_repository import UserRepository
 
     repo = UserRepository(db)
-    user = await repo.get(user_id)
+    user = await repo.get(uuid.UUID(user_id))
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -73,3 +71,19 @@ async def get_current_user(
             detail="Account deactivated",
         )
     return user
+
+
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    return await _resolve_user(token, db)
+
+
+async def get_current_user_optional(
+    token: str | None = Depends(oauth2_scheme_optional),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    if not token:
+        return None
+    return await _resolve_user(token, db)
