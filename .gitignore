@@ -1,0 +1,42 @@
+# ── Environment ──
+.env
+.env.local
+.env.production
+*.env
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+coverage.xml
+.coverage
+
+# ── Node ──
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# ── Docker ──
+docker-compose.override.yml
+
+# ── IDE ──
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# ── Claude Code ──
+.claude/settings.local.json
+CLAUDE.local.md
+
+# ── Build ──
+dist/
+build/
+*.egg
