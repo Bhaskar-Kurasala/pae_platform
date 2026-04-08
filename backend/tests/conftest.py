@@ -28,12 +28,26 @@ async def db_session() -> AsyncSession:
     await engine.dispose()
 
 
+@pytest.fixture(autouse=True)
+def reset_rate_limiter() -> None:
+    """Reset slowapi in-memory storage between tests so rate limits don't accumulate."""
+    from app.core.rate_limit import limiter
+
+    storage = getattr(limiter, "_storage", None)
+    if storage is not None and hasattr(storage, "storage"):
+        # MemoryStorage stores limits in a plain dict
+        inner = getattr(storage, "storage", None)
+        if isinstance(inner, dict):
+            inner.clear()
+
+
 @pytest.fixture
 async def client(db_session: AsyncSession) -> AsyncClient:
     app.dependency_overrides[get_db] = lambda: db_session
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
+        headers={"X-Forwarded-For": "127.0.0.1"},
     ) as ac:
         yield ac
     app.dependency_overrides.clear()
