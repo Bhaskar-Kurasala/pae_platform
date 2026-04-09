@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 
 class SubmissionCreate(BaseModel):
-    exercise_id: uuid.UUID
+    exercise_id: uuid.UUID | None = None
     code: str | None = None
     github_pr_url: str | None = None
 

@@ -19,12 +19,14 @@ from app.core.database import Base  # noqa: E402
 
 target_metadata = Base.metadata
 
-# Override sqlalchemy.url from environment
+# Override sqlalchemy.url from environment or settings
 database_url = os.environ.get("DATABASE_URL", "")
 if database_url.startswith("postgresql://"):
     database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+if not database_url:
+    from app.core.config import settings
+    database_url = settings.database_url
+config.set_main_option("sqlalchemy.url", database_url)
 
 
 def run_migrations_offline() -> None:

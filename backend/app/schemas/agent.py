@@ -13,8 +13,9 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     agent_name: str
-    evaluation_score: float
-    conversation_id: str
+    evaluation_score: float | None = None
+    conversation_id: str | None = None
+    error: bool | None = None
 
 
 class AgentInfo(BaseModel):

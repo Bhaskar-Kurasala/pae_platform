@@ -34,4 +34,5 @@ async def submit_exercise(
     service: ExerciseService = Depends(get_service),
     current_user: User = Depends(get_current_user),
 ) -> ExerciseSubmission:
+    payload.exercise_id = exercise_id
     return await service.submit(exercise_id, payload, current_user)

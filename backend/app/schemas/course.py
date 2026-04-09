@@ -10,6 +10,7 @@ class CourseCreate(BaseModel):
     description: str | None = None
     thumbnail_url: str | None = None
     price_cents: int = 0
+    is_published: bool = False
     difficulty: str = "beginner"
     estimated_hours: int = 0
     github_repo_url: str | None = None

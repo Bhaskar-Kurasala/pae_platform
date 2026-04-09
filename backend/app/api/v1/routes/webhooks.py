@@ -5,6 +5,7 @@ from typing import Any
 
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 
@@ -169,14 +170,16 @@ async def github_webhook(
     return {"status": "received", "event": x_github_event}
 
 
-@router.post("/stripe")
+@router.post("/stripe", response_model=None)
 async def stripe_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
     stripe_signature: str = Header(default=""),
-) -> dict[str, str]:
+) -> dict[str, str] | JSONResponse:
+    if not settings.stripe_webhook_secret:
+        return JSONResponse(status_code=503, content={"detail": "Stripe webhook not configured"})
     body = await request.body()
-    if stripe_signature and settings.stripe_webhook_secret:
+    if stripe_signature:
         _verify_stripe_signature(body, stripe_signature)
     payload: dict[str, Any] = await request.json()
     event_type: str = payload.get("type", "unknown")

@@ -30,15 +30,35 @@ async def db_session() -> AsyncSession:
 
 @pytest.fixture(autouse=True)
 def reset_rate_limiter() -> None:
-    """Reset slowapi in-memory storage between tests so rate limits don't accumulate."""
+    """Reset slowapi storage between tests so rate limits don't accumulate.
+
+    Handles both in-memory (dict) and Redis backends.  Redis keys created by
+    slowapi follow the pattern ``LIMITER/<ip>/<endpoint>`` so we delete them
+    with a wildcard scan.  If Redis is unreachable we fall back silently.
+    """
     from app.core.rate_limit import limiter
 
+    # In-memory backend (used when Redis is unavailable)
     storage = getattr(limiter, "_storage", None)
     if storage is not None and hasattr(storage, "storage"):
-        # MemoryStorage stores limits in a plain dict
         inner = getattr(storage, "storage", None)
         if isinstance(inner, dict):
             inner.clear()
+
+    # Redis backend — delete all slowapi limiter keys
+    try:
+        import redis as redis_lib  # type: ignore[import-untyped]
+
+        from app.core.config import settings
+
+        r = redis_lib.Redis.from_url(settings.redis_url, socket_connect_timeout=1)
+        keys = r.keys("LIMITS:LIMITER/*")
+        if keys:
+            r.delete(*keys)
+        r.close()
+    except Exception:
+        # Redis not available in this environment — ignore
+        pass
 
 
 @pytest.fixture

@@ -84,8 +84,18 @@ async def test_chat_returns_conversation_id(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_agents(client: AsyncClient) -> None:
+async def test_list_agents_requires_auth(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/agents/list")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_list_agents(client: AsyncClient) -> None:
+    token = await _get_token(client)
+    resp = await client.get(
+        "/api/v1/agents/list",
+        headers={"Authorization": f"Bearer {token}"},
+    )
     assert resp.status_code == 200
     agents = resp.json()
     names = [a["name"] for a in agents]

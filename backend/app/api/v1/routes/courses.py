@@ -6,15 +6,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import get_current_user, get_current_user_optional
 from app.models.course import Course
+from app.models.enrollment import Enrollment
 from app.models.user import User
 from app.schemas.course import CourseCreate, CourseResponse, CourseUpdate
+from app.schemas.enrollment import EnrollmentResponse
 from app.services.course_service import CourseService
+from app.services.enrollment_service import EnrollmentService
 
 router = APIRouter(prefix="/courses", tags=["courses"])
 
 
 def get_service(db: AsyncSession = Depends(get_db)) -> CourseService:
     return CourseService(db)
+
+
+def get_enrollment_service(db: AsyncSession = Depends(get_db)) -> EnrollmentService:
+    return EnrollmentService(db)
 
 
 @router.get("", response_model=list[CourseResponse])
@@ -59,3 +66,12 @@ async def delete_course(
     current_user: User = Depends(get_current_user),
 ) -> None:
     await service.delete_course(course_id, current_user)
+
+
+@router.post("/{course_id}/enroll", response_model=EnrollmentResponse, status_code=201)
+async def enroll_in_course(
+    course_id: uuid.UUID,
+    service: EnrollmentService = Depends(get_enrollment_service),
+    current_user: User = Depends(get_current_user),
+) -> Enrollment:
+    return await service.enroll_student(course_id, current_user)
