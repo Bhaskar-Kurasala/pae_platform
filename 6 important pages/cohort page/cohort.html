@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Live Cohort — Production RAG Engineering | Production AI Engineering</title>
+<meta name="description" content="4 weeks. 8 live sessions. Personal code review. Build a production RAG system with a cohort of engineers and direct instructor access — not alone."/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=IBM+Plex+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --ink:      #0D0D1A;
+  --purple:   #4F3CC9;
+  --purple-l: #7B6EE0;
+  --purple-s: rgba(79,60,201,0.12);
+  --teal:     #1D9E75;
+  --teal-l:   #E1F5EE;
+  --amber:    #F59E0B;
+  --surface:  #F8F7FF;
+  --card:     #EEEDF8;
+  --border:   rgba(79,60,201,0.18);
+  --g4:       #9CA3AF;
+  --g6:       #6B7280;
+  --g7:       #374151;
+  --serif:    'DM Serif Display', Georgia, serif;
+  --sans:     'IBM Plex Sans', system-ui, sans-serif;
+  --mono:     'JetBrains Mono', 'Courier New', monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-font-smoothing:antialiased;scroll-behavior:smooth}
+body{font-family:var(--sans);color:var(--ink);background:var(--surface);line-height:1.65;overflow-x:hidden}
+a{color:inherit;text-decoration:none}
+button{cursor:pointer;border:none;background:none;font-family:inherit}
+
+@keyframes fadeUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+@keyframes grain{0%,100%{transform:translate(0,0)}25%{transform:translate(-2%,-1%)}50%{transform:translate(1%,2%)}75%{transform:translate(-1%,1%)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+
+.reveal{opacity:0;transform:translateY(20px);transition:opacity .6s cubic-bezier(.16,1,.3,1),transform .6s cubic-bezier(.16,1,.3,1)}
+.reveal.visible{opacity:1;transform:translateY(0)}
+
+body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:999;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.04'/%3E%3C/svg%3E");
+  opacity:.14;animation:grain 8s steps(2) infinite}
+
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation:none !important;transition:none !important}
+  .reveal{opacity:1 !important;transform:none !important}
+}
+
+/* ── NAV ─────────────────────────────────────────────── */
+.nav{
+  position:sticky;top:0;z-index:100;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 clamp(1.5rem,5vw,4rem);height:64px;
+  background:rgba(13,13,26,.92);backdrop-filter:blur(14px);
+  border-bottom:1px solid rgba(255,255,255,.06);
+}
+.nav-logo{display:flex;align-items:center;gap:10px}
+.nav-logo-mark{width:30px;height:30px;background:var(--purple);border-radius:5px;display:flex;align-items:center;justify-content:center}
+.nav-logo-text{font-family:var(--mono);font-size:.8rem;color:#fff;letter-spacing:.04em;font-weight:500}
+.nav-logo-text span{color:var(--amber)}
+.nav-right{display:flex;align-items:center;gap:1.1rem}
+.nav-link{font-size:.84rem;color:rgba(255,255,255,.5);transition:color .2s}
+.nav-link:hover{color:rgba(255,255,255,.85)}
+.nav-apply{
+  font-size:.82rem;font-weight:600;color:#fff;
+  background:var(--teal);padding:.44rem 1.1rem;border-radius:4px;
+  transition:background .18s,transform .15s;
+}
+.nav-apply:hover{background:#15875f;transform:translateY(-1px)}
+
+/* ── SHARED ──────────────────────────────────────────── */
+.section{padding:5rem clamp(1.5rem,5vw,4rem)}
+.inner{max-width:1060px;margin:0 auto}
+.inner-mid{max-width:820px;margin:0 auto}
+.stag{display:inline-block;font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--purple);margin-bottom:.7rem;font-weight:500}
+.stag-t{color:var(--teal)}
+.sh2{font-family:var(--serif);font-size:clamp(1.85rem,3.8vw,2.7rem);line-height:1.13;margin-bottom:.9rem}
+.slead{font-size:.97rem;color:var(--g7);max-width:580px;line-height:1.8}
+
+.btn-apply{
+  display:inline-flex;align-items:center;gap:.5rem;
+  background:var(--teal);color:#fff;
+  padding:.9rem 2rem;border-radius:4px;
+  font-size:.97rem;font-weight:600;letter-spacing:.01em;
+  transition:background .18s,transform .16s,box-shadow .18s;
+}
+.btn-apply:hover{background:#15875f;transform:translateY(-2px);box-shadow:0 8px 28px rgba(29,158,117,.3)}
+.btn-apply svg{transition:transform .2s}
+.btn-apply:hover svg{transform:translateX(3px)}
+.btn-apply-lg{font-size:1.05rem;padding:1rem 2.4rem}
+
+.btn-secondary-link{
+  font-size:.86rem;color:var(--g6);font-family:var(--mono);
+  border-bottom:1px solid rgba(0,0,0,.15);
+  transition:color .2s,border-color .2s;
+}
+.btn-secondary-link:hover{color:var(--ink);border-color:rgba(0,0,0,.35)}
+
+/* ── HERO ─────────────────────────────────────────────── */
+.hero{
+  background:var(--ink);position:relative;overflow:hidden;
+  padding:5.5rem clamp(1.5rem,5vw,4rem) 5rem;
+}
+.hero-grid-bg{position:absolute;inset:0;pointer-events:none;
+  background-image:linear-gradient(rgba(29,158,117,.04) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(29,158,117,.04) 1px,transparent 1px);
+  background-size:52px 52px}
+.hero-glow{position:absolute;top:-15%;right:-8%;width:55%;height:85%;
+  background:radial-gradient(ellipse,rgba(29,158,117,.16) 0%,transparent 62%);pointer-events:none}
+.hero-glow-l{position:absolute;bottom:-20%;left:-10%;width:35%;height:60%;
+  background:radial-gradient(ellipse,rgba(79,60,201,.08) 0%,transparent 62%);pointer-events:none}
+
+.hero-inner{
+  position:relative;z-index:2;max-width:1060px;margin:0 auto;
+  display:grid;grid-template-columns:1fr auto;gap:3rem;align-items:start;
+}
+.hero-eyebrow{
+  display:inline-flex;align-items:center;gap:.5rem;
+  background:rgba(29,158,117,.14);border:1px solid rgba(29,158,117,.28);
+  padding:.28rem .85rem;border-radius:2px;margin-bottom:1.3rem;
+  font-family:var(--mono);font-size:.7rem;color:rgba(80,210,150,.9);letter-spacing:.09em;
+  animation:fadeUp .5s ease both;
+}
+.hero-eyebrow-dot{width:6px;height:6px;border-radius:50%;background:rgba(80,210,150,.9);animation:pulse 2s infinite}
+.hero-h1{font-family:var(--serif);font-size:clamp(2.2rem,4.3vw,3.3rem);
+  color:#fff;line-height:1.1;margin-bottom:1rem;animation:fadeUp .5s .08s ease both}
+.hero-h1 em{color:rgba(80,210,150,.85);font-style:italic}
+.hero-sub{font-size:1rem;color:rgba(255,255,255,.56);line-height:1.78;
+  margin-bottom:2rem;max-width:520px;animation:fadeUp .5s .16s ease both}
+.hero-sub strong{color:rgba(255,255,255,.88);font-weight:500}
+.hero-cta{animation:fadeUp .5s .24s ease both;display:flex;flex-direction:column;gap:.75rem;align-items:flex-start}
+.hero-meta{
+  display:flex;align-items:center;gap:.7rem;
+  font-size:.74rem;color:rgba(255,255,255,.32);font-family:var(--mono);
+  flex-wrap:wrap;row-gap:.35rem;animation:fadeUp .5s .34s ease both;
+}
+.hero-sep{width:3px;height:3px;border-radius:50%;background:rgba(255,255,255,.2)}
+
+.seat-card{
+  background:rgba(255,255,255,.05);border:1px solid rgba(29,158,117,.2);
+  border-radius:8px;padding:1.6rem 1.5rem;min-width:230px;max-width:260px;
+  flex-shrink:0;animation:fadeUp .55s .2s ease both;position:relative;overflow:hidden;
+}
+.seat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--teal),transparent)}
+.seat-label{font-family:var(--mono);font-size:.65rem;color:var(--teal);
+  letter-spacing:.1em;text-transform:uppercase;margin-bottom:.85rem}
+.seat-bar{margin-bottom:1.1rem}
+.seat-bar-track{height:6px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden;margin-bottom:.5rem}
+.seat-bar-fill{height:100%;background:var(--teal);border-radius:3px;width:70%;transition:width .5s}
+.seat-nums{display:flex;justify-content:space-between;font-family:var(--mono);font-size:.72rem}
+.seat-remaining{color:var(--teal);font-weight:500}
+.seat-total{color:rgba(255,255,255,.3)}
+
+.seat-divider{border:none;border-top:1px solid rgba(255,255,255,.07);margin:.9rem 0}
+.seat-price-label{font-family:var(--mono);font-size:.64rem;color:var(--g4);letter-spacing:.08em;margin-bottom:.35rem}
+.seat-price{font-family:var(--serif);font-size:1.75rem;color:#fff;line-height:1}
+.seat-future{font-size:.74rem;color:rgba(255,255,255,.28);font-family:var(--mono);margin-top:.35rem;line-height:1.5}
+
+.seat-dates{margin-top:.9rem;display:flex;flex-direction:column;gap:.35rem}
+.seat-date-row{display:flex;justify-content:space-between;gap:.5rem;font-size:.76rem}
+.seat-date-label{color:rgba(255,255,255,.35);font-family:var(--mono)}
+.seat-date-val{color:rgba(255,255,255,.65);font-family:var(--mono);text-align:right}
+
+/* ── WHO THIS IS FOR ─────────────────────────────────── */
+.who-section{background:#fff}
+.who-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:2.5rem}
+.who-card{
+  padding:1.2rem 1.3rem;background:var(--surface);
+  border:1px solid var(--border);border-left:3px solid var(--teal);
+  border-radius:5px;transition:transform .2s,border-left-color .2s;
+}
+.who-card:hover{transform:translateX(3px);border-left-color:#15875f}
+.who-card-title{font-size:.9rem;font-weight:600;color:var(--ink);margin-bottom:.3rem}
+.who-card-body{font-size:.84rem;color:var(--g7);line-height:1.6}
+
+/* ── SELF-PACED vs COHORT ──────────────────────────── */
+.vs-section{background:var(--surface)}
+.vs-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-top:2.5rem}
+.vs-card{border-radius:8px;padding:1.75rem;position:relative;overflow:hidden}
+.vs-card.sp{background:#fff;border:1px solid var(--border)}
+.vs-card.co{background:var(--ink);border:1px solid rgba(29,158,117,.25)}
+.vs-card.co::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,var(--teal),transparent)}
+.vs-tag{font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.85rem}
+.vs-card.sp .vs-tag{color:var(--g4)}
+.vs-card.co .vs-tag{color:var(--teal)}
+.vs-title{font-family:var(--serif);font-size:1.25rem;margin-bottom:1.1rem;line-height:1.2}
+.vs-card.sp .vs-title{color:var(--ink)}
+.vs-card.co .vs-title{color:#fff}
+.vs-list{display:flex;flex-direction:column;gap:.6rem}
+.vs-item{display:flex;align-items:flex-start;gap:.65rem;font-size:.86rem;line-height:1.55}
+.vs-card.sp .vs-item{color:var(--g7)}
+.vs-card.co .vs-item{color:rgba(255,255,255,.72)}
+.vs-icon{flex-shrink:0;margin-top:2px;font-size:.85rem}
+.vs-card.sp .vs-icon{color:var(--g4)}
+.vs-card.co .vs-icon{color:var(--teal)}
+
+/* ── 4-WEEK SCHEDULE ────────────────────────────────── */
+.schedule-section{background:#fff}
+.schedule-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-top:2.5rem}
+.week-card{
+  background:var(--surface);border:1px solid var(--border);border-radius:6px;
+  padding:1.3rem 1.2rem;position:relative;overflow:hidden;
+}
+.week-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+.wk-1::before{background:var(--purple)}
+.wk-2::before{background:var(--teal)}
+.wk-3::before{background:var(--amber)}
+.wk-4::before{background:var(--purple-l)}
+.week-num{font-family:var(--mono);font-size:.65rem;color:var(--g4);letter-spacing:.08em;margin-bottom:.5rem}
+.week-title{font-size:.92rem;font-weight:600;color:var(--ink);margin-bottom:.25rem;line-height:1.3}
+.week-sessions{font-family:var(--mono);font-size:.7rem;color:var(--g6);margin-bottom:.8rem}
+.week-topics{display:flex;flex-direction:column;gap:.3rem;margin-bottom:.85rem}
+.week-topic{font-size:.79rem;color:var(--g7);display:flex;align-items:flex-start;gap:.4rem;line-height:1.45}
+.week-topic-dot{width:4px;height:4px;border-radius:50%;flex-shrink:0;margin-top:5px}
+.wk-1 .week-topic-dot{background:var(--purple)}
+.wk-2 .week-topic-dot{background:var(--teal)}
+.wk-3 .week-topic-dot{background:var(--amber)}
+.wk-4 .week-topic-dot{background:var(--purple-l)}
+.week-deliverable{
+  font-size:.76rem;color:var(--g6);
+  border-top:1px solid var(--border);padding-top:.65rem;
+  font-family:var(--mono);line-height:1.5;
+}
+.week-deliverable-label{font-size:.62rem;text-transform:uppercase;letter-spacing:.07em;color:var(--teal);display:block;margin-bottom:.2rem}
+
+/* ── SUPPORT SECTION ──────────────────────────────────── */
+.support-section{background:var(--ink)}
+.support-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1rem;margin-top:2.5rem}
+.support-card{
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
+  border-radius:6px;padding:1.4rem;transition:border-color .2s,transform .2s;
+  position:relative;
+}
+.support-card:hover{border-color:rgba(29,158,117,.3);transform:translateY(-2px)}
+.support-card::before{content:'';position:absolute;top:0;left:0;bottom:0;width:2px;background:var(--teal)}
+.support-name{font-size:.95rem;font-weight:600;color:#fff;margin-bottom:.4rem}
+.support-desc{font-size:.83rem;color:rgba(255,255,255,.5);line-height:1.65}
+
+/* ── WHAT HAPPENS NEXT ───────────────────────────────── */
+.next-steps-section{background:#fff}
+.next-steps-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-top:2.25rem}
+.next-step-card{
+  background:var(--surface);border:1px solid var(--border);border-radius:6px;
+  padding:1.2rem 1.1rem;position:relative;
+}
+.next-step-num{
+  width:28px;height:28px;border-radius:4px;background:var(--teal);
+  color:#fff;font-family:var(--mono);font-size:.72rem;
+  display:flex;align-items:center;justify-content:center;margin-bottom:.8rem;
+}
+.next-step-title{font-size:.88rem;font-weight:600;color:var(--ink);margin-bottom:.35rem;line-height:1.35}
+.next-step-body{font-size:.8rem;color:var(--g7);line-height:1.6}
+
+/* ── SCARCITY BANNER ────────────────────────────────── */
+.scarcity-section{
+  background:rgba(29,158,117,.08);border-top:1px solid rgba(29,158,117,.2);
+  border-bottom:1px solid rgba(29,158,117,.2);
+  padding:2rem clamp(1.5rem,5vw,4rem);
+}
+.scarcity-inner{
+  max-width:1060px;margin:0 auto;
+  display:flex;align-items:center;justify-content:space-between;gap:1.5rem;flex-wrap:wrap;
+}
+.scarcity-left{display:flex;align-items:center;gap:1.25rem;flex-wrap:wrap}
+.scarcity-dot{width:10px;height:10px;border-radius:50%;background:var(--teal);flex-shrink:0;animation:pulse 2s infinite}
+.scarcity-text h3{font-family:var(--serif);font-size:1.25rem;color:var(--ink);margin-bottom:.2rem}
+.scarcity-text p{font-size:.86rem;color:var(--g6);line-height:1.6}
+
+/* ── FAQ ────────────────────────────────────────────────── */
+.faq-section{background:var(--surface)}
+.faq-list{display:flex;flex-direction:column;gap:.55rem;margin-top:2.5rem;max-width:720px}
+.faq-item{border:1px solid var(--border);border-radius:6px;overflow:hidden;background:#fff}
+.faq-q{
+  width:100%;display:flex;align-items:center;justify-content:space-between;gap:1rem;
+  padding:1rem 1.2rem;text-align:left;cursor:pointer;
+  font-size:.92rem;font-weight:600;color:var(--ink);background:#fff;transition:background .18s;
+}
+.faq-q:hover{background:var(--card)}
+.faq-q[aria-expanded="true"]{background:var(--ink);color:#fff}
+.faq-chevron{width:16px;height:16px;flex-shrink:0;color:var(--g4);transition:transform .25s,color .18s}
+.faq-q[aria-expanded="true"] .faq-chevron{transform:rotate(180deg);color:rgba(255,255,255,.4)}
+.faq-a{max-height:0;overflow:hidden;transition:max-height .3s cubic-bezier(.16,1,.3,1)}
+.faq-a.open{max-height:420px}
+.faq-a-inner{padding:.9rem 1.2rem 1.1rem;font-size:.88rem;color:var(--g7);line-height:1.75;border-top:1px solid var(--border)}
+
+/* ── PRICING ──────────────────────────────────────────── */
+.pricing-section{background:var(--ink);padding:5rem clamp(1.5rem,5vw,4rem);position:relative;overflow:hidden}
+.pricing-section::before{content:'';position:absolute;top:-30%;right:-10%;width:50%;height:80%;
+  background:radial-gradient(ellipse,rgba(29,158,117,.14) 0%,transparent 65%);pointer-events:none}
+.pricing-inner{position:relative;z-index:2;max-width:1060px;margin:0 auto;
+  display:grid;grid-template-columns:1fr auto;gap:3rem;align-items:start}
+.pricing-card{
+  background:rgba(255,255,255,.05);border:1px solid rgba(29,158,117,.22);
+  border-radius:10px;padding:2.5rem;position:relative;overflow:hidden;
+}
+.pricing-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,var(--teal),var(--purple))}
+.pricing-tag{font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;
+  color:rgba(80,210,150,.8);margin-bottom:.85rem}
+.pricing-h2{font-family:var(--serif);font-size:clamp(1.6rem,3vw,2.1rem);color:#fff;
+  margin-bottom:.5rem;line-height:1.2}
+.pricing-desc{font-size:.88rem;color:rgba(255,255,255,.45);margin-bottom:1.75rem;line-height:1.65}
+.price-row{display:flex;align-items:baseline;gap:.75rem;margin-bottom:.3rem}
+.price-main{font-family:var(--serif);font-size:2.8rem;color:var(--teal);line-height:1}
+.price-note{font-family:var(--mono);font-size:.72rem;color:rgba(80,210,150,.6);margin-bottom:1.75rem}
+.inc-list{display:flex;flex-direction:column;gap:.5rem;margin-bottom:2rem}
+.inc-item{display:flex;align-items:flex-start;gap:.6rem;font-size:.84rem;color:rgba(255,255,255,.65)}
+.inc-check{color:var(--teal);flex-shrink:0;margin-top:1px}
+.future-note{
+  font-size:.8rem;color:rgba(255,255,255,.3);font-family:var(--mono);
+  padding:.6rem .85rem;background:rgba(255,255,255,.04);border-radius:3px;
+  margin-bottom:1.5rem;line-height:1.55;
+}
+.trust-row{display:flex;gap:1.5rem;flex-wrap:wrap;font-size:.76rem;color:rgba(255,255,255,.32);font-family:var(--mono);margin-top:.75rem}
+.trust-item{display:flex;align-items:center;gap:.35rem}
+
+.alt-card{
+  background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);
+  border-radius:8px;padding:1.6rem 1.5rem;min-width:220px;max-width:250px;
+  flex-shrink:0;
+}
+.alt-label{font-family:var(--mono);font-size:.64rem;color:var(--g4);letter-spacing:.09em;text-transform:uppercase;margin-bottom:.7rem}
+.alt-name{font-family:var(--serif);font-size:1.1rem;color:#fff;margin-bottom:.5rem;line-height:1.25}
+.alt-desc{font-size:.81rem;color:rgba(255,255,255,.4);line-height:1.6;margin-bottom:1rem}
+.alt-price{font-family:var(--mono);font-size:.88rem;color:var(--g4);margin-bottom:1rem}
+.alt-link{
+  font-size:.82rem;font-family:var(--mono);color:var(--purple-l);
+  display:inline-flex;align-items:center;gap:.35rem;transition:gap .2s;
+}
+.alt-link:hover{gap:.6rem}
+
+/* ── FINAL CTA ────────────────────────────────────────── */
+.final-section{
+  background:linear-gradient(140deg,#050510 0%,var(--ink) 50%,#051a12 100%);
+  padding:6rem clamp(1.5rem,5vw,4rem);text-align:center;
+}
+.final-h2{font-family:var(--serif);font-size:clamp(1.8rem,3.8vw,2.8rem);
+  color:#fff;margin-bottom:1rem;max-width:760px;margin-left:auto;margin-right:auto;line-height:1.15}
+.final-sub{font-size:.95rem;color:rgba(255,255,255,.45);margin-bottom:2.5rem;
+  max-width:520px;margin-left:auto;margin-right:auto;line-height:1.75}
+.final-actions{display:flex;align-items:center;justify-content:center;gap:1.25rem;flex-wrap:wrap}
+
+/* ── FOOTER ─────────────────────────────────────────── */
+footer{background:var(--ink);border-top:1px solid rgba(255,255,255,.05);padding:2rem clamp(1.5rem,5vw,4rem)}
+.footer-inner{max-width:1060px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem}
+.footer-copy{font-size:.76rem;color:rgba(255,255,255,.28);font-family:var(--mono)}
+.footer-links{display:flex;gap:1.5rem;flex-wrap:wrap}
+.footer-link{font-size:.76rem;color:rgba(255,255,255,.38);transition:color .2s;font-family:var(--mono)}
+.footer-link:hover{color:rgba(255,255,255,.72)}
+
+/* ── RESPONSIVE ──────────────────────────────────────── */
+@media(max-width:960px){
+  .hero-inner{grid-template-columns:1fr}
+  .seat-card{min-width:unset;max-width:100%}
+  .vs-grid{grid-template-columns:1fr}
+  .schedule-grid{grid-template-columns:repeat(2,1fr)}
+  .next-steps-grid{grid-template-columns:repeat(2,1fr)}
+  .pricing-inner{grid-template-columns:1fr}
+  .alt-card{max-width:100%}
+  .who-grid{grid-template-columns:1fr}
+}
+@media(max-width:640px){
+  .nav-link{display:none}
+  .schedule-grid{grid-template-columns:1fr}
+  .next-steps-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<nav class="nav" aria-label="Site navigation">
+  <div class="nav-logo">
+    <div class="nav-logo-mark" aria-hidden="true">
+      <svg viewBox="0 0 16 16" width="16" height="16" fill="none">
+        <rect x="2" y="2" width="5" height="5" rx="1" fill="white" opacity=".9"/>
+        <rect x="9" y="2" width="5" height="5" rx="1" fill="white" opacity=".45"/>
+        <rect x="2" y="9" width="5" height="5" rx="1" fill="white" opacity=".45"/>
+        <rect x="9" y="9" width="5" height="5" rx="1" fill="#F59E0B"/>
+      </svg>
+    </div>
+    <a href="index.html"><span class="nav-logo-text">Production<span>AI</span>Engineering</span></a>
+  </div>
+  <div class="nav-right">
+    <a href="index.html" class="nav-link">Home</a>
+    <a href="rag-course.html" class="nav-link">Self-paced</a>
+    <a href="#pricing" class="nav-apply">Reserve your seat — ₹18,000</a>
+  </div>
+</nav>
+
+<section class="hero" aria-labelledby="hero-h1">
+  <div class="hero-grid-bg" aria-hidden="true"></div>
+  <div class="hero-glow" aria-hidden="true"></div>
+  <div class="hero-glow-l" aria-hidden="true"></div>
+  <div class="hero-inner">
+    <div>
+      <div class="hero-eyebrow">
+        <span class="hero-eyebrow-dot" aria-hidden="true"></span>
+        Live cohort · 4 weeks · max 20 seats
+      </div>
+      <h1 class="hero-h1" id="hero-h1">
+        Build a Production RAG System<br/>in 4 Weeks — <em>With People,<br/>Not Alone</em>
+      </h1>
+      <p class="hero-sub">
+        <strong>Not just videos.</strong> 8 live sessions, personal code review on your implementation, and a cohort of engineers building the same system alongside you — with deadlines that actually hold.
+      </p>
+      <div class="hero-cta">
+        <a href="#pricing" class="btn-apply btn-apply-lg">
+          Reserve your seat — ₹18,000
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </a>
+        <a href="rag-course.html" class="btn-secondary-link">Prefer self-paced? See the course →</a>
+      </div>
+      <div class="hero-meta">
+        <span>Cohort 1 founding rate</span><div class="hero-sep" aria-hidden="true"></div>
+        <span>8 live sessions</span><div class="hero-sep" aria-hidden="true"></div>
+        <span>Personal code review</span><div class="hero-sep" aria-hidden="true"></div>
+        <span>Max 20 seats</span>
+      </div>
+    </div>
+
+    <aside class="seat-card" aria-label="Cohort seat availability">
+      <div class="seat-label">Cohort 1 seats</div>
+      <!-- PLACEHOLDER: update seat count below — currently showing 14/20 remaining -->
+      <div class="seat-bar" role="meter" aria-valuenow="14" aria-valuemin="0" aria-valuemax="20" aria-label="14 of 20 seats remaining">
+        <div class="seat-bar-track"><div class="seat-bar-fill"></div></div>
+        <div class="seat-nums">
+          <span class="seat-remaining">14 remaining</span>
+          <span class="seat-total">of 20</span>
+        </div>
+      </div>
+      <div class="seat-divider"></div>
+      <div class="seat-price-label">Cohort 1 founding rate</div>
+      <div class="seat-price">₹18,000</div>
+      <div class="seat-future">Future cohorts: ₹22,000–₹25,000</div>
+      <div class="seat-dates">
+        <!-- PLACEHOLDER: replace all date values below with confirmed cohort 1 dates -->
+        <div class="seat-date-row">
+          <span class="seat-date-label">Starts</span>
+          <span class="seat-date-val">TBD</span>
+        </div>
+        <div class="seat-date-row">
+          <span class="seat-date-label">Ends</span>
+          <span class="seat-date-val">TBD</span>
+        </div>
+        <div class="seat-date-row">
+          <span class="seat-date-label">Seats close</span>
+          <span class="seat-date-val">TBD</span>
+        </div>
+        <div class="seat-date-row">
+          <span class="seat-date-label">Sessions (IST)</span>
+          <span class="seat-date-val">TBD</span>
+        </div>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<section class="section who-section reveal" aria-labelledby="who-h2">
+  <div class="inner">
+    <span class="stag">Who this is for</span>
+    <h2 class="sh2" id="who-h2">Engineers Who Know They Learn Faster<br/>With Accountability</h2>
+    <p class="slead" style="margin-bottom:2rem">The curriculum is the same as the self-paced course. What's different is everything around it.</p>
+    <div class="who-grid">
+      <div class="who-card reveal">
+        <div class="who-card-title">You've bought courses and not finished them</div>
+        <div class="who-card-body">You need external deadlines. Weekly deliverables and a cohort who sees your progress — or lack of it — changes how you work.</div>
+      </div>
+      <div class="who-card reveal">
+        <div class="who-card-title">You want real-time answers, not forum waits</div>
+        <div class="who-card-body">Stuck on a chunking decision at 10pm? The live session on Tuesday covers it. Async questions in the cohort Discord are answered within 24 hours.</div>
+      </div>
+      <div class="who-card reveal">
+        <div class="who-card-title">You want your actual code reviewed</div>
+        <div class="who-card-body">Not a forum upvote. A personal async code review on your RAG implementation — specific feedback on your architecture, your chunking strategy, your evaluation setup.</div>
+      </div>
+      <div class="who-card reveal">
+        <div class="who-card-title">You need to move fast — there's a real project waiting</div>
+        <div class="who-card-body">4 weeks is the timeline. You're preparing for a production GenAI project at work and can't spend 6 months in self-paced mode. The cohort compresses the learning curve.</div>
+      </div>
+      <div class="who-card reveal">
+        <div class="who-card-title">You want to build alongside peers at your level</div>
+        <div class="who-card-body">Max 20 students. Small enough that you know each other's names, share architecture decisions, and compare evaluation results. Not an anonymous course community.</div>
+      </div>
+      <div class="who-card reveal">
+        <div class="who-card-title">You want the work reviewed before you ship it</div>
+        <div class="who-card-body">Students who complete the cohort have a production-ready RAG system reviewed by someone who has deployed this at enterprise scale. That's the difference you're paying for.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section vs-section reveal" aria-labelledby="vs-h2">
+  <div class="inner">
+    <span class="stag">The real difference</span>
+    <h2 class="sh2" id="vs-h2">Same Curriculum. Completely<br/>Different Experience.</h2>
+    <div class="vs-grid">
+      <div class="vs-card sp">
+        <div class="vs-tag">Self-paced — ₹8,999</div>
+        <div class="vs-title">Production RAG Engineering Course</div>
+        <div class="vs-list">
+          <div class="vs-item"><span class="vs-icon" aria-hidden="true">→</span>Work at your own pace, no schedule</div>
+          <div class="vs-item"><span class="vs-icon" aria-hidden="true">→</span>Flexible — fit around your current job</div>
+          <div class="vs-item"><span class="vs-icon" aria-hidden="true">→</span>Discord questions answered when active</div>
+          <div class="vs-item"><span class="vs-icon" aria-hidden="true">→</span>No code review included</div>
+          <div class="vs-item"><span class="vs-icon" aria-hidden="true">→</span>You set your own finish line</div>
+          <div class="vs-item"><span class="vs-icon" aria-hidden="true">→</span>Lifetime access, revisit any time</div>
+        </div>
+      </div>
+      <div class="vs-card co">
+        <div class="vs-tag">Live Cohort — ₹18,000</div>
+        <div class="vs-title" style="color:#fff">Production RAG Engineering — Cohort 1</div>
+        <div class="vs-list">
+          <div class="vs-item"><span class="vs-icon" aria-hidden="true">✓</span>Weekly deliverable checkpoints — hard deadlines</div>
+          <div class="vs-item"><span class="vs-icon" aria-hidden="true">✓</span>8 live sessions — concept, live coding, and Q&A</div>
+          <div class="vs-item"><span class="vs-icon" aria-hidden="true">✓</span>Real-time questions answered in session</div>
+          <div class="vs-item"><span class="vs-icon" aria-hidden="true">✓</span>Personal code review on your implementation</div>
+          <div class="vs-item"><span class="vs-icon" aria-hidden="true">✓</span>Cohort of max 20 — peer pressure and peer learning</div>
+          <div class="vs-item"><span class="vs-icon" aria-hidden="true">✓</span>Certificate of completion + self-paced access included</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section schedule-section reveal" aria-labelledby="schedule-h2">
+  <div class="inner">
+    <span class="stag">The program</span>
+    <h2 class="sh2" id="schedule-h2">4 Weeks. 8 Sessions.<br/>One Production-Ready System.</h2>
+    <p class="slead" style="margin-bottom:2.5rem">Every week ends with a concrete deliverable — not just watched content. By Week 4 you have a deployed, monitored, reviewed system.</p>
+    <div class="schedule-grid">
+      <div class="week-card wk-1 reveal">
+        <div class="week-num">Week 1 · Sessions 1–2</div>
+        <div class="week-title">Use Case Analysis + Ingestion Pipeline</div>
+        <div class="week-sessions">2 × 90-min live sessions</div>
+        <div class="week-topics">
+          <div class="week-topic"><div class="week-topic-dot"></div>RAG decision framework</div>
+          <div class="week-topic"><div class="week-topic-dot"></div>Chunking strategy selection</div>
+          <div class="week-topic"><div class="week-topic-dot"></div>Embedding model comparison</div>
+          <div class="week-topic"><div class="week-topic-dot"></div>Vector store schema design</div>
+        </div>
+        <div class="week-deliverable">
+          <span class="week-deliverable-label">Deliverable</span>
+          Working ingestion pipeline with chunking strategy documented in an ADR
+        </div>
+      </div>
+      <div class="week-card wk-2 reveal">
+        <div class="week-num">Week 2 · Sessions 3–4</div>
+        <div class="week-title">Query Pipeline + Hybrid Search + Reranking</div>
+        <div class="week-sessions">2 × 90-min live sessions</div>
+        <div class="week-topics">
+          <div class="week-topic"><div class="week-topic-dot"></div>HyDE query transformation</div>
+          <div class="week-topic"><div class="week-topic-dot"></div>BM25 + semantic hybrid search</div>
+          <div class="week-topic"><div class="week-topic-dot"></div>Cross-encoder reranking</div>
+          <div class="week-topic"><div class="week-topic-dot"></div>Context window assembly</div>
+        </div>
+        <div class="week-deliverable">
+          <span class="week-deliverable-label">Deliverable</span>
+          Hybrid retrieval system with results for 100 test queries, latency benchmarked
+        </div>
+      </div>
+      <div class="week-card wk-3 reveal">
+        <div class="week-num">Week 3 · Sessions 5–6</div>
+        <div class="week-title">Evaluation Framework + RAG Variants</div>
+        <div class="week-sessions">2 × 90-min live sessions</div>
+        <div class="week-topics">
+          <div class="week-topic"><div class="week-topic-dot"></div>Golden dataset construction</div>
+          <div class="week-topic"><div class="week-topic-dot"></div>RAGAS + business KPI baseline</div>
+          <div class="week-topic"><div class="week-topic-dot"></div>Advanced RAG variants tested</div>
+          <div class="week-topic"><div class="week-topic-dot"></div>Variant comparison report</div>
+        </div>
+        <div class="week-deliverable">
+          <span class="week-deliverable-label">Deliverable</span>
+          Golden dataset + RAGAS baseline + 2 RAG variants compared against it
+        </div>
+      </div>
+      <div class="week-card wk-4 reveal">
+        <div class="week-num">Week 4 · Sessions 7–8</div>
+        <div class="week-title">Deployment + Observability + Re-Indexing</div>
+        <div class="week-sessions">2 × 90-min live sessions</div>
+        <div class="week-topics">
+          <div class="week-topic"><div class="week-topic-dot"></div>FastAPI + Docker deployment</div>
+          <div class="week-topic"><div class="week-topic-dot"></div>Cost + latency dashboards</div>
+          <div class="week-topic"><div class="week-topic-dot"></div>Hallucination monitoring</div>
+          <div class="week-topic"><div class="week-topic-dot"></div>Re-indexing strategies</div>
+        </div>
+        <div class="week-deliverable">
+          <span class="week-deliverable-label">Deliverable</span>
+          Deployed API with monitoring dashboard and re-indexing pipeline — code reviewed
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section support-section reveal" aria-labelledby="support-h2">
+  <div class="inner">
+    <span class="stag" style="color:var(--teal)">What's included</span>
+    <h2 class="sh2" style="color:#fff" id="support-h2">You Are Not Alone<br/>in This Cohort</h2>
+    <div class="support-grid">
+      <div class="support-card reveal">
+        <div class="support-name">8 Live Sessions</div>
+        <div class="support-desc">90 minutes each. Concept walkthrough, live coding, and extended Q&A. Every session recorded and available within 24 hours.</div>
+      </div>
+      <div class="support-card reveal">
+        <div class="support-name">Personal Code Review</div>
+        <div class="support-desc">Async review of your RAG implementation — specific feedback on your architecture, not “looks good.” At least one review per student, on the phase of your choice.</div>
+      </div>
+      <div class="support-card reveal">
+        <div class="support-name">Private Cohort Discord</div>
+        <div class="support-desc">A channel only for Cohort 1 students. Questions answered within 24 hours by the instructor. Post your architecture, your evaluation results, your blockers.</div>
+      </div>
+      <div class="support-card reveal">
+        <div class="support-name">Session Recordings</div>
+        <div class="support-desc">All 8 sessions recorded. If you miss one or want to rewatch a complex section, it's available. Missing one session doesn't derail you.</div>
+      </div>
+      <div class="support-card reveal">
+        <div class="support-name">Peer Cohort of Max 20</div>
+        <div class="support-desc">Small enough that you know each other's names and architectures. Share evaluation results, compare chunking decisions, review each other's code. Real peer learning.</div>
+      </div>
+      <div class="support-card reveal">
+        <div class="support-name">Certificate + Self-Paced Access</div>
+        <div class="support-desc">Certificate of completion when you finish all 4 deliverables. Full self-paced course access included — revisit any phase after the cohort ends.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section next-steps-section reveal" aria-labelledby="next-steps-h2">
+  <div class="inner">
+    <span class="stag">What happens next</span>
+    <h2 class="sh2" id="next-steps-h2">How Your Seat Gets Confirmed</h2>
+    <p class="slead">Simple, direct, and clear. No hidden process.</p>
+    <div class="next-steps-grid">
+      <div class="next-step-card reveal">
+        <div class="next-step-num">01</div>
+        <div class="next-step-title">Reserve your seat</div>
+        <div class="next-step-body">Complete payment through the cohort checkout link. Your seat is held immediately once payment is successful.</div>
+      </div>
+      <div class="next-step-card reveal">
+        <div class="next-step-num">02</div>
+        <div class="next-step-title">Receive confirmation</div>
+        <div class="next-step-body">You get a confirmation email with your receipt, cohort timeline, and next-step instructions.</div>
+      </div>
+      <div class="next-step-card reveal">
+        <div class="next-step-num">03</div>
+        <div class="next-step-title">Join the private cohort space</div>
+        <div class="next-step-body">You receive Discord access, onboarding details, and the final session schedule before Week 1 begins.</div>
+      </div>
+      <div class="next-step-card reveal">
+        <div class="next-step-num">04</div>
+        <div class="next-step-title">Start Week 1</div>
+        <div class="next-step-body">You begin with the first live session and the Week 1 deliverable. Full self-paced access is included from day one.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="scarcity-section reveal">
+  <div class="scarcity-inner">
+    <div class="scarcity-left">
+      <div class="scarcity-dot" aria-hidden="true"></div>
+      <div class="scarcity-text">
+        <!-- PLACEHOLDER: update seat count here too -->
+        <h3>14 of 20 seats remaining — Cohort 1 only</h3>
+        <p>Future cohorts run at ₹22,000–₹25,000. This rate is for founding members only. When the 20 seats fill, seat reservations close.</p>
+      </div>
+    </div>
+    <a href="#pricing" class="btn-apply">
+      Reserve your seat
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+  </div>
+</div>
+
+<section class="section faq-section reveal" aria-labelledby="faq-h2">
+  <div class="inner">
+    <span class="stag">Before you reserve</span>
+    <h2 class="sh2" id="faq-h2">Common Questions</h2>
+    <div class="faq-list" id="faq">
+
+      <div class="faq-item">
+        <button class="faq-q" aria-expanded="false" aria-controls="faq-1" onclick="toggleFaq(this)">
+          What timezone are the sessions in?
+          <svg class="faq-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="faq-a" id="faq-1" aria-hidden="true">
+          <div class="faq-a-inner">Sessions are scheduled in IST. We will offer two session time options — one morning, one evening — to accommodate students in US/EU timezones. Specify your preference in the onboarding form and we'll confirm the schedule before Week 1. All sessions are recorded and available within 24 hours regardless of timezone.</div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q" aria-expanded="false" aria-controls="faq-2" onclick="toggleFaq(this)">
+          I already started the self-paced course. Can I still join the cohort?
+          <svg class="faq-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="faq-a" id="faq-2" aria-hidden="true">
+          <div class="faq-a-inner">Yes. You'll move faster through the cohort material because you already have context. The live sessions go deeper than the self-paced content — the cohort is not a repetition of the videos, it's a live working session. If you've paid for the self-paced course, email us and we'll discuss a partial credit toward the cohort price.</div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q" aria-expanded="false" aria-controls="faq-3" onclick="toggleFaq(this)">
+          What if I miss a session?
+          <svg class="faq-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="faq-a" id="faq-3" aria-hidden="true">
+          <div class="faq-a-inner">All sessions are recorded and available within 24 hours. Missing one or two sessions does not derail you. Missing three or more sessions means you likely won't complete the program deliverables, which are required for the certificate.</div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q" aria-expanded="false" aria-controls="faq-4" onclick="toggleFaq(this)">
+          What is the refund policy?
+          <svg class="faq-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="faq-a" id="faq-4" aria-hidden="true">
+          <div class="faq-a-inner">Full refund if you cancel before the cohort starts — no questions asked. After Session 2, no refund — by that point you've received a code review, attended two live sessions, and the seat that could have gone to another engineer has been held for four weeks.</div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q" aria-expanded="false" aria-controls="faq-5" onclick="toggleFaq(this)">
+          How technical are the live sessions?
+          <svg class="faq-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="faq-a" id="faq-5" aria-hidden="true">
+          <div class="faq-a-inner">Very. Each session involves live coding — real code written in the session, not slides explaining code written elsewhere. We go into the failure modes, the edge cases, the production tradeoffs that don't fit in a video.</div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q" aria-expanded="false" aria-controls="faq-6" onclick="toggleFaq(this)">
+          I'd rather go at my own pace. Is the self-paced course better for me?
+          <svg class="faq-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="faq-a" id="faq-6" aria-hidden="true">
+          <div class="faq-a-inner">Probably, yes. The self-paced course covers the same 6 phases at ₹8,999. If you have a flexible schedule, learn well from recorded content, and don't need external accountability — go with the self-paced option. The cohort is for engineers who know they need structure and human feedback to move fast.</div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q" aria-expanded="false" aria-controls="faq-7" onclick="toggleFaq(this)">
+          What level should I be at before joining?
+          <svg class="faq-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="faq-a" id="faq-7" aria-hidden="true">
+          <div class="faq-a-inner">You should be comfortable with Python, APIs, and basic LLM concepts. You do not need deep ML theory. This cohort is best for ML engineers, software engineers moving into AI, and data scientists who want production depth — not complete beginners to programming.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section class="pricing-section" id="pricing" aria-labelledby="pricing-h2">
+  <div class="pricing-inner">
+    <div class="pricing-card reveal">
+      <div class="pricing-tag">Cohort 1 Founding Rate — Limited Seats</div>
+      <h2 class="pricing-h2" id="pricing-h2">Production RAG Engineering<br/>Live Cohort</h2>
+      <p class="pricing-desc">4 weeks. 8 live sessions. Personal code review. The fastest way to build and ship a production RAG system — with a deadline and a cohort that keeps you accountable.</p>
+      <div class="price-row">
+        <span class="price-main">₹18,000</span>
+      </div>
+      <p class="price-note">Cohort 1 founding rate. Future cohorts: ₹22,000–₹25,000.</p>
+      <div class="inc-list" role="list">
+        <div class="inc-item" role="listitem"><span class="inc-check" aria-hidden="true">✓</span>8 live sessions (90 min each) — concept, live coding, and Q&A</div>
+        <div class="inc-item" role="listitem"><span class="inc-check" aria-hidden="true">✓</span>All session recordings — available within 24 hours</div>
+        <div class="inc-item" role="listitem"><span class="inc-check" aria-hidden="true">✓</span>Personal async code review on your implementation</div>
+        <div class="inc-item" role="listitem"><span class="inc-check" aria-hidden="true">✓</span>Private cohort Discord — 24h instructor response</div>
+        <div class="inc-item" role="listitem"><span class="inc-check" aria-hidden="true">✓</span>Full self-paced course access (included)</div>
+        <div class="inc-item" role="listitem"><span class="inc-check" aria-hidden="true">✓</span>Certificate of completion on all 4 deliverables</div>
+      </div>
+      <div class="future-note">This price is for Cohort 1 only. The rate increases for future cohorts and will not return to ₹18,000.</div>
+      <!-- PLACEHOLDER: Replace href with your Stripe Payment Link or cohort checkout URL -->
+      <a href="#checkout-PLACEHOLDER" class="btn-apply btn-apply-lg" style="width:100%;justify-content:center">
+        Reserve your seat — ₹18,000
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </a>
+      <div class="trust-row">
+        <span class="trust-item">✓ Full refund before cohort starts</span>
+        <span class="trust-item">✓ UPI · Net Banking · Cards</span>
+      </div>
+    </div>
+
+    <aside class="alt-card reveal" aria-label="Self-paced alternative">
+      <div class="alt-label">Not ready for a cohort?</div>
+      <div class="alt-name">Self-Paced Course</div>
+      <div class="alt-desc">Same 6 phases. Same private repo. Your timeline, no live sessions, no code review.</div>
+      <div class="alt-price">₹8,999 early access</div>
+      <a href="rag-course.html" class="alt-link">
+        See course details →
+      </a>
+    </aside>
+  </div>
+</section>
+
+<section class="final-section" aria-labelledby="final-h2">
+  <h2 class="final-h2" id="final-h2">Build the system faster — with deadlines, feedback, and code review.</h2>
+  <p class="final-sub">Cohort 1 gives you the same production-grade system as the self-paced course, but with structure, live support, and a small group that helps you finish it properly.</p>
+  <div class="final-actions">
+    <!-- PLACEHOLDER: Replace href with your Stripe Payment Link or cohort checkout URL -->
+    <a href="#checkout-PLACEHOLDER" class="btn-apply btn-apply-lg">
+      Reserve your seat
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+    <a href="rag-course.html" class="btn-secondary-link" style="color:rgba(255,255,255,.4);border-color:rgba(255,255,255,.15)">Prefer self-paced? ₹8,999 →</a>
+  </div>
+</section>
+
+<footer>
+  <div class="footer-inner">
+    <span class="footer-copy">© 2025 Production AI Engineering. Built for engineers who ship to production.</span>
+    <nav class="footer-links" aria-label="Footer links">
+      <a href="index.html" class="footer-link">Home</a>
+      <a href="rag-course.html" class="footer-link">Self-paced</a>
+      <a href="https://www.youtube.com/@ProductionAIEngineering" target="_blank" rel="noopener" class="footer-link">YouTube</a>
+      <a href="#discord" class="footer-link">Discord</a>
+      <a href="mailto:PLACEHOLDER@productionaiengineering.com" class="footer-link">Contact</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+if (!prefersReducedMotion) {
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (!e.isIntersecting) return;
+      const siblings = [...(e.target.parentElement?.children||[])].filter(c=>c.classList.contains('reveal'));
+      const idx = siblings.indexOf(e.target);
+      setTimeout(()=>e.target.classList.add('visible'), idx*75);
+      io.unobserve(e.target);
+    });
+  }, {threshold:.07,rootMargin:'0px 0px -36px 0px'});
+  document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+} else {
+  document.querySelectorAll('.reveal').forEach(el=>el.classList.add('visible'));
+}
+
+function toggleFaq(btn) {
+  const isOpen = btn.getAttribute('aria-expanded') === 'true';
+  document.querySelectorAll('.faq-q[aria-expanded="true"]').forEach(b => {
+    if (b !== btn) {
+      b.setAttribute('aria-expanded','false');
+      const bd = document.getElementById(b.getAttribute('aria-controls'));
+      bd.classList.remove('open');
+      bd.setAttribute('aria-hidden','true');
+    }
+  });
+  const next = !isOpen;
+  btn.setAttribute('aria-expanded', String(next));
+  const body = document.getElementById(btn.getAttribute('aria-controls'));
+  body.setAttribute('aria-hidden', String(!next));
+  body.classList.toggle('open', next);
+}
+</script>
+</body>
+</html>

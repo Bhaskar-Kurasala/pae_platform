@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Review Your Order — Production AI Engineering</title>
+<meta name="description" content="Review what's included, then continue to secure checkout."/>
+<meta name="robots" content="noindex, nofollow"/>
+<!-- Stripe.js — load when Stripe account is configured -->
+<!-- <script src="https://js.stripe.com/v3/" async></script> -->
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --ink:     #0D0D1A;
+  --purple:  #4F3CC9;
+  --teal:    #1D9E75;
+  --teal-l:  #E1F5EE;
+  --amber:   #F59E0B;
+  --border:  #E5E7EB;
+  --g4:      #9CA3AF;
+  --g6:      #6B7280;
+  --g7:      #374151;
+  --serif:   'DM Serif Display', Georgia, serif;
+  --sans:    'IBM Plex Sans', system-ui, sans-serif;
+  --mono:    'JetBrains Mono', 'Courier New', monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-font-smoothing:antialiased}
+body{font-family:var(--sans);color:var(--ink);background:#fff;line-height:1.65}
+a{color:inherit;text-decoration:none}
+
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none !important;transition:none !important}
+}
+
+/* ── MINIMAL NAV ───────────────────────────────────── */
+.nav{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 1.5rem;height:56px;
+  border-bottom:1px solid var(--border);
+  background:#fff;
+}
+.nav-logo{display:flex;align-items:center;gap:9px}
+.nav-logo-mark{width:26px;height:26px;background:var(--purple);border-radius:4px;display:flex;align-items:center;justify-content:center}
+.nav-logo-text{font-family:var(--mono);font-size:.76rem;color:var(--ink);letter-spacing:.04em;font-weight:500}
+.nav-logo-text span{color:var(--amber)}
+.nav-back{font-size:.78rem;color:var(--g4);font-family:var(--mono);transition:color .2s}
+.nav-back:hover{color:var(--g6)}
+
+/* ── PAGE WRAPPER ───────────────────────────────────── */
+.page{max-width:640px;margin:0 auto;padding:3rem 1.5rem 4rem}
+
+/* ── HEADER ─────────────────────────────────────────── */
+.page-header{margin-bottom:2.5rem;padding-bottom:2rem;border-bottom:1px solid var(--border)}
+.page-eyebrow{font-family:var(--mono);font-size:.67rem;letter-spacing:.1em;text-transform:uppercase;color:var(--g4);margin-bottom:.6rem}
+.page-h1{font-family:var(--serif);font-size:clamp(1.8rem,5vw,2.4rem);color:var(--ink);margin-bottom:.5rem;line-height:1.15}
+.page-sub{font-size:.92rem;color:var(--g6);line-height:1.7}
+
+/* ── ORDER SUMMARY ──────────────────────────────────── */
+.section-label{
+  font-family:var(--mono);
+  font-size:.67rem;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+  color:var(--g4);
+  margin-bottom:.85rem;
+}
+.order-card{
+  border:1.5px solid var(--ink);border-radius:6px;
+  padding:1.6rem 1.5rem;margin-bottom:2rem;
+}
+.order-header{
+  display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;
+  margin-bottom:1.25rem;padding-bottom:1.25rem;border-bottom:1px solid var(--border)
+}
+.order-product{font-size:.97rem;font-weight:600;color:var(--ink);margin-bottom:.2rem}
+.order-type{font-family:var(--mono);font-size:.7rem;color:var(--g4);letter-spacing:.07em}
+.order-price{text-align:right;flex-shrink:0}
+.price-amount{font-family:var(--serif);font-size:1.75rem;color:var(--ink);line-height:1;display:block}
+.price-label{font-family:var(--mono);font-size:.67rem;color:var(--g4);letter-spacing:.06em;margin-top:.2rem}
+
+.order-inclusions{display:flex;flex-direction:column;gap:.55rem}
+.order-item{display:flex;align-items:flex-start;gap:.6rem;font-size:.86rem;color:var(--g7);line-height:1.5}
+.item-check{color:var(--teal);flex-shrink:0;font-size:.9rem;margin-top:1px}
+
+/* ── WHAT HAPPENS NEXT ──────────────────────────────── */
+.next-section{margin-bottom:2rem}
+.next-steps{display:flex;flex-direction:column;gap:.7rem}
+.next-step{display:grid;grid-template-columns:auto 1fr;gap:.75rem;align-items:start}
+.step-num{
+  width:24px;height:24px;border-radius:50%;
+  background:rgba(79,60,201,.1);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:.68rem;color:var(--purple);
+  font-weight:500;flex-shrink:0;margin-top:1px;
+}
+.step-text{font-size:.88rem;color:var(--g7);line-height:1.6}
+.step-text strong{color:var(--ink);font-weight:600}
+
+/* ── GUARANTEE ──────────────────────────────────────── */
+.guarantee-box{
+  border-left:3px solid var(--teal);
+  padding:.9rem 1.1rem;margin-bottom:2rem;
+  background:rgba(29,158,117,.04);
+}
+.guarantee-label{font-family:var(--mono);font-size:.67rem;letter-spacing:.1em;text-transform:uppercase;color:var(--teal);margin-bottom:.4rem}
+.guarantee-text{font-size:.87rem;color:var(--g7);line-height:1.7}
+
+/* ── TRUST STRIP ────────────────────────────────────── */
+.trust-strip{
+  display:flex;flex-direction:column;gap:.35rem;
+  padding:.9rem 1rem;background:#F9FAFB;border-radius:4px;
+  border:1px solid var(--border);margin-bottom:2rem;
+}
+.trust-item{font-size:.78rem;color:var(--g6);font-family:var(--mono);display:flex;align-items:center;gap:.5rem}
+.trust-dot{width:4px;height:4px;border-radius:50%;background:var(--teal);flex-shrink:0}
+
+/* ── CHECKOUT CTA ───────────────────────────────────── */
+.checkout-cta{
+  display:flex;width:100%;align-items:center;justify-content:center;gap:.55rem;
+  background:var(--purple);color:#fff;
+  padding:1.05rem;border-radius:4px;
+  font-size:1.05rem;font-weight:600;letter-spacing:.01em;font-family:var(--sans);
+  border:none;cursor:pointer;
+  transition:background .18s,transform .15s;
+  margin-bottom:.75rem;
+}
+.checkout-cta:hover{background:#7B6EE0;transform:translateY(-1px)}
+.checkout-cta svg{flex-shrink:0;transition:transform .2s}
+.checkout-cta:hover svg{transform:translateX(3px)}
+
+.checkout-note{text-align:center;font-size:.76rem;color:var(--g4);font-family:var(--mono);line-height:1.5}
+.checkout-note-secondary{
+  text-align:center;font-size:.74rem;color:var(--g4);font-family:var(--mono);
+  line-height:1.5;margin-top:.35rem;
+}
+
+/* ── MINIMAL FOOTER ─────────────────────────────────── */
+.page-footer{
+  margin-top:3rem;padding-top:1.5rem;border-top:1px solid var(--border);
+  text-align:center;
+}
+.footer-text{font-size:.78rem;color:var(--g4);font-family:var(--mono)}
+.footer-text a{color:var(--g6);border-bottom:1px solid var(--border);transition:color .2s}
+.footer-text a:hover{color:var(--ink)}
+
+@media(max-width:480px){
+  .order-header{flex-direction:column;gap:.6rem}
+  .order-price{text-align:left}
+}
+</style>
+</head>
+<body>
+
+<nav class="nav" aria-label="Checkout navigation">
+  <div class="nav-logo">
+    <div class="nav-logo-mark" aria-hidden="true">
+      <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+        <rect x="2" y="2" width="5" height="5" rx="1" fill="white" opacity=".9"/>
+        <rect x="9" y="2" width="5" height="5" rx="1" fill="white" opacity=".45"/>
+        <rect x="2" y="9" width="5" height="5" rx="1" fill="white" opacity=".45"/>
+        <rect x="9" y="9" width="5" height="5" rx="1" fill="#F59E0B"/>
+      </svg>
+    </div>
+    <span class="nav-logo-text">Production<span>AI</span>Engineering</span>
+  </div>
+  <a href="rag-course.html" class="nav-back">← Back to Production RAG course</a>
+</nav>
+
+<main class="page" aria-labelledby="page-h1">
+
+  <div class="page-header">
+    <div class="page-eyebrow">Secure checkout</div>
+    <h1 class="page-h1" id="page-h1">You're one step away.</h1>
+    <p class="page-sub">Review what's included below, then continue to Stripe. Your order details carry over automatically.</p>
+  </div>
+
+  <section aria-labelledby="order-heading">
+    <div class="section-label" id="order-heading">Order summary</div>
+    <div class="order-card">
+      <div class="order-header">
+        <div>
+          <div class="order-product">Production RAG Engineering</div>
+          <div class="order-type">Self-paced course · Lifetime access</div>
+        </div>
+        <div class="order-price">
+          <span class="price-amount">₹8,999</span>
+          <span class="price-label">Early access rate</span>
+        </div>
+      </div>
+      <div class="order-inclusions" role="list" aria-label="What's included">
+        <div class="order-item" role="listitem"><span class="item-check" aria-hidden="true">✓</span>6 pipeline phases with full implementation code</div>
+        <div class="order-item" role="listitem"><span class="item-check" aria-hidden="true">✓</span>Private GitHub repository — production-grade, not tutorial code</div>
+        <div class="order-item" role="listitem"><span class="item-check" aria-hidden="true">✓</span>Architecture Decision Records for every major tradeoff</div>
+        <div class="order-item" role="listitem"><span class="item-check" aria-hidden="true">✓</span>Golden evaluation dataset template + RAGAS integration</div>
+        <div class="order-item" role="listitem"><span class="item-check" aria-hidden="true">✓</span>Cost and latency monitoring dashboard (Grafana-ready)</div>
+        <div class="order-item" role="listitem"><span class="item-check" aria-hidden="true">✓</span>Discord community access</div>
+        <div class="order-item" role="listitem"><span class="item-check" aria-hidden="true">✓</span>Lifetime access + all future course updates</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="next-section" aria-labelledby="next-heading">
+    <div class="section-label" id="next-heading">What happens immediately after you pay</div>
+    <div class="next-steps">
+      <div class="next-step">
+        <div class="step-num" aria-hidden="true">1</div>
+        <div class="step-text"><strong>Confirmation email arrives within 2 minutes</strong> — receipt, access instructions, and next steps for repository access.</div>
+      </div>
+      <div class="next-step">
+        <div class="step-num" aria-hidden="true">2</div>
+        <div class="step-text"><strong>Repository access is unlocked through the instructions in your email</strong> — follow the steps to open the private production-grade code repo.</div>
+      </div>
+      <div class="next-step">
+        <div class="step-num" aria-hidden="true">3</div>
+        <div class="step-text"><strong>Join the Discord</strong> using the invite link in the confirmation email. Introduce yourself and start with Phase 1.</div>
+      </div>
+      <div class="next-step">
+        <div class="step-num" aria-hidden="true">4</div>
+        <div class="step-text"><strong>Course content is available instantly</strong> — no waiting period, no approval. Start Phase 1 today.</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="guarantee-box" role="note" aria-label="Refund guarantee">
+    <div class="guarantee-label">14-day full refund guarantee</div>
+    <p class="guarantee-text">If you complete fewer than 2 phases in the first 14 days and don't feel the course is worth it, email us for a full refund. No forms, no questions asked. We'd rather you get your money back than feel stuck with something that doesn't work for you.</p>
+  </div>
+
+  <div class="trust-strip" role="list" aria-label="Security information">
+    <div class="trust-item" role="listitem"><div class="trust-dot" aria-hidden="true"></div>Secured by Stripe — PCI DSS Level 1 compliant</div>
+    <div class="trust-item" role="listitem"><div class="trust-dot" aria-hidden="true"></div>No card data stored on our servers — Stripe handles all payment processing</div>
+    <div class="trust-item" role="listitem"><div class="trust-dot" aria-hidden="true"></div>Indian payment methods accepted: UPI, Net Banking, Debit/Credit cards</div>
+  </div>
+
+  <!-- PLACEHOLDER: Replace href with your Stripe Payment Link URL -->
+  <a href="#stripe-payment-link-PLACEHOLDER"
+     class="checkout-cta"
+     aria-label="Continue to secure Stripe checkout">
+    Continue to Secure Checkout
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </a>
+  <p class="checkout-note">You will be redirected to Stripe Checkout. Your order details are carried over automatically.</p>
+  <p class="checkout-note-secondary">Final total will be shown on Stripe checkout.</p>
+
+  <footer class="page-footer">
+    <p class="footer-text">
+      Questions before you enroll?
+      <a href="mailto:PLACEHOLDER@productionaiengineering.com">Email us</a>
+      and we'll reply within a few hours.
+    </p>
+  </footer>
+
+</main>
+
+</body>
+</html>

@@ -1,0 +1,621 @@
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap');
+
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0a0a;--surface:#111;--surface2:#1a1a1a;--surface3:#222;
+  --accent:#e8ff47;--accent2:#ff6b35;--accent3:#47ffb8;
+  --text:#f0f0f0;--muted:#666;--border:#2a2a2a;
+}
+body{background:var(--bg);color:var(--text);font-family:'Syne',sans-serif;min-height:100vh}
+
+.hero{padding:2.5rem 2rem 1.5rem;border-bottom:1px solid var(--border)}
+.hero-badge{display:inline-block;font-family:'Space Mono',monospace;font-size:10px;color:var(--accent);border:1px solid var(--accent);padding:3px 10px;border-radius:2px;letter-spacing:.1em;margin-bottom:1rem}
+.hero h1{font-size:clamp(1.8rem,5vw,3rem);font-weight:800;line-height:1.1;margin-bottom:.5rem}
+.hero h1 span{color:var(--accent)}
+.hero-sub{font-size:13px;color:var(--muted);font-family:'Space Mono',monospace;line-height:1.8;max-width:600px}
+.hero-sub strong{color:var(--text)}
+
+.north-star{margin:1.5rem 2rem;background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);padding:1.25rem 1.5rem;border-radius:4px}
+.ns-label{font-size:10px;font-family:'Space Mono',monospace;color:var(--accent);letter-spacing:.1em;margin-bottom:.75rem}
+.ns-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
+.ns-item{text-align:center;padding:.75rem;background:var(--surface2);border-radius:4px;border:1px solid var(--border)}
+.ns-val{font-size:1.4rem;font-weight:800;color:var(--accent)}
+.ns-lbl{font-size:10px;color:var(--muted);font-family:'Space Mono',monospace;margin-top:2px}
+
+.why-box{margin:0 2rem 1.5rem;background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--accent3);padding:1.25rem 1.5rem;border-radius:4px}
+.why-title{font-size:10px;font-family:'Space Mono',monospace;color:var(--accent3);letter-spacing:.1em;margin-bottom:.75rem}
+.why-items{display:flex;flex-direction:column;gap:8px}
+.why-item{font-size:12px;color:var(--text);line-height:1.6;display:flex;gap:8px}
+.why-dot{color:var(--accent3);flex-shrink:0;font-family:'Space Mono',monospace}
+
+.phase-nav{display:flex;gap:6px;padding:0 2rem;flex-wrap:wrap;margin-bottom:1.5rem}
+.pnav{padding:6px 14px;border:1px solid var(--border);background:transparent;color:var(--muted);font-family:'Space Mono',monospace;font-size:11px;cursor:pointer;border-radius:2px;transition:all .15s}
+.pnav.active{background:var(--accent);color:#000;border-color:var(--accent);font-weight:700}
+
+.phase{display:none;padding:0 2rem 2rem}
+.phase.active{display:block}
+
+.phase-header{margin-bottom:1.25rem;padding-bottom:1rem;border-bottom:1px solid var(--border)}
+.phase-title{font-size:1.5rem;font-weight:800;margin-bottom:.25rem}
+.phase-meta{font-size:11px;font-family:'Space Mono',monospace;color:var(--muted)}
+.phase-goal{font-size:13px;color:var(--accent);margin-top:.5rem;font-weight:600}
+
+.week-grid{display:flex;flex-direction:column;gap:10px;margin-bottom:1.5rem}
+.week-card{background:var(--surface);border:1px solid var(--border);border-radius:4px;overflow:hidden}
+.week-card:hover{border-color:var(--border);background:var(--surface2)}
+.week-head{display:flex;align-items:center;gap:12px;padding:.75rem 1rem;cursor:pointer}
+.week-num{font-family:'Space Mono',monospace;font-size:10px;color:var(--accent);font-weight:700;min-width:52px}
+.week-title{font-size:13px;font-weight:600;flex:1}
+.week-focus{font-size:10px;font-family:'Space Mono',monospace;color:var(--muted);white-space:nowrap}
+.week-body{display:none;padding:0 1rem 1rem;border-top:1px solid var(--border)}
+.week-body.open{display:block}
+
+.task-section{margin-top:.75rem}
+.task-label{font-size:9px;font-family:'Space Mono',monospace;color:var(--muted);letter-spacing:.1em;margin-bottom:4px}
+.task-list{display:flex;flex-direction:column;gap:4px}
+.task{display:flex;gap:8px;font-size:12px;color:var(--text);line-height:1.5}
+.task-dot{color:var(--accent);flex-shrink:0}
+.task.vid .task-dot{color:#ff6b35}
+.task.code .task-dot{color:#47ffb8}
+.task.learn .task-dot{color:#a78bfa}
+.task.sell .task-dot{color:#fbbf24}
+
+.deliverable{margin-top:.75rem;background:var(--surface2);border:1px solid var(--border);border-left:2px solid var(--accent2);padding:.6rem .8rem;border-radius:2px;font-size:11px;font-family:'Space Mono',monospace;color:var(--text);line-height:1.6}
+.del-label{color:var(--accent2);font-size:9px;letter-spacing:.1em;display:block;margin-bottom:2px}
+
+.module-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin-bottom:1.5rem}
+.module{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:.75rem 1rem}
+.mod-num{font-size:10px;font-family:'Space Mono',monospace;color:var(--accent);margin-bottom:4px}
+.mod-title{font-size:13px;font-weight:600;margin-bottom:4px}
+.mod-items{font-size:11px;color:var(--muted);line-height:1.7}
+
+.income-section{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:1rem 1.25rem;margin-bottom:1.5rem}
+.income-label{font-size:9px;font-family:'Space Mono',monospace;color:var(--muted);letter-spacing:.1em;margin-bottom:.75rem}
+.income-rows{display:flex;flex-direction:column;gap:6px}
+.income-row{display:flex;align-items:baseline;gap:8px;font-size:12px}
+.inc-month{font-family:'Space Mono',monospace;color:var(--muted);min-width:60px}
+.inc-bar-wrap{flex:1;background:var(--surface2);height:6px;border-radius:3px;overflow:hidden}
+.inc-bar{height:100%;border-radius:3px;background:var(--accent)}
+.inc-val{font-family:'Space Mono',monospace;font-size:11px;color:var(--accent);min-width:80px;text-align:right}
+
+.rules-section{background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--accent2);padding:1.25rem 1.5rem;border-radius:4px;margin-bottom:1.5rem}
+.rules-title{font-size:10px;font-family:'Space Mono',monospace;color:var(--accent2);letter-spacing:.1em;margin-bottom:.75rem}
+.rule-items{display:flex;flex-direction:column;gap:8px}
+.rule{font-size:12px;color:var(--text);line-height:1.6;display:flex;gap:8px}
+.rule-num{font-family:'Space Mono',monospace;color:var(--accent2);flex-shrink:0;font-weight:700}
+
+.stack-section{margin-bottom:1.5rem}
+.stack-label{font-size:10px;font-family:'Space Mono',monospace;color:var(--muted);letter-spacing:.1em;margin-bottom:.75rem}
+.stack-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}
+.stack-item{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:.6rem .8rem;font-size:11px}
+.stack-cat{color:var(--accent);font-family:'Space Mono',monospace;font-size:9px;letter-spacing:.08em;margin-bottom:3px}
+.stack-tools{color:var(--text);line-height:1.6}
+
+.wall-note{margin:1.5rem 2rem;background:var(--surface);border:1px solid var(--accent);padding:1.25rem 1.5rem;border-radius:4px}
+.wall-title{font-size:10px;font-family:'Space Mono',monospace;color:var(--accent);letter-spacing:.1em;margin-bottom:.75rem}
+.wall-text{font-size:13px;color:var(--text);line-height:1.9;font-weight:500}
+.wall-text strong{color:var(--accent)}
+</style>
+
+<div style="background:var(--bg);min-height:100vh;padding-bottom:3rem">
+
+<div class="hero">
+  <div class="hero-badge">MASTER PLAN — APRIL 2026 — 6 MONTHS</div>
+  <h1>The <span>1% AI Engineer</span><br>Content Machine</h1>
+  <div class="hero-sub">
+    <strong>The mission:</strong> Learn in public. Build in public. Sell the process.<br>
+    RAG → Agents → Claude Code → Production Systems → World-class AI Engineer.<br>
+    Every concept you master becomes a video. Every video builds distribution.<br>
+    Distribution becomes your business. <strong>This is the plan. Stick to it.</strong>
+  </div>
+</div>
+
+<div class="north-star">
+  <div class="ns-label">// NORTH STAR METRICS — 6 MONTHS</div>
+  <div class="ns-grid">
+    <div class="ns-item"><div class="ns-val">50+</div><div class="ns-lbl">YouTube videos</div></div>
+    <div class="ns-item"><div class="ns-val">200+</div><div class="ns-lbl">LinkedIn posts</div></div>
+    <div class="ns-item"><div class="ns-val">10K+</div><div class="ns-lbl">YouTube subs</div></div>
+    <div class="ns-item"><div class="ns-val">3</div><div class="ns-lbl">Paid courses live</div></div>
+    <div class="ns-item"><div class="ns-val">₹1L+</div><div class="ns-lbl">Course revenue M6</div></div>
+    <div class="ns-item"><div class="ns-val">1</div><div class="ns-lbl">World-class repo</div></div>
+  </div>
+</div>
+
+<div class="why-box">
+  <div class="why-title">// WHY THIS PATH IS CORRECT — READ THIS WHEN YOU DOUBT</div>
+  <div class="why-items">
+    <div class="why-item"><span class="why-dot">→</span><span>You are already a Senior Gen AI Engineer. The learning gap is smaller than you think. Teaching forces you to close it completely — explaining is the fastest way to find what you don't know.</span></div>
+    <div class="why-item"><span class="why-dot">→</span><span>Distribution compounds. Every video you publish in month 1 keeps earning views in month 12. Starting today means you are 12 months ahead of yourself starting next year.</span></div>
+    <div class="why-item"><span class="why-dot">→</span><span>The repo is your proof. Code doesn't lie. One well-documented GitHub repo of production agentic systems is worth more than 100 slides explaining theory.</span></div>
+    <div class="why-item"><span class="why-dot">→</span><span>Content makes you better for everything else — consulting, interviews, corporate workshops. Every concept you explain clearly is a concept you own completely.</span></div>
+    <div class="why-item"><span class="why-dot">→</span><span>You are the first user. Every video you make, you will watch again for revision. Every course you build, you will use as your own reference. This is learning with leverage.</span></div>
+    <div class="why-item"><span class="why-dot">→</span><span>The agentic AI + Claude Code space is moving faster than anyone can document. Recency is your moat. You are not competing with Krish Naik — you are ahead of him on this specific frontier.</span></div>
+  </div>
+</div>
+
+<div class="phase-nav">
+  <button class="pnav active" onclick="showPhase(0)">Phase 1: Foundation</button>
+  <button class="pnav" onclick="showPhase(1)">Phase 2: Momentum</button>
+  <button class="pnav" onclick="showPhase(2)">Phase 3: Monetise</button>
+  <button class="pnav" onclick="showPhase(3)">Content Map</button>
+  <button class="pnav" onclick="showPhase(4)">Rules & Stack</button>
+  <button class="pnav" onclick="showPhase(5)">Income Curve</button>
+</div>
+
+<div class="phase active" id="phase-0">
+  <div class="phase-header">
+    <div class="phase-meta">MONTHS 1–2 · WEEKS 1–8</div>
+    <div class="phase-title">Phase 1: Foundation</div>
+    <div class="phase-goal">Goal: Ship first 16 videos. Build the RAG + Agents course backbone. Establish daily habit.</div>
+  </div>
+
+  <div class="week-grid">
+
+    <div class="week-card">
+      <div class="week-head" onclick="toggleWeek(this)">
+        <span class="week-num">WEEK 1</span>
+        <span class="week-title">Setup + First video shipped</span>
+        <span class="week-focus">RAG FOUNDATIONS</span>
+      </div>
+      <div class="week-body">
+        <div class="task-section">
+          <div class="task-label">LEARN</div>
+          <div class="task-list">
+            <div class="task learn"><span class="task-dot">◆</span>Deep dive: RAG architecture — naive RAG vs advanced RAG vs modular RAG. Build each variant in code.</div>
+            <div class="task learn"><span class="task-dot">◆</span>Study: chunking strategies, embedding models comparison (OpenAI vs open-source), vector DB options.</div>
+          </div>
+        </div>
+        <div class="task-section">
+          <div class="task-label">CODE → REPO</div>
+          <div class="task-list">
+            <div class="task code"><span class="task-dot">◆</span>Create GitHub repo: "production-ai-systems" — this is your master repo for all 6 months.</div>
+            <div class="task code"><span class="task-dot">◆</span>Build: RAG from scratch — no LangChain, just raw API calls. Understand every line.</div>
+            <div class="task code"><span class="task-dot">◆</span>Build: Same RAG with LangChain. Show the difference. Document why each choice matters.</div>
+          </div>
+        </div>
+        <div class="task-section">
+          <div class="task-label">PUBLISH</div>
+          <div class="task-list">
+            <div class="task vid"><span class="task-dot">◆</span>YouTube video 1: "RAG from scratch — what tutorials don't show you" (coding session, 20-30 min).</div>
+            <div class="task vid"><span class="task-dot">◆</span>LinkedIn post 1: One sharp insight from your RAG build. What surprised you. Real code snippet.</div>
+            <div class="task vid"><span class="task-dot">◆</span>LinkedIn post 2: "I'm documenting my journey to become a world-class AI engineer. Week 1: RAG."</div>
+          </div>
+        </div>
+        <div class="deliverable"><span class="del-label">WEEK 1 DELIVERABLE</span>Repo live on GitHub. Video 1 published. 2 LinkedIn posts. RAG working end-to-end locally.</div>
+      </div>
+    </div>
+
+    <div class="week-card">
+      <div class="week-head" onclick="toggleWeek(this)">
+        <span class="week-num">WEEK 2</span>
+        <span class="week-title">Advanced RAG — the real patterns</span>
+        <span class="week-focus">RAG ADVANCED</span>
+      </div>
+      <div class="week-body">
+        <div class="task-section">
+          <div class="task-label">LEARN + CODE</div>
+          <div class="task-list">
+            <div class="task learn"><span class="task-dot">◆</span>Hybrid search: semantic + keyword (BM25). Build and benchmark. When does each win?</div>
+            <div class="task learn"><span class="task-dot">◆</span>Reranking: ColBERT, cross-encoder rerankers. Why retrieval alone is not enough.</div>
+            <div class="task code"><span class="task-dot">◆</span>Build: Evaluation framework for RAG — RAGAS metrics. This is what separates engineers from hobbyists.</div>
+            <div class="task code"><span class="task-dot">◆</span>Build: RAG with LangGraph state management. Your first LangGraph system.</div>
+          </div>
+        </div>
+        <div class="task-section">
+          <div class="task-label">PUBLISH</div>
+          <div class="task-list">
+            <div class="task vid"><span class="task-dot">◆</span>YouTube video 2: "Why your RAG is lying to you — evaluation with RAGAS" (show failures, show fixes).</div>
+            <div class="task vid"><span class="task-dot">◆</span>YouTube Short: 60-second tip on chunking strategy that surprised you.</div>
+            <div class="task vid"><span class="task-dot">◆</span>LinkedIn post 3+4: One insight per day from your builds.</div>
+          </div>
+        </div>
+        <div class="deliverable"><span class="del-label">WEEK 2 DELIVERABLE</span>RAG evaluation harness in repo. Video 2 + 1 Short published. RAGAS working on your test dataset.</div>
+      </div>
+    </div>
+
+    <div class="week-card">
+      <div class="week-head" onclick="toggleWeek(this)">
+        <span class="week-num">WEEK 3</span>
+        <span class="week-title">Agents — from theory to first working agent</span>
+        <span class="week-focus">AGENTS BASICS</span>
+      </div>
+      <div class="week-body">
+        <div class="task-section">
+          <div class="task-label">LEARN + CODE</div>
+          <div class="task-list">
+            <div class="task learn"><span class="task-dot">◆</span>ReAct, Chain-of-Thought, Tool Use — deep understanding of each pattern and when to use what.</div>
+            <div class="task code"><span class="task-dot">◆</span>Build: Single agent from scratch — no framework, raw LLM + tool loop. Understand the mechanics.</div>
+            <div class="task code"><span class="task-dot">◆</span>Build: Same agent in LangGraph. Nodes, edges, state. The LangGraph mental model made concrete.</div>
+            <div class="task code"><span class="task-dot">◆</span>Build: Agent with memory — short-term (conversation) and long-term (vector store).</div>
+          </div>
+        </div>
+        <div class="task-section">
+          <div class="task-label">PUBLISH</div>
+          <div class="task-list">
+            <div class="task vid"><span class="task-dot">◆</span>YouTube video 3: "Build an AI agent from scratch — before using any framework."</div>
+            <div class="task vid"><span class="task-dot">◆</span>YouTube video 4: "LangGraph explained by building — not slides."</div>
+          </div>
+        </div>
+        <div class="deliverable"><span class="del-label">WEEK 3 DELIVERABLE</span>2 videos published. Agent with memory working in repo. 6 LinkedIn posts total (running count).</div>
+      </div>
+    </div>
+
+    <div class="week-card">
+      <div class="week-head" onclick="toggleWeek(this)">
+        <span class="week-num">WEEK 4</span>
+        <span class="week-title">Multi-agent systems — your real expertise</span>
+        <span class="week-focus">MULTI-AGENT</span>
+      </div>
+      <div class="week-body">
+        <div class="task-section">
+          <div class="task-label">LEARN + CODE</div>
+          <div class="task-list">
+            <div class="task learn"><span class="task-dot">◆</span>Supervisor patterns, hierarchical agents, parallel execution. When do you need multiple agents?</div>
+            <div class="task code"><span class="task-dot">◆</span>Build: Supervisor + worker pattern — orchestrator delegates to specialist agents.</div>
+            <div class="task code"><span class="task-dot">◆</span>Build: Multi-agent with human-in-the-loop. Interrupt, approve, resume.</div>
+            <div class="task code"><span class="task-dot">◆</span>Document: Failure modes you hit. This becomes your most valuable content.</div>
+          </div>
+        </div>
+        <div class="task-section">
+          <div class="task-label">PUBLISH</div>
+          <div class="task-list">
+            <div class="task vid"><span class="task-dot">◆</span>YouTube video 5: "Multi-agent systems — what breaks and how to fix it."</div>
+            <div class="task vid"><span class="task-dot">◆</span>LinkedIn post: Share the failure mode that surprised you most. This gets the most engagement.</div>
+          </div>
+        </div>
+        <div class="deliverable"><span class="del-label">END OF MONTH 1</span>5 videos live. Multi-agent system in repo. LinkedIn daily habit established. RAG course outline drafted.</div>
+      </div>
+    </div>
+
+    <div class="week-card">
+      <div class="week-head" onclick="toggleWeek(this)">
+        <span class="week-num">WEEK 5–6</span>
+        <span class="week-title">Claude Code — deep feature documentation</span>
+        <span class="week-focus">CLAUDE CODE</span>
+      </div>
+      <div class="week-body">
+        <div class="task-section">
+          <div class="task-label">LEARN + CODE</div>
+          <div class="task-list">
+            <div class="task learn"><span class="task-dot">◆</span>Every Claude Code feature — agentic mode, tool use, computer use, MCP integrations. Use Claude to research what just shipped.</div>
+            <div class="task code"><span class="task-dot">◆</span>Build real projects using Claude Code — let it write, debug, refactor. Document what works, what fails.</div>
+            <div class="task code"><span class="task-dot">◆</span>Build: A LangGraph system entirely with Claude Code assistance. Record the session.</div>
+          </div>
+        </div>
+        <div class="task-section">
+          <div class="task-label">PUBLISH</div>
+          <div class="task-list">
+            <div class="task vid"><span class="task-dot">◆</span>YouTube video 6: "Claude Code for AI engineers — what's actually useful in production."</div>
+            <div class="task vid"><span class="task-dot">◆</span>YouTube video 7: "I built a multi-agent system using Claude Code — here's what happened."</div>
+            <div class="task vid"><span class="task-dot">◆</span>YouTube video 8: "Claude Code features every engineer should know — with demos."</div>
+          </div>
+        </div>
+        <div class="deliverable"><span class="del-label">WEEK 5-6 DELIVERABLE</span>8 videos total. Claude Code series started. This becomes your fastest-growing content — the space has almost no deep technical coverage.</div>
+      </div>
+    </div>
+
+    <div class="week-card">
+      <div class="week-head" onclick="toggleWeek(this)">
+        <span class="week-num">WEEK 7–8</span>
+        <span class="week-title">Production patterns — observability, evaluation, deployment</span>
+        <span class="week-focus">PRODUCTION</span>
+      </div>
+      <div class="week-body">
+        <div class="task-section">
+          <div class="task-label">LEARN + CODE</div>
+          <div class="task-list">
+            <div class="task learn"><span class="task-dot">◆</span>LangSmith for observability. What to actually monitor in production agents. Cost tracking.</div>
+            <div class="task learn"><span class="task-dot">◆</span>Guardrails, prompt injection defence, handling agent failures gracefully.</div>
+            <div class="task code"><span class="task-dot">◆</span>Build: Full production-ready agent with LangSmith observability wired in.</div>
+            <div class="task code"><span class="task-dot">◆</span>Build: Automated evaluation pipeline — golden dataset, regression testing for agent behaviour.</div>
+          </div>
+        </div>
+        <div class="task-section">
+          <div class="task-label">PUBLISH + MONETISE START</div>
+          <div class="task-list">
+            <div class="task vid"><span class="task-dot">◆</span>YouTube video 9+10: Production patterns series.</div>
+            <div class="task sell"><span class="task-dot">◆</span>Launch waitlist for "Production RAG Course" — announce on LinkedIn and YouTube. Free for first 20 signups.</div>
+            <div class="task sell"><span class="task-dot">◆</span>Price point: ₹2,999 early bird (deliberately low for first cohort — testimonials are worth more than margin).</div>
+          </div>
+        </div>
+        <div class="deliverable"><span class="del-label">END OF MONTH 2</span>10 videos live. First course waitlist launched. Repo has 5+ working systems. LinkedIn: 60+ posts total.</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="phase" id="phase-1">
+  <div class="phase-header">
+    <div class="phase-meta">MONTHS 3–4 · WEEKS 9–16</div>
+    <div class="phase-title">Phase 2: Momentum</div>
+    <div class="phase-goal">Goal: 20+ more videos. First course live and selling. Fine-tuning + MCP + advanced topics covered.</div>
+  </div>
+
+  <div class="week-grid">
+    <div class="week-card">
+      <div class="week-head" onclick="toggleWeek(this)">
+        <span class="week-num">WEEK 9–10</span>
+        <span class="week-title">Fine-tuning SLMs — your thesis in action</span>
+        <span class="week-focus">FINE-TUNING</span>
+      </div>
+      <div class="week-body">
+        <div class="task-section">
+          <div class="task-label">LEARN + CODE</div>
+          <div class="task-list">
+            <div class="task learn"><span class="task-dot">◆</span>LoRA, QLoRA, full fine-tuning — when to use each. The economics of fine-tuning vs prompting.</div>
+            <div class="task code"><span class="task-dot">◆</span>Fine-tune Mistral-7B or Phi-3 on a domain-specific dataset. Document every step including failures.</div>
+            <div class="task code"><span class="task-dot">◆</span>Compare fine-tuned model vs RAG vs prompting on the same task. Publish results honestly.</div>
+          </div>
+        </div>
+        <div class="task-section">
+          <div class="task-label">PUBLISH</div>
+          <div class="task-list">
+            <div class="task vid"><span class="task-dot">◆</span>Video 11: "Fine-tuning vs RAG vs prompting — when to use what (with benchmarks)"</div>
+            <div class="task vid"><span class="task-dot">◆</span>Video 12: "Fine-tune a model in 2 hours — complete walkthrough with real data"</div>
+            <div class="task sell"><span class="task-dot">◆</span>RAG Course: Record and package final lessons. Open for purchase this week.</div>
+          </div>
+        </div>
+        <div class="deliverable"><span class="del-label">WEEK 9-10 DELIVERABLE</span>RAG Course live for sale. Fine-tuning module in repo. First course revenue (even ₹10,000 validates the model).</div>
+      </div>
+    </div>
+
+    <div class="week-card">
+      <div class="week-head" onclick="toggleWeek(this)">
+        <span class="week-num">WEEK 11–12</span>
+        <span class="week-title">MCP — Model Context Protocol deep dive</span>
+        <span class="week-focus">MCP + TOOLS</span>
+      </div>
+      <div class="week-body">
+        <div class="task-section">
+          <div class="task-label">LEARN + CODE</div>
+          <div class="task-list">
+            <div class="task learn"><span class="task-dot">◆</span>MCP architecture — servers, clients, transport. Why it matters for agent tool ecosystems.</div>
+            <div class="task code"><span class="task-dot">◆</span>Build a custom MCP server. Connect it to Claude. Show real use cases.</div>
+            <div class="task code"><span class="task-dot">◆</span>Build an agent that uses 5+ MCP tools in a real workflow. Document the orchestration.</div>
+          </div>
+        </div>
+        <div class="task-section">
+          <div class="task-label">PUBLISH</div>
+          <div class="task-list">
+            <div class="task vid"><span class="task-dot">◆</span>Video 13: "MCP explained by building — the future of AI tool ecosystems"</div>
+            <div class="task vid"><span class="task-dot">◆</span>Video 14: "Build your own MCP server in 30 minutes"</div>
+            <div class="task vid"><span class="task-dot">◆</span>Video 15: "Claude + MCP + LangGraph — the full production stack"</div>
+          </div>
+        </div>
+        <div class="deliverable"><span class="del-label">WEEK 11-12 DELIVERABLE</span>MCP series live. This content is extremely rare — almost nobody has deep MCP + LangGraph combined coverage.</div>
+      </div>
+    </div>
+
+    <div class="week-card">
+      <div class="week-head" onclick="toggleWeek(this)">
+        <span class="week-num">WEEK 13–16</span>
+        <span class="week-title">Agents Course + Enterprise patterns</span>
+        <span class="week-focus">AGENTS COURSE</span>
+      </div>
+      <div class="week-body">
+        <div class="task-section">
+          <div class="task-label">LEARN + CODE</div>
+          <div class="task-list">
+            <div class="task learn"><span class="task-dot">◆</span>Enterprise agent patterns: auth, rate limiting, cost management, multi-tenancy.</div>
+            <div class="task code"><span class="task-dot">◆</span>Build: End-to-end enterprise agent system — the capstone of your agents series.</div>
+            <div class="task code"><span class="task-dot">◆</span>Build: Agent evaluation framework — automated testing, regression detection.</div>
+          </div>
+        </div>
+        <div class="task-section">
+          <div class="task-label">PUBLISH + SELL</div>
+          <div class="task-list">
+            <div class="task vid"><span class="task-dot">◆</span>Videos 16–20: Enterprise agent patterns series. 5 focused videos.</div>
+            <div class="task sell"><span class="task-dot">◆</span>Launch "Production Agents with LangGraph" course — ₹4,999. This is your flagship.</div>
+            <div class="task sell"><span class="task-dot">◆</span>Bundle deal: RAG + Agents = ₹6,999. Create urgency with 72-hour launch price.</div>
+          </div>
+        </div>
+        <div class="deliverable"><span class="del-label">END OF MONTH 4</span>20+ videos. 2 courses live. Monthly revenue target: ₹20,000–50,000 from course sales. 30+ YouTube video library building SEO.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="phase" id="phase-2">
+  <div class="phase-header">
+    <div class="phase-meta">MONTHS 5–6 · WEEKS 17–24</div>
+    <div class="phase-title">Phase 3: Monetise</div>
+    <div class="phase-goal">Goal: Claude Code course live. Corporate workshop pipeline open. ₹1L+/month target. Platform decision.</div>
+  </div>
+
+  <div class="week-grid">
+    <div class="week-card">
+      <div class="week-head" onclick="toggleWeek(this)">
+        <span class="week-num">WEEK 17–20</span>
+        <span class="week-title">Claude Code course — full series</span>
+        <span class="week-focus">CLAUDE CODE COURSE</span>
+      </div>
+      <div class="week-body">
+        <div class="task-section">
+          <div class="task-label">BUILD THE COURSE</div>
+          <div class="task-list">
+            <div class="task code"><span class="task-dot">◆</span>Module 1: Claude Code setup + agentic mode — every feature explained by building.</div>
+            <div class="task code"><span class="task-dot">◆</span>Module 2: Claude Code + LangGraph — AI-assisted agentic system development.</div>
+            <div class="task code"><span class="task-dot">◆</span>Module 3: Claude Code + MCP — building tool ecosystems with AI assistance.</div>
+            <div class="task code"><span class="task-dot">◆</span>Module 4: Production workflow — how to use Claude Code for real engineering work.</div>
+            <div class="task sell"><span class="task-dot">◆</span>Price: ₹3,999 standalone. Bundle with RAG + Agents: ₹9,999 for all three.</div>
+          </div>
+        </div>
+        <div class="task-section">
+          <div class="task-label">PUBLISH</div>
+          <div class="task-list">
+            <div class="task vid"><span class="task-dot">◆</span>Videos 21–30: Mix of Claude Code content, advanced agent patterns, real project walkthroughs.</div>
+            <div class="task vid"><span class="task-dot">◆</span>Start YouTube Shorts strategy — 3 Shorts per week. 60-second tips from your builds.</div>
+          </div>
+        </div>
+        <div class="deliverable"><span class="del-label">WEEK 17-20 DELIVERABLE</span>3 courses live. Full bundle available. 30+ videos. Shorts adding distribution velocity.</div>
+      </div>
+    </div>
+
+    <div class="week-card">
+      <div class="week-head" onclick="toggleWeek(this)">
+        <span class="week-num">WEEK 21–24</span>
+        <span class="week-title">Open the corporate workshop pipeline</span>
+        <span class="week-focus">CORPORATE + SCALE</span>
+      </div>
+      <div class="week-body">
+        <div class="task-section">
+          <div class="task-label">SELL</div>
+          <div class="task-list">
+            <div class="task sell"><span class="task-dot">◆</span>Your YouTube library is now your sales deck. Share specific videos with L&D contacts instead of cold pitching.</div>
+            <div class="task sell"><span class="task-dot">◆</span>Corporate workshop: ₹75,000–1,50,000/day. Target engineering teams at Indian startups and MNCs.</div>
+            <div class="task sell"><span class="task-dot">◆</span>Through wife's consultancy — 1 workshop per month = ₹1L+ clean income on top of course revenue.</div>
+            <div class="task sell"><span class="task-dot">◆</span>LinkedIn posts of your course testimonials + workshop results = best marketing you can do.</div>
+          </div>
+        </div>
+        <div class="task-section">
+          <div class="task-label">PLATFORM DECISION</div>
+          <div class="task-list">
+            <div class="task code"><span class="task-dot">◆</span>By month 6 you have enough content and audience to decide: stay on Gumroad/Maven OR build own platform with OpenMAIC-inspired AI support layer.</div>
+            <div class="task code"><span class="task-dot">◆</span>Don't build the platform before the audience. Build it when you have 500+ paying students and the friction is real.</div>
+          </div>
+        </div>
+        <div class="deliverable"><span class="del-label">END OF MONTH 6 — TARGET STATE</span>50+ videos. 3 courses. 1 workshop/month. ₹1–2L/month combined. 10K+ YouTube subscribers. 5K+ LinkedIn followers. World-class GitHub repo that proves everything.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="phase" id="phase-3">
+  <div class="phase-header">
+    <div class="phase-meta">COMPLETE CONTENT MAP</div>
+    <div class="phase-title">What You'll Have Built</div>
+    <div class="phase-goal">3 flagship courses + 50 videos + the most comprehensive production agentic AI repo in India.</div>
+  </div>
+
+  <div class="module-grid">
+    <div class="module">
+      <div class="mod-num">COURSE 01</div>
+      <div class="mod-title">Production RAG</div>
+      <div class="mod-items">Naive→Advanced RAG<br>Hybrid search<br>RAGAS evaluation<br>LangGraph RAG<br>Production patterns<br>₹2,999</div>
+    </div>
+    <div class="module">
+      <div class="mod-num">COURSE 02</div>
+      <div class="mod-title">Production Agents</div>
+      <div class="mod-items">Single agent from scratch<br>LangGraph deep dive<br>Multi-agent patterns<br>Human-in-the-loop<br>Enterprise systems<br>₹4,999</div>
+    </div>
+    <div class="module">
+      <div class="mod-num">COURSE 03</div>
+      <div class="mod-title">Claude Code Mastery</div>
+      <div class="mod-items">Every feature by building<br>Agentic workflows<br>MCP integration<br>Production workflow<br>Real project walkthroughs<br>₹3,999</div>
+    </div>
+    <div class="module">
+      <div class="mod-num">FREE SERIES</div>
+      <div class="mod-title">YouTube Channel</div>
+      <div class="mod-items">50+ videos<br>RAG series (10 vids)<br>Agents series (15 vids)<br>Claude Code series (10 vids)<br>Production patterns (10 vids)<br>Shorts (60+ clips)</div>
+    </div>
+    <div class="module">
+      <div class="mod-num">REPO</div>
+      <div class="mod-title">production-ai-systems</div>
+      <div class="mod-items">RAG from scratch<br>LangGraph systems<br>Multi-agent examples<br>Evaluation frameworks<br>MCP servers<br>Claude Code examples</div>
+    </div>
+    <div class="module">
+      <div class="mod-num">WORKSHOP</div>
+      <div class="mod-title">Corporate Training</div>
+      <div class="mod-items">Full-day workshop<br>Production Agentic AI<br>Target: Eng teams<br>Via wife's consultancy<br>₹75K–1.5L/day<br>Opens Month 5</div>
+    </div>
+  </div>
+</div>
+
+<div class="phase" id="phase-4">
+  <div class="phase-header">
+    <div class="phase-meta">OPERATING RULES + TOOL STACK</div>
+    <div class="phase-title">The Rules — Read When You Want to Change Direction</div>
+    <div class="phase-goal">These are not suggestions. These are the commitments you made on this day.</div>
+  </div>
+
+  <div class="rules-section">
+    <div class="rules-title">// THE 8 RULES — NON-NEGOTIABLE</div>
+    <div class="rule-items">
+      <div class="rule"><span class="rule-num">01</span><span>Publish something every week. Not when it's perfect. Not after more research. This week. Every week. A bad video published beats a perfect video in your drafts every time.</span></div>
+      <div class="rule"><span class="rule-num">02</span><span>One topic at a time. RAG this month. Agents next month. Not RAG + Agents + Fine-tuning + Claude Code + Drones simultaneously. Depth beats breadth for building a real audience.</span></div>
+      <div class="rule"><span class="rule-num">03</span><span>Code first, explain second. Never make a video about something you haven't built. The repo is the source of truth. The video is the explanation of the repo.</span></div>
+      <div class="rule"><span class="rule-num">04</span><span>Don't build the platform until you have 500 paying students. Gumroad, Maven, or Razorpay + Google Drive works fine until then. Premature platform building kills more courses than bad content.</span></div>
+      <div class="rule"><span class="rule-num">05</span><span>LinkedIn daily, YouTube weekly. One LinkedIn post every day (15 minutes). One YouTube video every 5-7 days. This is the minimum. Non-negotiable even during busy weeks.</span></div>
+      <div class="rule"><span class="rule-num">06</span><span>No new topic research for at least 3 months. The content plan above is fixed. When you feel the urge to pivot to a new idea, make a video about the current topic instead.</span></div>
+      <div class="rule"><span class="rule-num">07</span><span>Failure is content. When something breaks, when your model hallucinates, when your agent loops — document it. These are your best videos. Engineers trust someone who shows what went wrong.</span></div>
+      <div class="rule"><span class="rule-num">08</span><span>You are building for 3-year you. In 3 years, when someone hires you, buys your course, or books your workshop — they will find this repo, these videos, these posts. Every piece of content is a permanent asset working for you while you sleep.</span></div>
+    </div>
+  </div>
+
+  <div class="stack-section">
+    <div class="stack-label">// TOOL STACK</div>
+    <div class="stack-grid">
+      <div class="stack-item"><div class="stack-cat">BUILD</div><div class="stack-tools">Python · LangGraph · LangChain · Claude API · OpenAI API · Ollama</div></div>
+      <div class="stack-item"><div class="stack-cat">RECORD</div><div class="stack-tools">OBS Studio (free) · Screen recording · No fancy studio needed — terminal + browser is enough</div></div>
+      <div class="stack-item"><div class="stack-cat">EDIT</div><div class="stack-tools">DaVinci Resolve (free) or CapCut · Keep edits minimal — engineers want substance not polish</div></div>
+      <div class="stack-item"><div class="stack-cat">PUBLISH</div><div class="stack-tools">YouTube · LinkedIn · GitHub (repo) · Twitter/X optional</div></div>
+      <div class="stack-item"><div class="stack-cat">SELL</div><div class="stack-tools">Gumroad (simplest) or Maven · Razorpay for Indian payments · No custom platform yet</div></div>
+      <div class="stack-item"><div class="stack-cat">RESEARCH</div><div class="stack-tools">Claude Code · Perplexity · arXiv · LangChain docs · Anthropic docs</div></div>
+      <div class="stack-item"><div class="stack-cat">CORPORATE</div><div class="stack-tools">Wife's consultancy for invoicing · Calendly for booking · Zoom for virtual workshops</div></div>
+      <div class="stack-item"><div class="stack-cat">TRACK</div><div class="stack-tools">YouTube Studio analytics · LinkedIn analytics · Gumroad dashboard · Simple spreadsheet for revenue</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="phase" id="phase-5">
+  <div class="phase-header">
+    <div class="phase-meta">HONEST INCOME PROJECTION</div>
+    <div class="phase-title">The Realistic Revenue Curve</div>
+    <div class="phase-goal">Honest numbers. Not hype. Month 3 won't be ₹2L. Month 6 could be. Month 12 will be if you don't stop.</div>
+  </div>
+
+  <div class="income-section">
+    <div class="income-label">// PROJECTED MONTHLY REVENUE FROM CONTENT + COURSES + WORKSHOPS</div>
+    <div class="income-rows">
+      <div class="income-row"><span class="inc-month">Month 1</span><div class="inc-bar-wrap"><div class="inc-bar" style="width:2%"></div></div><span class="inc-val">₹0 – ₹5K</span></div>
+      <div class="income-row"><span class="inc-month">Month 2</span><div class="inc-bar-wrap"><div class="inc-bar" style="width:5%"></div></div><span class="inc-val">₹5K – ₹15K</span></div>
+      <div class="income-row"><span class="inc-month">Month 3</span><div class="inc-bar-wrap"><div class="inc-bar" style="width:10%"></div></div><span class="inc-val">₹15K – ₹30K</span></div>
+      <div class="income-row"><span class="inc-month">Month 4</span><div class="inc-bar-wrap"><div class="inc-bar" style="width:20%"></div></div><span class="inc-val">₹30K – ₹60K</span></div>
+      <div class="income-row"><span class="inc-month">Month 5</span><div class="inc-bar-wrap"><div class="inc-bar" style="width:40%"></div></div><span class="inc-val">₹60K – ₹1.2L</span></div>
+      <div class="income-row"><span class="inc-month">Month 6</span><div class="inc-bar-wrap"><div class="inc-bar" style="width:60%"></div></div><span class="inc-val">₹1L – ₹2L</span></div>
+      <div class="income-row"><span class="inc-month">Month 12</span><div class="inc-bar-wrap"><div class="inc-bar" style="width:90%"></div></div><span class="inc-val">₹3L – ₹5L</span></div>
+    </div>
+  </div>
+
+  <div class="why-box" style="border-left-color:var(--accent2)">
+    <div class="why-title" style="color:var(--accent2)">// WHY THESE NUMBERS — THE HONEST MATH</div>
+    <div class="why-items">
+      <div class="why-item"><span class="why-dot" style="color:var(--accent2)">→</span><span>Month 1-2: No course live yet. No audience. Revenue is ₹0. Accept this. Every video you make is an asset that compounds — it just takes time to activate.</span></div>
+      <div class="why-item"><span class="why-dot" style="color:var(--accent2)">→</span><span>Month 3: First course live. If 5 people buy at ₹2,999 = ₹15,000. This is the minimum realistic scenario. It feels small but it proves the model works.</span></div>
+      <div class="why-item"><span class="why-dot" style="color:var(--accent2)">→</span><span>Month 5-6: Three courses live. 20+ videos driving traffic. LinkedIn following growing. First corporate workshop via wife's consultancy adds ₹75,000 in one day.</span></div>
+      <div class="why-item"><span class="why-dot" style="color:var(--accent2)">→</span><span>Month 12: This is when the compounding becomes visible. 50+ videos, 3 courses, regular workshops, LinkedIn inbound. ₹3-5L/month is conservative at this stage.</span></div>
+      <div class="why-item"><span class="why-dot" style="color:var(--accent2)">→</span><span>The EMI reality: Months 1-4 will be hard financially. Turing salary carries the EMI. Content carries the future. Do not quit Turing until month 6 revenue data is in hand.</span></div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<div class="wall-note">
+  <div class="wall-title">// PRINT THIS. PUT IT ON YOUR WALL. READ IT WHEN YOU WANT TO CHANGE DIRECTION.</div>
+  <div class="wall-text">
+    You decided on <strong>April 14, 2026</strong> that for the next 6 months you are a <strong>content creator, engineer, and teacher</strong> — in that order. You build things. You record the building. You explain what you learned. You sell the explanation.<br><br>
+    You are not a drone analytics founder this month. You are not pivoting to a new SaaS idea. You are not starting a different YouTube channel. You are not exploring a new framework that just launched.<br><br>
+    When a new idea arrives — and it will, because your mind works that way — you write it in a notebook and return to it in <strong>October 2026</strong>. Not before.<br><br>
+    The person who publishes <strong>50 videos over 6 months</strong> is unrecognisably better than the person who published 0 while planning the perfect strategy. You already know this.<br><br>
+    <strong>First video this week. Not next week. This week.</strong>
+  </div>
+</div>
+
+<script>
+function showPhase(n){
+  document.querySelectorAll('.phase').forEach((p,i)=>{p.classList.toggle('active',i===n)});
+  document.querySelectorAll('.pnav').forEach((b,i)=>{b.classList.toggle('active',i===n)});
+}
+function toggleWeek(head){
+  const body=head.nextElementSibling;
+  body.classList.toggle('open');
+}
+document.querySelectorAll('.week-head').forEach(h=>{
+  h.addEventListener('click',()=>toggleWeek(h));
+});
+</script>

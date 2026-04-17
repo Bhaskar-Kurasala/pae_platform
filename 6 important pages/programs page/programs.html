@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>All Programs — Production AI Engineering</title>
+<meta name="description" content="Free YouTube series, checklist, self-paced course, live cohort, and community. Everything Production AI Engineering offers — and which is right for you."/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=IBM+Plex+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --ink:      #0D0D1A;
+  --purple:   #4F3CC9;
+  --purple-l: #7B6EE0;
+  --purple-s: rgba(79,60,201,0.12);
+  --teal:     #1D9E75;
+  --teal-l:   #E1F5EE;
+  --amber:    #F59E0B;
+  --surface:  #F8F7FF;
+  --card:     #EEEDF8;
+  --border:   rgba(79,60,201,0.18);
+  --g4:       #9CA3AF;
+  --g6:       #6B7280;
+  --g7:       #374151;
+  --serif:    'DM Serif Display', Georgia, serif;
+  --sans:     'IBM Plex Sans', system-ui, sans-serif;
+  --mono:     'JetBrains Mono', 'Courier New', monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-font-smoothing:antialiased}
+body{font-family:var(--sans);color:var(--ink);background:#fff;line-height:1.65;overflow-x:hidden}
+a{color:inherit;text-decoration:none}
+
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none !important;transition:none !important}
+  .reveal{opacity:1 !important;transform:none !important}
+}
+.reveal{opacity:0;transform:translateY(16px);transition:opacity .55s cubic-bezier(.16,1,.3,1),transform .55s cubic-bezier(.16,1,.3,1)}
+.reveal.visible{opacity:1;transform:translateY(0)}
+
+/* ── NAV ──────────────────────────────────────────────── */
+.nav{
+  position:sticky;top:0;z-index:100;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 clamp(1.5rem,5vw,4rem);height:64px;
+  background:rgba(13,13,26,.92);backdrop-filter:blur(14px);
+  border-bottom:1px solid rgba(255,255,255,.06);
+}
+.nav-logo{display:flex;align-items:center;gap:10px}
+.nav-logo-mark{width:30px;height:30px;background:var(--purple);border-radius:5px;display:flex;align-items:center;justify-content:center}
+.nav-logo-text{font-family:var(--mono);font-size:.8rem;color:#fff;letter-spacing:.04em;font-weight:500}
+.nav-logo-text span{color:var(--amber)}
+.nav-right{display:flex;align-items:center;gap:1.1rem}
+.nav-link{font-size:.84rem;color:rgba(255,255,255,.5);transition:color .2s}
+.nav-link:hover{color:rgba(255,255,255,.85)}
+
+/* ── PAGE HEADER ─────────────────────────────────────── */
+.page-header{
+  background:var(--surface);border-bottom:1px solid var(--border);
+  padding:3.5rem clamp(1.5rem,5vw,4rem) 3rem;
+}
+.header-inner{max-width:1060px;margin:0 auto}
+.page-tag{font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--purple);margin-bottom:.65rem;display:block}
+.page-h1{font-family:var(--serif);font-size:clamp(1.9rem,4vw,2.8rem);line-height:1.13;margin-bottom:.8rem;color:var(--ink)}
+.page-sub{font-size:.97rem;color:var(--g7);max-width:580px;line-height:1.8}
+.page-start{
+  margin-top:1.1rem;
+  display:inline-flex;align-items:center;gap:.45rem;
+  background:var(--teal-l);color:var(--teal);
+  border:1px solid rgba(29,158,117,.18);
+  padding:.42rem .8rem;border-radius:4px;
+  font-family:var(--mono);font-size:.74rem;line-height:1.5;
+}
+
+/* ── DECISION FLOW ────────────────────────────────────── */
+.decision-section{
+  background:var(--ink);
+  padding:3rem clamp(1.5rem,5vw,4rem);
+}
+.decision-inner{max-width:1060px;margin:0 auto}
+.decision-label{
+  font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--g4);margin-bottom:1.5rem;
+}
+.decision-flow{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:1px;
+  background:rgba(255,255,255,.06);border-radius:6px;overflow:hidden;
+}
+.decision-path{
+  background:rgba(255,255,255,.03);padding:1.5rem 1.35rem;
+  transition:background .2s;cursor:default;position:relative;
+}
+.decision-path:hover{background:rgba(255,255,255,.06)}
+.decision-path.recommended{
+  background:rgba(29,158,117,.08);
+  box-shadow:inset 0 0 0 1px rgba(29,158,117,.18);
+}
+.decision-rec{
+  display:inline-block;
+  margin-bottom:.7rem;
+  font-family:var(--mono);font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;
+  padding:.16rem .5rem;border-radius:2px;
+  background:var(--teal-l);color:var(--teal);
+}
+.dp-who{
+  font-family:var(--mono);font-size:.7rem;color:var(--g4);
+  letter-spacing:.08em;text-transform:uppercase;margin-bottom:.6rem;
+}
+.dp-intent{
+  font-size:.95rem;font-weight:600;color:#fff;
+  margin-bottom:.85rem;line-height:1.35;
+}
+.dp-arrow{
+  display:flex;align-items:center;gap:.4rem;
+  font-size:.78rem;color:var(--g4);margin-bottom:.65rem;font-family:var(--mono);
+}
+.dp-arrow span{font-size:.65rem}
+.dp-dest{
+  display:inline-flex;align-items:center;gap:.4rem;
+  font-size:.82rem;font-family:var(--mono);
+  padding:.3rem .7rem;border-radius:3px;
+  transition:gap .2s;
+}
+.dp-dest:hover{gap:.65rem}
+.dp-free .dp-dest{background:var(--teal-l);color:var(--teal)}
+.dp-course .dp-dest{background:var(--purple-s);color:var(--purple-l)}
+.dp-cohort .dp-dest{background:rgba(29,158,117,.12);color:var(--teal)}
+.dp-mobile-arrow{display:none;text-align:center;padding:.6rem 0;color:var(--g4);font-size:.85rem}
+
+/* ── PROGRAMS GRID ────────────────────────────────────── */
+.programs-section{
+  background:#fff;
+  padding:4rem clamp(1.5rem,5vw,4rem);
+}
+.programs-inner{max-width:1060px;margin:0 auto}
+.section-tag{font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--purple);margin-bottom:.7rem;display:block;font-weight:500}
+.section-h2{font-family:var(--serif);font-size:clamp(1.6rem,3.2vw,2.2rem);margin-bottom:2.5rem;line-height:1.15}
+
+.programs-grid{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:1.1rem;
+}
+
+.prog-card{
+  border:1px solid var(--border);border-radius:8px;padding:1.5rem;
+  display:flex;flex-direction:column;
+  transition:border-color .2s,transform .2s,box-shadow .2s;
+  background:#fff;position:relative;overflow:hidden;
+}
+.prog-card:hover{border-color:rgba(79,60,201,.35);transform:translateY(-3px);box-shadow:0 8px 24px rgba(79,60,201,.08)}
+.prog-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+.pc-free-yt::before{background:var(--teal)}
+.pc-free-email::before{background:var(--purple)}
+.pc-paid-sp::before{background:var(--purple)}
+.pc-paid-co::before{background:var(--teal)}
+.pc-free-com::before{background:var(--teal)}
+.pc-soon::before{background:var(--g4)}
+
+.prog-badge{
+  display:inline-block;font-family:var(--mono);font-size:.62rem;
+  letter-spacing:.08em;text-transform:uppercase;padding:.18rem .55rem;
+  border-radius:2px;margin-bottom:.85rem;
+}
+.badge-free-yt{background:var(--teal-l);color:var(--teal)}
+.badge-free-email{background:var(--purple-s);color:var(--purple)}
+.badge-paid{background:var(--purple-s);color:var(--purple)}
+.badge-paid-co{background:var(--teal-l);color:var(--teal)}
+.badge-community{background:var(--teal-l);color:var(--teal)}
+.badge-soon{background:rgba(0,0,0,.05);color:var(--g4)}
+
+.prog-name{font-family:var(--serif);font-size:1.1rem;color:var(--ink);margin-bottom:.45rem;line-height:1.25}
+.prog-desc{font-size:.84rem;color:var(--g7);line-height:1.65;flex:1;margin-bottom:1rem}
+.prog-price{font-family:var(--mono);font-size:.78rem;color:var(--g6);margin-bottom:.85rem}
+.prog-price strong{color:var(--ink);font-weight:600}
+.prog-cta{
+  display:inline-flex;align-items:center;gap:.35rem;
+  font-size:.8rem;font-family:var(--mono);margin-top:auto;
+  transition:gap .2s;
+}
+.prog-cta:hover{gap:.6rem}
+.pc-free-yt .prog-cta,.pc-free-com .prog-cta,.pc-paid-co .prog-cta{color:var(--teal)}
+.pc-free-email .prog-cta,.pc-paid-sp .prog-cta{color:var(--purple)}
+.pc-soon .prog-cta{color:var(--g4)}
+
+/* ── COMPARISON TABLE ─────────────────────────────────── */
+.compare-section{
+  background:var(--surface);
+  padding:4rem clamp(1.5rem,5vw,4rem);
+  border-top:1px solid var(--border);
+}
+.compare-inner{max-width:680px;margin:0 auto}
+.compare-h2{font-family:var(--serif);font-size:clamp(1.4rem,2.8vw,1.9rem);margin-bottom:.6rem;line-height:1.2}
+.compare-sub{font-size:.9rem;color:var(--g7);margin-bottom:2rem;line-height:1.7}
+.compare-table{width:100%;border-collapse:collapse;font-size:.85rem}
+.compare-table th{padding:.7rem .9rem;text-align:left;font-size:.72rem;font-weight:600;
+  text-transform:uppercase;letter-spacing:.07em;font-family:var(--mono)}
+.th-label{color:var(--g4)}
+.th-course{color:var(--purple);background:var(--purple-s)}
+.th-cohort{color:var(--teal);background:var(--teal-l)}
+.compare-table td{padding:.65rem .9rem;border-top:1px solid var(--border);vertical-align:middle}
+.td-label{font-weight:500;color:var(--g7);font-size:.83rem}
+.td-course{background:rgba(79,60,201,.04);text-align:center;font-size:.82rem;color:var(--g7)}
+.td-cohort{background:rgba(29,158,117,.04);text-align:center;font-size:.82rem;color:var(--g7)}
+.yes{color:var(--teal);font-weight:500}
+.no{color:var(--g4)}
+.compare-cta-row{
+  display:flex;gap:1rem;margin-top:1.75rem;flex-wrap:wrap;
+}
+.cta-small{
+  display:inline-flex;align-items:center;gap:.35rem;
+  font-size:.83rem;font-family:var(--mono);padding:.5rem 1rem;
+  border-radius:4px;transition:background .18s,transform .15s;
+}
+.cta-course{background:var(--purple-s);color:var(--purple)}
+.cta-course:hover{background:rgba(79,60,201,.2);transform:translateY(-1px)}
+.cta-cohort{background:var(--teal-l);color:var(--teal)}
+.cta-cohort:hover{background:rgba(29,158,117,.25);transform:translateY(-1px)}
+
+/* ── FOOTER ───────────────────────────────────────────── */
+footer{background:var(--ink);border-top:1px solid rgba(255,255,255,.05);padding:2rem clamp(1.5rem,5vw,4rem)}
+.footer-inner{max-width:1060px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem}
+.footer-copy{font-size:.76rem;color:rgba(255,255,255,.28);font-family:var(--mono)}
+.footer-links{display:flex;gap:1.5rem;flex-wrap:wrap}
+.footer-link{font-size:.76rem;color:rgba(255,255,255,.38);transition:color .2s;font-family:var(--mono)}
+.footer-link:hover{color:rgba(255,255,255,.72)}
+
+/* ── RESPONSIVE ───────────────────────────────────────── */
+@media(max-width:860px){
+  .decision-flow{grid-template-columns:1fr}
+  .dp-mobile-arrow{display:block}
+  .programs-grid{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:560px){
+  .programs-grid{grid-template-columns:1fr}
+  .nav-link{display:none}
+}
+</style>
+</head>
+<body>
+
+<nav class="nav" aria-label="Site navigation">
+  <div class="nav-logo">
+    <div class="nav-logo-mark" aria-hidden="true">
+      <svg viewBox="0 0 16 16" width="16" height="16" fill="none">
+        <rect x="2" y="2" width="5" height="5" rx="1" fill="white" opacity=".9"/>
+        <rect x="9" y="2" width="5" height="5" rx="1" fill="white" opacity=".45"/>
+        <rect x="2" y="9" width="5" height="5" rx="1" fill="white" opacity=".45"/>
+        <rect x="9" y="9" width="5" height="5" rx="1" fill="#F59E0B"/>
+      </svg>
+    </div>
+    <a href="index.html"><span class="nav-logo-text">Production<span>AI</span>Engineering</span></a>
+  </div>
+  <div class="nav-right">
+    <a href="index.html" class="nav-link">Home</a>
+    <a href="https://www.youtube.com/@ProductionAIEngineering" target="_blank" rel="noopener" class="nav-link">YouTube</a>
+    <a href="index.html#checklist" class="nav-link">Free Checklist</a>
+  </div>
+</nav>
+
+<header class="page-header">
+  <div class="header-inner">
+    <span class="page-tag">Programs overview</span>
+    <h1 class="page-h1">Everything Production AI Engineering Offers</h1>
+    <p class="page-sub">Free content for engineers who are learning. Paid programs for engineers who want to go faster with support. Everything is built on the same production-first philosophy.</p>
+    <div class="page-start">New here? Start with the YouTube series and the free checklist.</div>
+  </div>
+</header>
+
+<section class="decision-section" aria-labelledby="decision-label">
+  <div class="decision-inner">
+    <div class="decision-label" id="decision-label">Not sure where to start? Pick the one that fits you.</div>
+    <div class="decision-flow" role="list">
+
+      <div class="decision-path dp-free recommended reveal" role="listitem">
+        <span class="decision-rec">Best place to start</span>
+        <div class="dp-who">If you want to explore first</div>
+        <div class="dp-intent">"I want to understand production RAG before committing to anything."</div>
+        <div class="dp-arrow"><span>→</span> Start here</div>
+        <a href="https://www.youtube.com/@ProductionAIEngineering" target="_blank" rel="noopener" class="dp-dest">
+          YouTube Series — free →
+        </a>
+        <div style="margin-top:.5rem">
+          <a href="index.html#checklist" class="dp-dest" style="background:rgba(79,60,201,.12);color:var(--purple-l)">
+            + Free Checklist →
+          </a>
+        </div>
+      </div>
+
+      <div class="dp-mobile-arrow" aria-hidden="true">↓</div>
+
+      <div class="decision-path dp-course reveal" role="listitem">
+        <div class="dp-who">If you're ready to build</div>
+        <div class="dp-intent">"I know I need production RAG. I want to implement it properly, at my own pace."</div>
+        <div class="dp-arrow"><span>→</span> Best fit</div>
+        <a href="rag-course.html" class="dp-dest">
+          Self-Paced Course — ₹8,999 →
+        </a>
+      </div>
+
+      <div class="dp-mobile-arrow" aria-hidden="true">↓</div>
+
+      <div class="decision-path dp-cohort reveal" role="listitem">
+        <div class="dp-who">If you need to move fast</div>
+        <div class="dp-intent">"I have a real project coming. I need accountability, live sessions, and someone to review my code."</div>
+        <div class="dp-arrow"><span>→</span> Best fit</div>
+        <a href="cohort.html" class="dp-dest">
+          Reserve your seat — ₹18,000 →
+        </a>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section class="programs-section" aria-labelledby="programs-h2">
+  <div class="programs-inner">
+    <span class="section-tag">All programs</span>
+    <h2 class="section-h2" id="programs-h2">The Complete Ecosystem</h2>
+
+    <div class="programs-grid" role="list">
+
+      <div class="prog-card pc-free-yt reveal" role="listitem">
+        <span class="prog-badge badge-free-yt">Free — YouTube</span>
+        <div class="prog-name">Production RAG Series</div>
+        <div class="prog-desc">15+ videos covering every pipeline phase — business use case to deployed system. Companion GitHub repo. No email required, free forever.</div>
+        <div class="prog-price">Free · No signup required</div>
+        <a href="https://www.youtube.com/@ProductionAIEngineering" target="_blank" rel="noopener" class="prog-cta" aria-label="Watch the Production RAG series on YouTube">
+          Watch the series →
+        </a>
+      </div>
+
+      <div class="prog-card pc-free-email reveal" role="listitem">
+        <span class="prog-badge badge-free-email">Free — Email Required</span>
+        <div class="prog-name">RAG Architecture Checklist</div>
+        <div class="prog-desc">The 2-page production RAG decision framework. Chunking strategy selector, embedding model comparison, 15 pre-deployment questions, business metrics worksheet.</div>
+        <div class="prog-price">Free · Email required · Instant delivery</div>
+        <a href="index.html#checklist" class="prog-cta" aria-label="Get the free RAG architecture checklist">
+          Get the checklist →
+        </a>
+      </div>
+
+      <div class="prog-card pc-paid-sp reveal" role="listitem">
+        <span class="prog-badge badge-paid">Paid — Self-Paced</span>
+        <div class="prog-name">Production RAG Engineering</div>
+        <div class="prog-desc">6 pipeline phases, private GitHub repo, Architecture Decision Records, RAGAS evaluation framework, cost monitoring dashboard. Work at your own pace.</div>
+        <div class="prog-price"><strong>₹8,999</strong> early access · Lifetime access</div>
+        <a href="rag-course.html" class="prog-cta" aria-label="See the Production RAG Engineering course details">
+          See course details →
+        </a>
+      </div>
+
+      <div class="prog-card pc-paid-co reveal" role="listitem">
+        <span class="prog-badge badge-paid-co">Paid — Live Cohort</span>
+        <div class="prog-name">Live Cohort — 4 Weeks</div>
+        <div class="prog-desc">8 live sessions, personal code review, max 20 engineers. Same 6 phases — with live mentorship, weekly deliverables, and peer accountability.</div>
+        <div class="prog-price"><strong>₹18,000</strong> Cohort 1 · Future cohorts ₹22–25k</div>
+        <a href="cohort.html" class="prog-cta" aria-label="Reserve your seat in the live cohort">
+          Reserve your seat →
+        </a>
+      </div>
+
+      <div class="prog-card pc-free-com reveal" role="listitem">
+        <span class="prog-badge badge-community">Free — Community</span>
+        <div class="prog-name">Discord — Engineers in Production</div>
+        <div class="prog-desc">Share architecture decisions, retrieval issues, evaluation results, and deployment blockers with engineers building similar production GenAI systems.</div>
+        <div class="prog-price">Free · No commitment</div>
+        <a href="#discord" class="prog-cta" aria-label="Join the Discord community">
+          Join the community →
+        </a>
+      </div>
+
+      <div class="prog-card pc-soon reveal" role="listitem">
+        <span class="prog-badge badge-soon">Coming Soon</span>
+        <div class="prog-name">Advanced Courses</div>
+        <div class="prog-desc">Starts with RAG. Expands into agents, evaluation, fine-tuning, and production observability — with free YouTube content first, then deeper paid programs.</div>
+        <div class="prog-price">Dates TBD · Get notified</div>
+        <a href="index.html#checklist" class="prog-cta" style="color:var(--g4)" aria-label="Get notified about upcoming advanced courses">
+          Get notified →
+        </a>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section class="compare-section reveal" aria-labelledby="compare-h2">
+  <div class="compare-inner">
+    <h2 class="compare-h2" id="compare-h2">Course vs Cohort — At a Glance</h2>
+    <p class="compare-sub">Both cover the same 6 pipeline phases. The difference is everything around the content.</p>
+    <div style="overflow-x:auto">
+      <table class="compare-table" aria-label="Course vs Cohort comparison">
+        <thead>
+          <tr>
+            <th class="th-label" scope="col"></th>
+            <th class="th-course" scope="col">Self-Paced Course</th>
+            <th class="th-cohort" scope="col">Live Cohort</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="td-label">Price</td><td class="td-course">₹8,999</td><td class="td-cohort">₹18,000</td></tr>
+          <tr><td class="td-label">Best for</td><td class="td-course">Independent builders</td><td class="td-cohort">Engineers who want speed + feedback</td></tr>
+          <tr><td class="td-label">6 pipeline phases</td><td class="td-course"><span class="yes">✓</span></td><td class="td-cohort"><span class="yes">✓</span></td></tr>
+          <tr><td class="td-label">Private GitHub repo</td><td class="td-course"><span class="yes">✓</span></td><td class="td-cohort"><span class="yes">✓</span></td></tr>
+          <tr><td class="td-label">Live sessions (8 × 90 min)</td><td class="td-course"><span class="no">—</span></td><td class="td-cohort"><span class="yes">✓</span></td></tr>
+          <tr><td class="td-label">Personal code review</td><td class="td-course"><span class="no">—</span></td><td class="td-cohort"><span class="yes">✓</span></td></tr>
+          <tr><td class="td-label">Weekly deadlines</td><td class="td-course"><span class="no">—</span></td><td class="td-cohort"><span class="yes">✓</span></td></tr>
+          <tr><td class="td-label">Discord community</td><td class="td-course"><span class="yes">✓</span></td><td class="td-cohort"><span class="yes">✓</span></td></tr>
+          <tr><td class="td-label">Your own schedule</td><td class="td-course"><span class="yes">✓</span></td><td class="td-cohort"><span class="no">Fixed 4 weeks</span></td></tr>
+          <tr><td class="td-label">Certificate of completion</td><td class="td-course"><span class="no">—</span></td><td class="td-cohort"><span class="yes">✓</span></td></tr>
+          <tr><td class="td-label">Refund policy</td><td class="td-course">14-day</td><td class="td-cohort">Before start</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="compare-cta-row">
+      <a href="rag-course.html" class="cta-small cta-course">See course details →</a>
+      <a href="cohort.html" class="cta-small cta-cohort">Reserve your seat →</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="footer-inner">
+    <span class="footer-copy">© 2025 Production AI Engineering. Built for engineers who ship to production.</span>
+    <nav class="footer-links" aria-label="Footer links">
+      <a href="index.html" class="footer-link">Home</a>
+      <a href="https://www.youtube.com/@ProductionAIEngineering" target="_blank" rel="noopener" class="footer-link">YouTube</a>
+      <a href="rag-course.html" class="footer-link">Course</a>
+      <a href="cohort.html" class="footer-link">Cohort</a>
+      <a href="#discord" class="footer-link">Discord</a>
+      <a href="mailto:PLACEHOLDER@productionaiengineering.com" class="footer-link">Contact</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (!prefersReducedMotion) {
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (!e.isIntersecting) return;
+      const siblings = [...(e.target.parentElement?.children||[])].filter(c=>c.classList.contains('reveal'));
+      const idx = siblings.indexOf(e.target);
+      setTimeout(()=>e.target.classList.add('visible'), idx*70);
+      io.unobserve(e.target);
+    });
+  }, {threshold:.07,rootMargin:'0px 0px -30px 0px'});
+  document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+} else {
+  document.querySelectorAll('.reveal').forEach(el=>el.classList.add('visible'));
+}
+</script>
+</body>
+</html>

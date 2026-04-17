@@ -1,0 +1,1076 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Production RAG Engineering — Self-Paced Course | Production AI Engineering</title>
+<meta name="description" content="6 pipeline phases. Private GitHub repo. Real evaluation frameworks. Build a production-ready RAG system that survives scale — not a tutorial project."/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=IBM+Plex+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+/* ── TOKENS — identical across all pages ────────────────── */
+:root {
+  --ink:       #0D0D1A;
+  --purple:    #4F3CC9;
+  --purple-l:  #7B6EE0;
+  --purple-s:  rgba(79,60,201,0.12);
+  --teal:      #1D9E75;
+  --teal-l:    #E1F5EE;
+  --amber:     #F59E0B;
+  --surface:   #F8F7FF;
+  --card:      #EEEDF8;
+  --border:    rgba(79,60,201,0.18);
+  --g4:        #9CA3AF;
+  --g6:        #6B7280;
+  --g7:        #374151;
+  --serif:     'DM Serif Display', Georgia, serif;
+  --sans:      'IBM Plex Sans', system-ui, sans-serif;
+  --mono:      'JetBrains Mono', 'Courier New', monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-font-smoothing:antialiased;scroll-behavior:smooth}
+body{font-family:var(--sans);color:var(--ink);background:var(--surface);line-height:1.65;overflow-x:hidden}
+a{color:inherit;text-decoration:none}
+button{cursor:pointer;border:none;background:none;font-family:inherit}
+
+/* ── ANIMATIONS ─────────────────────────────────────────── */
+@keyframes fadeUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+@keyframes grain{0%,100%{transform:translate(0,0)}25%{transform:translate(-2%,-1%)}50%{transform:translate(1%,2%)}75%{transform:translate(-1%,1%)}}
+.reveal{opacity:0;transform:translateY(20px);transition:opacity .6s cubic-bezier(.16,1,.3,1),transform .6s cubic-bezier(.16,1,.3,1)}
+.reveal.visible{opacity:1;transform:translateY(0)}
+
+body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:999;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.04'/%3E%3C/svg%3E");
+  opacity:.14;animation:grain 8s steps(2) infinite}
+
+/* ── REDUCED MOTION ─────────────────────────────────────── */
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation:none !important;transition:none !important}
+  .reveal{opacity:1 !important;transform:none !important}
+}
+
+/* ── NAV ─────────────────────────────────────────────────── */
+.nav{
+  position:sticky;top:0;z-index:100;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 clamp(1.5rem,5vw,4rem);height:64px;
+  background:rgba(13,13,26,.92);backdrop-filter:blur(14px);
+  border-bottom:1px solid rgba(255,255,255,.06);
+}
+.nav-logo{display:flex;align-items:center;gap:10px}
+.nav-logo-mark{width:30px;height:30px;background:var(--purple);border-radius:5px;display:flex;align-items:center;justify-content:center}
+.nav-logo-text{font-family:var(--mono);font-size:.8rem;color:#fff;letter-spacing:.04em;font-weight:500}
+.nav-logo-text span{color:var(--amber)}
+.nav-right{display:flex;align-items:center;gap:1.1rem}
+.nav-link{font-size:.84rem;color:rgba(255,255,255,.5);transition:color .2s}
+.nav-link:hover{color:rgba(255,255,255,.85)}
+.nav-enroll{
+  font-size:.82rem;font-weight:600;color:#fff;
+  background:var(--purple);padding:.44rem 1.1rem;border-radius:4px;
+  transition:background .18s,transform .15s;
+}
+.nav-enroll:hover{background:var(--purple-l);transform:translateY(-1px)}
+
+/* ── SHARED SECTION SHELL ───────────────────────────────── */
+.section{padding:5rem clamp(1.5rem,5vw,4rem)}
+.inner{max-width:1060px;margin:0 auto}
+.inner-narrow{max-width:760px;margin:0 auto}
+.stag{display:inline-block;font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--purple);margin-bottom:.7rem;font-weight:500}
+.stag-t{color:var(--teal)}
+.sh2{font-family:var(--serif);font-size:clamp(1.85rem,3.8vw,2.7rem);line-height:1.13;margin-bottom:.9rem}
+.slead{font-size:.97rem;color:var(--g7);max-width:580px;line-height:1.8}
+
+/* ── PRIMARY CTA BUTTON — reused 4× ────────────────────── */
+.btn-enroll{
+  display:inline-flex;align-items:center;gap:.5rem;
+  background:var(--purple);color:#fff;
+  padding:.9rem 2rem;border-radius:4px;
+  font-size:.97rem;font-weight:600;letter-spacing:.01em;
+  transition:background .18s,transform .16s,box-shadow .18s;
+}
+.btn-enroll:hover{background:var(--purple-l);transform:translateY(-2px);box-shadow:0 8px 28px rgba(79,60,201,.35)}
+.btn-enroll svg{transition:transform .2s}
+.btn-enroll:hover svg{transform:translateX(3px)}
+.btn-enroll-lg{font-size:1.05rem;padding:1rem 2.4rem}
+
+/* ── HERO ─────────────────────────────────────────────────── */
+.hero{
+  background:var(--ink);position:relative;overflow:hidden;
+  padding:5.5rem clamp(1.5rem,5vw,4rem) 5rem;
+}
+.hero-grid-bg{position:absolute;inset:0;pointer-events:none;
+  background-image:linear-gradient(rgba(79,60,201,.055) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(79,60,201,.055) 1px,transparent 1px);
+  background-size:52px 52px}
+.hero-glow{position:absolute;top:-15%;right:-8%;width:55%;height:85%;
+  background:radial-gradient(ellipse,rgba(79,60,201,.18) 0%,transparent 62%);pointer-events:none}
+.hero-glow-l{position:absolute;bottom:-20%;left:-10%;width:35%;height:60%;
+  background:radial-gradient(ellipse,rgba(29,158,117,.08) 0%,transparent 62%);pointer-events:none}
+.hero-inner{
+  position:relative;z-index:2;max-width:1060px;margin:0 auto;
+  display:grid;grid-template-columns:1fr auto;gap:3rem;align-items:start;
+}
+.hero-eyebrow{
+  display:inline-flex;align-items:center;gap:.5rem;
+  background:rgba(79,60,201,.15);border:1px solid rgba(79,60,201,.3);
+  padding:.28rem .85rem;border-radius:2px;margin-bottom:1.3rem;
+  font-family:var(--mono);font-size:.7rem;color:rgba(139,122,233,.9);letter-spacing:.09em;
+  animation:fadeUp .5s ease both;
+}
+.hero-h1{font-family:var(--serif);font-size:clamp(2.3rem,4.5vw,3.4rem);
+  color:#fff;line-height:1.1;margin-bottom:1rem;animation:fadeUp .5s .08s ease both}
+.hero-h1 em{color:var(--purple-l);font-style:italic}
+.hero-sub{font-size:1rem;color:rgba(255,255,255,.58);line-height:1.78;
+  margin-bottom:2rem;max-width:520px;animation:fadeUp .5s .16s ease both}
+.hero-sub strong{color:rgba(255,255,255,.88);font-weight:500}
+.hero-cta{animation:fadeUp .5s .24s ease both}
+.hero-meta{
+  display:flex;align-items:center;gap:.7rem;margin-top:1.25rem;
+  font-size:.75rem;color:rgba(255,255,255,.35);font-family:var(--mono);
+  flex-wrap:wrap;row-gap:.35rem;animation:fadeUp .5s .34s ease both;
+}
+.hero-sep{width:3px;height:3px;border-radius:50%;background:rgba(255,255,255,.2)}
+
+/* hero right: outcome card */
+.hero-outcome{
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);
+  border-radius:8px;padding:1.6rem 1.5rem;min-width:240px;max-width:280px;
+  flex-shrink:0;animation:fadeUp .55s .2s ease both;position:relative;overflow:hidden;
+}
+.hero-outcome::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--teal),transparent)}
+.outcome-label{font-family:var(--mono);font-size:.65rem;color:var(--teal);
+  letter-spacing:.1em;text-transform:uppercase;margin-bottom:.9rem}
+.outcome-list{display:flex;flex-direction:column;gap:.65rem}
+.outcome-item{display:flex;align-items:flex-start;gap:.6rem;font-size:.83rem;color:rgba(255,255,255,.7);line-height:1.5}
+.outcome-check{color:var(--teal);flex-shrink:0;font-size:.9rem;margin-top:1px}
+.outcome-divider{border:none;border-top:1px solid rgba(255,255,255,.07);margin:.85rem 0}
+.outcome-price-label{font-family:var(--mono);font-size:.65rem;color:var(--g4);letter-spacing:.08em;margin-bottom:.35rem}
+.outcome-price{font-family:var(--serif);font-size:1.75rem;color:#fff;line-height:1}
+.outcome-price-strike{font-size:.88rem;color:var(--g4);text-decoration:line-through;margin-left:.4rem;font-family:var(--sans)}
+.outcome-access{font-size:.74rem;color:rgba(255,255,255,.35);font-family:var(--mono);margin-top:.4rem}
+
+/* ── WHO SECTION ─────────────────────────────────────────── */
+.who-section{background:#fff}
+.who-list{display:flex;flex-direction:column;gap:.75rem;margin-top:2rem;max-width:680px}
+.who-item{
+  display:flex;align-items:flex-start;gap:.85rem;
+  padding:1rem 1.15rem;background:var(--surface);
+  border:1px solid var(--border);border-left:3px solid var(--purple);
+  border-radius:5px;transition:transform .2s,border-left-color .2s;
+}
+.who-item:hover{transform:translateX(3px);border-left-color:var(--purple-l)}
+.who-num{font-family:var(--mono);font-size:.7rem;color:var(--purple);
+  flex-shrink:0;margin-top:2px;font-weight:500;min-width:20px}
+.who-text{font-size:.9rem;color:var(--g7);line-height:1.6}
+.who-text strong{color:var(--ink);font-weight:600}
+
+/* ── COMPARISON TABLE ───────────────────────────────────── */
+.compare-section{background:var(--surface)}
+.compare-wrap{overflow-x:auto;margin-top:2.5rem}
+.compare-table{width:100%;border-collapse:collapse;font-size:.88rem;min-width:560px}
+.compare-table th{
+  padding:.85rem 1.1rem;text-align:left;
+  font-weight:600;font-size:.74rem;text-transform:uppercase;
+  letter-spacing:.07em;font-family:var(--mono);
+}
+.th-label{color:var(--g4);background:transparent}
+.th-demo{color:var(--g4);background:rgba(0,0,0,.03)}
+.th-prod{color:var(--teal);background:rgba(29,158,117,.07)}
+.compare-table td{padding:.78rem 1.1rem;border-top:1px solid rgba(0,0,0,.06);vertical-align:top}
+.td-label{font-weight:500;color:var(--g7)}
+.td-demo{background:rgba(0,0,0,.02);color:var(--g4);font-size:.84rem}
+.td-prod{background:rgba(29,158,117,.05);color:var(--ink);font-weight:500;font-size:.84rem}
+
+/* ── CURRICULUM ACCORDION ───────────────────────────────── */
+.curriculum-section{background:#fff}
+.curriculum-grid{display:flex;flex-direction:column;gap:.65rem;margin-top:2.5rem}
+.phase-item{border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.phase-header{
+  width:100%;display:flex;align-items:center;gap:1rem;
+  padding:1.1rem 1.25rem;background:#fff;
+  text-align:left;cursor:pointer;
+  transition:background .18s;
+}
+.phase-header:hover{background:var(--card)}
+.phase-header[aria-expanded="true"]{background:var(--ink)}
+.phase-num{
+  width:36px;height:36px;border-radius:4px;background:var(--purple);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:.74rem;font-weight:500;color:#fff;flex-shrink:0;
+}
+.phase-num.teal{background:var(--teal)}
+.phase-title-wrap{flex:1;min-width:0}
+.phase-title{font-size:.97rem;font-weight:600;color:var(--ink);line-height:1.3}
+.phase-header[aria-expanded="true"] .phase-title{color:#fff}
+.phase-subtitle{font-size:.78rem;color:var(--g6);font-family:var(--mono);margin-top:.15rem}
+.phase-header[aria-expanded="true"] .phase-subtitle{color:rgba(255,255,255,.45)}
+.phase-badge{
+  font-family:var(--mono);font-size:.62rem;letter-spacing:.07em;
+  text-transform:uppercase;padding:.18rem .5rem;border-radius:2px;flex-shrink:0;
+}
+.pb-free{background:var(--teal-l);color:var(--teal)}
+.pb-paid{background:var(--purple-s);color:var(--purple)}
+.phase-chevron{
+  width:18px;height:18px;flex-shrink:0;color:var(--g4);
+  transition:transform .25s,color .18s;
+}
+.phase-header[aria-expanded="true"] .phase-chevron{transform:rotate(180deg);color:rgba(255,255,255,.5)}
+
+.phase-body{
+  max-height:0;overflow:hidden;
+  transition:max-height .35s cubic-bezier(.16,1,.3,1);
+  background:rgba(13,13,26,.97);
+}
+.phase-body.open{max-height:800px}
+.phase-body-inner{padding:1.5rem 1.25rem 1.5rem 5rem}
+.phase-goal{
+  font-size:.84rem;color:rgba(255,255,255,.55);line-height:1.65;
+  margin-bottom:1.1rem;font-style:italic;
+  border-left:2px solid rgba(79,60,201,.4);padding-left:.75rem;
+}
+.phase-topics{display:grid;grid-template-columns:1fr 1fr;gap:.45rem .75rem;margin-bottom:1.1rem}
+.phase-topic{display:flex;align-items:flex-start;gap:.5rem;font-size:.82rem;color:rgba(255,255,255,.65);line-height:1.5}
+.phase-topic-dot{width:4px;height:4px;border-radius:50%;background:var(--purple);flex-shrink:0;margin-top:6px}
+.phase-deliverable{
+  display:flex;align-items:flex-start;gap:.6rem;
+  background:rgba(29,158,117,.1);border:1px solid rgba(29,158,117,.25);
+  border-radius:4px;padding:.65rem .85rem;
+  font-size:.81rem;color:rgba(255,255,255,.8);line-height:1.5;
+}
+.deliverable-label{font-family:var(--mono);font-size:.64rem;color:var(--teal);letter-spacing:.07em;text-transform:uppercase;flex-shrink:0;margin-top:1px}
+
+/* ── INCLUSIONS ─────────────────────────────────────────── */
+.inclusions-section{background:var(--ink)}
+.inclusions-grid{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+  gap:1rem;margin-top:2.5rem;
+}
+.inclusion-card{
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
+  border-radius:6px;padding:1.35rem 1.4rem;
+  transition:border-color .2s,transform .2s;
+}
+.inclusion-card:hover{border-color:rgba(79,60,201,.35);transform:translateY(-2px)}
+.inclusion-name{font-size:.92rem;font-weight:600;color:#fff;margin-bottom:.4rem}
+.inclusion-desc{font-size:.82rem;color:rgba(255,255,255,.48);line-height:1.6}
+
+/* ── WHY DIFFERENT ──────────────────────────────────────── */
+.why-section{background:var(--surface)}
+.why-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.25rem;margin-top:2.5rem}
+.why-card{
+  background:#fff;border:1px solid var(--border);border-radius:6px;
+  padding:1.5rem;position:relative;overflow:hidden;
+  transition:transform .2s,border-color .2s;
+}
+.why-card:hover{transform:translateY(-2px);border-color:rgba(79,60,201,.35)}
+.why-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--purple)}
+.why-card-num{font-family:var(--mono);font-size:.65rem;color:var(--g4);letter-spacing:.08em;margin-bottom:.7rem}
+.why-card-title{font-size:.97rem;font-weight:600;color:var(--ink);margin-bottom:.55rem;line-height:1.35}
+.why-card-body{font-size:.85rem;color:var(--g7);line-height:1.7}
+
+/* ── CTA BRIDGE ─────────────────────────────────────────── */
+.cta-bridge{background:var(--card);padding:2.2rem clamp(1.5rem,5vw,4rem);
+  border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.cta-bridge-inner{
+  max-width:1060px;margin:0 auto;
+  display:flex;align-items:center;justify-content:space-between;gap:1.5rem;flex-wrap:wrap;
+}
+.cta-bridge-copy{font-size:.95rem;color:var(--g7);max-width:520px;line-height:1.7}
+.cta-bridge-copy strong{color:var(--ink);font-weight:600}
+
+/* ── INSTRUCTOR ─────────────────────────────────────────── */
+.instructor-section{background:#fff}
+.instructor-card{
+  display:grid;grid-template-columns:auto 1fr;gap:2rem;align-items:start;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:2rem;margin-top:2rem;max-width:720px;
+}
+.instructor-avatar{
+  width:72px;height:72px;border-radius:6px;background:var(--purple);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--serif);font-size:1.6rem;color:#fff;flex-shrink:0;
+}
+.instructor-name{font-family:var(--serif);font-size:1.35rem;color:var(--ink);margin-bottom:.3rem}
+.instructor-title{font-size:.82rem;color:var(--g6);font-family:var(--mono);margin-bottom:.9rem}
+.instructor-bio{font-size:.88rem;color:var(--g7);line-height:1.75;margin-bottom:1rem}
+.instructor-creds{display:flex;flex-direction:column;gap:.35rem}
+.instructor-cred{display:flex;align-items:flex-start;gap:.55rem;font-size:.82rem;color:var(--g7)}
+.cred-dot{width:5px;height:5px;border-radius:50%;background:var(--purple);flex-shrink:0;margin-top:6px}
+.yt-badge{
+  display:inline-flex;align-items:center;gap:.5rem;
+  background:rgba(79,60,201,.1);border:1px solid var(--border);
+  padding:.3rem .75rem;border-radius:3px;margin-top:.85rem;
+  font-family:var(--mono);font-size:.72rem;color:var(--purple);
+}
+
+/* ── FAQ ────────────────────────────────────────────────── */
+.faq-section{background:var(--surface)}
+.faq-list{display:flex;flex-direction:column;gap:.55rem;margin-top:2.5rem;max-width:720px}
+.faq-item{border:1px solid var(--border);border-radius:6px;overflow:hidden;background:#fff}
+.faq-q{
+  width:100%;display:flex;align-items:center;justify-content:space-between;gap:1rem;
+  padding:1rem 1.2rem;text-align:left;cursor:pointer;
+  font-size:.92rem;font-weight:600;color:var(--ink);
+  background:#fff;transition:background .18s;
+}
+.faq-q:hover{background:var(--card)}
+.faq-q[aria-expanded="true"]{background:var(--ink);color:#fff}
+.faq-chevron{width:16px;height:16px;flex-shrink:0;color:var(--g4);transition:transform .25s,color .18s}
+.faq-q[aria-expanded="true"] .faq-chevron{transform:rotate(180deg);color:rgba(255,255,255,.4)}
+.faq-a{
+  max-height:0;overflow:hidden;
+  transition:max-height .3s cubic-bezier(.16,1,.3,1);
+}
+.faq-a.open{max-height:400px}
+.faq-a-inner{padding:.9rem 1.2rem 1.1rem;font-size:.88rem;color:var(--g7);line-height:1.75;border-top:1px solid var(--border)}
+
+/* ── PRICING BLOCK ──────────────────────────────────────── */
+.pricing-section{background:var(--ink);padding:5rem clamp(1.5rem,5vw,4rem);position:relative;overflow:hidden}
+.pricing-section::before{content:'';position:absolute;top:-30%;right:-10%;width:50%;height:80%;
+  background:radial-gradient(ellipse,rgba(79,60,201,.18) 0%,transparent 65%);pointer-events:none}
+.pricing-inner{position:relative;z-index:2;max-width:1060px;margin:0 auto}
+.pricing-card{
+  background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);
+  border-radius:10px;padding:2.5rem;max-width:640px;
+  position:relative;overflow:hidden;
+}
+.pricing-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,var(--purple),var(--teal))}
+.pricing-tag{font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;
+  color:rgba(245,158,11,.85);margin-bottom:.85rem}
+.pricing-h2{font-family:var(--serif);font-size:clamp(1.6rem,3vw,2.1rem);color:#fff;
+  margin-bottom:.5rem;line-height:1.2}
+.pricing-desc{font-size:.88rem;color:rgba(255,255,255,.48);margin-bottom:1.75rem;line-height:1.65}
+.price-row{display:flex;align-items:baseline;gap:.75rem;margin-bottom:.35rem}
+.price-main{font-family:var(--serif);font-size:2.8rem;color:var(--amber);line-height:1}
+.price-strike{font-size:1.1rem;color:rgba(255,255,255,.3);text-decoration:line-through}
+.price-note{font-family:var(--mono);font-size:.72rem;color:rgba(245,158,11,.65);margin-bottom:1.75rem}
+.inclusions-check{display:flex;flex-direction:column;gap:.5rem;margin-bottom:2rem}
+.inc-item{display:flex;align-items:flex-start;gap:.6rem;font-size:.84rem;color:rgba(255,255,255,.65)}
+.inc-check{color:var(--teal);flex-shrink:0;font-size:.9rem;margin-top:1px}
+.pricing-cta-wrap{display:flex;flex-direction:column;gap:.75rem}
+.trust-row{display:flex;gap:1.5rem;flex-wrap:wrap;font-size:.76rem;color:rgba(255,255,255,.35);font-family:var(--mono)}
+.trust-item{display:flex;align-items:center;gap:.35rem}
+
+/* PLACEHOLDER: Stripe payment link goes in the href below */
+/* ── FINAL CTA ──────────────────────────────────────────── */
+.final-section{
+  background:linear-gradient(140deg,#08081a 0%,var(--ink) 50%,#0d0a27 100%);
+  padding:6rem clamp(1.5rem,5vw,4rem);text-align:center;
+}
+.final-h2{font-family:var(--serif);font-size:clamp(1.8rem,3.8vw,2.8rem);
+  color:#fff;margin-bottom:1rem;max-width:660px;margin-left:auto;margin-right:auto;line-height:1.15}
+.final-sub{font-size:.95rem;color:rgba(255,255,255,.48);margin-bottom:2.5rem;
+  max-width:460px;margin-left:auto;margin-right:auto;line-height:1.75}
+.final-actions{display:flex;align-items:center;justify-content:center;gap:1.25rem;flex-wrap:wrap}
+.btn-ghost-light{
+  font-size:.86rem;color:rgba(255,255,255,.45);font-family:var(--mono);
+  border-bottom:1px solid rgba(255,255,255,.18);
+  transition:color .2s,border-color .2s;
+}
+.btn-ghost-light:hover{color:rgba(255,255,255,.75);border-color:rgba(255,255,255,.45)}
+
+/* ── FOOTER ─────────────────────────────────────────────── */
+footer{background:var(--ink);border-top:1px solid rgba(255,255,255,.05);padding:2rem clamp(1.5rem,5vw,4rem)}
+.footer-inner{max-width:1060px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem}
+.footer-copy{font-size:.76rem;color:rgba(255,255,255,.28);font-family:var(--mono)}
+.footer-links{display:flex;gap:1.5rem;flex-wrap:wrap}
+.footer-link{font-size:.76rem;color:rgba(255,255,255,.38);transition:color .2s;font-family:var(--mono)}
+.footer-link:hover{color:rgba(255,255,255,.72)}
+
+/* ── RESPONSIVE ─────────────────────────────────────────── */
+@media(max-width:900px){
+  .hero-inner{grid-template-columns:1fr}
+  .hero-outcome{min-width:unset;max-width:100%}
+  .why-grid{grid-template-columns:1fr}
+  .instructor-card{grid-template-columns:1fr}
+  .phase-topics{grid-template-columns:1fr}
+}
+@media(max-width:640px){
+  .nav-link{display:none}
+  .inclusions-grid{grid-template-columns:1fr}
+  .compare-table th,.compare-table td{padding:.6rem .75rem;font-size:.82rem}
+}
+</style>
+</head>
+<body>
+
+<!-- ── NAV ─────────────────────────────────────────────── -->
+<nav class="nav" aria-label="Site navigation">
+  <div class="nav-logo">
+    <div class="nav-logo-mark" aria-hidden="true">
+      <svg viewBox="0 0 16 16" width="16" height="16" fill="none">
+        <rect x="2" y="2" width="5" height="5" rx="1" fill="white" opacity=".9"/>
+        <rect x="9" y="2" width="5" height="5" rx="1" fill="white" opacity=".45"/>
+        <rect x="2" y="9" width="5" height="5" rx="1" fill="white" opacity=".45"/>
+        <rect x="9" y="9" width="5" height="5" rx="1" fill="#F59E0B"/>
+      </svg>
+    </div>
+    <a href="index.html"><span class="nav-logo-text">Production<span>AI</span>Engineering</span></a>
+  </div>
+  <div class="nav-right">
+    <a href="index.html" class="nav-link">Home</a>
+    <a href="https://www.youtube.com/@ProductionAIEngineering" target="_blank" rel="noopener" class="nav-link">YouTube</a>
+    <a href="#pricing" class="nav-enroll">Enroll — ₹8,999</a>
+  </div>
+</nav>
+
+<!-- ── HERO ─────────────────────────────────────────────── -->
+<section class="hero" aria-labelledby="hero-h1">
+  <div class="hero-grid-bg" aria-hidden="true"></div>
+  <div class="hero-glow" aria-hidden="true"></div>
+  <div class="hero-glow-l" aria-hidden="true"></div>
+  <div class="hero-inner">
+    <!-- Left -->
+    <div>
+      <div class="hero-eyebrow">Self-paced course · Production AI Engineering</div>
+      <h1 class="hero-h1" id="hero-h1">
+        Build a Production RAG System<br/>That Actually <em>Works at Scale</em>
+      </h1>
+      <p class="hero-sub">
+        6 pipeline phases. A private GitHub repo with production-grade code. Real evaluation frameworks. <strong>Built by an engineer who has done this at enterprise scale — not in a tutorial.</strong>
+      </p>
+      <div class="hero-cta">
+        <a href="#pricing" class="btn-enroll btn-enroll-lg">
+          Enroll in Production RAG Engineering — ₹8,999
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </a>
+      </div>
+      <div class="hero-meta">
+        <span>Lifetime access</span><div class="hero-sep" aria-hidden="true"></div>
+        <span>Private GitHub repo</span><div class="hero-sep" aria-hidden="true"></div>
+        <span>14-day refund</span><div class="hero-sep" aria-hidden="true"></div>
+        <span>Discord included</span>
+      </div>
+    </div>
+    <!-- Right: outcome card -->
+    <aside class="hero-outcome" aria-label="What you will build">
+      <div class="outcome-label">You will ship</div>
+      <div class="outcome-list">
+        <div class="outcome-item"><span class="outcome-check" aria-hidden="true">✓</span>Working ingestion pipeline — real documents, real failure handling</div>
+        <div class="outcome-item"><span class="outcome-check" aria-hidden="true">✓</span>Hybrid retrieval with reranking — not just vector search</div>
+        <div class="outcome-item"><span class="outcome-check" aria-hidden="true">✓</span>Golden evaluation dataset + RAGAS baseline</div>
+        <div class="outcome-item"><span class="outcome-check" aria-hidden="true">✓</span>Deployed API with latency SLAs and cost dashboards</div>
+        <div class="outcome-item"><span class="outcome-check" aria-hidden="true">✓</span>Re-indexing pipeline — full, incremental, event-triggered</div>
+      </div>
+      <div class="outcome-divider"></div>
+      <div class="outcome-price-label">Early access price</div>
+      <div class="price-row" style="gap:.5rem">
+        <span class="outcome-price">₹8,999</span>
+        <span class="outcome-price-strike">₹12,999</span>
+      </div>
+      <div class="outcome-access">Instant access · Lifetime updates</div>
+    </aside>
+  </div>
+</section>
+
+<!-- ── WHO THIS IS FOR ──────────────────────────────────── -->
+<section class="section who-section reveal" aria-labelledby="who-h2">
+  <div class="inner">
+    <span class="stag">Who this is for</span>
+    <h2 class="sh2" id="who-h2">Engineers Who Have Tried to Build RAG<br/>and Hit a Wall</h2>
+    <div class="who-list" role="list">
+      <div class="who-item reveal" role="listitem">
+        <span class="who-num" aria-hidden="true">01</span>
+        <p class="who-text"><strong>You built a demo that works on 10 documents but breaks on 10,000.</strong> The problem isn't your code — it's that the architecture was never designed for scale.</p>
+      </div>
+      <div class="who-item reveal" role="listitem">
+        <span class="who-num" aria-hidden="true">02</span>
+        <p class="who-text"><strong>You can't tell if your RAG is actually good</strong> — you can only tell when it's obviously wrong. No golden dataset. No baseline. No metrics defined before go-live.</p>
+      </div>
+      <div class="who-item reveal" role="listitem">
+        <span class="who-num" aria-hidden="true">03</span>
+        <p class="who-text"><strong>You've followed every LangChain tutorial</strong> but your production deployment has mysterious quality degradation you can't diagnose or reproduce.</p>
+      </div>
+      <div class="who-item reveal" role="listitem">
+        <span class="who-num" aria-hidden="true">04</span>
+        <p class="who-text"><strong>You need to present an architecture to a tech lead or CTO</strong> and need to know not just what to build, but why each decision was made — and how to defend it.</p>
+      </div>
+      <div class="who-item reveal" role="listitem">
+        <span class="who-num" aria-hidden="true">05</span>
+        <p class="who-text"><strong>You want to own the full production pipeline</strong> — not just the model layer. Ingestion, retrieval, evaluation, observability, re-indexing. All of it.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── COMPARISON TABLE ─────────────────────────────────── -->
+<section class="section compare-section reveal" aria-labelledby="compare-h2">
+  <div class="inner">
+    <span class="stag">The real difference</span>
+    <h2 class="sh2" id="compare-h2">Demo RAG and Production RAG<br/>Are Not the Same System</h2>
+    <p class="slead">What tutorials teach you and what production demands are two different things. This course is built around the gap.</p>
+    <div class="compare-wrap">
+      <table class="compare-table" aria-label="Demo RAG vs Production RAG comparison">
+        <thead>
+          <tr>
+            <th class="th-label" scope="col">Decision</th>
+            <th class="th-demo" scope="col">Demo RAG — what tutorials teach</th>
+            <th class="th-prod" scope="col">Production RAG — what this course teaches</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="td-label">Chunking</td>
+            <td class="td-demo">Fixed chunk size, hardcoded. No strategy documented.</td>
+            <td class="td-prod">Chunking strategy chosen based on content type, retrieval pattern, and overlap needs — with an ADR to justify it.</td>
+          </tr>
+          <tr>
+            <td class="td-label">Vector store</td>
+            <td class="td-demo">Single index, default settings. No schema design.</td>
+            <td class="td-prod">Schema designed for scale, multi-tenancy, update patterns, and filtered retrieval.</td>
+          </tr>
+          <tr>
+            <td class="td-label">Evaluation</td>
+            <td class="td-demo">"It looks right when I test it." No metrics defined.</td>
+            <td class="td-prod">Golden dataset + RAGAS metrics + business KPIs established before any optimization begins.</td>
+          </tr>
+          <tr>
+            <td class="td-label">Re-indexing</td>
+            <td class="td-demo">Not covered. Discover the problem when quality drops.</td>
+            <td class="td-prod">Full, incremental, and event-triggered re-indexing strategies — which to use and when.</td>
+          </tr>
+          <tr>
+            <td class="td-label">Observability</td>
+            <td class="td-demo">Latency and cost: not measured. Hallucination: unknown.</td>
+            <td class="td-prod">Token cost dashboards, P95 latency monitoring, LLM-as-judge hallucination scoring — from day one.</td>
+          </tr>
+          <tr>
+            <td class="td-label">Failure modes</td>
+            <td class="td-demo">Unknown — discovered in production when it's too late.</td>
+            <td class="td-prod">Documented, handled, and monitored. Every phase covers what breaks and why.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ── CTA BRIDGE 1 ─────────────────────────────────────── -->
+<div class="cta-bridge reveal" aria-label="Enroll prompt">
+  <div class="cta-bridge-inner">
+    <p class="cta-bridge-copy"><strong>The gap between demo and production is exactly what this course closes.</strong> 6 phases, 40+ hours, one complete system built and deployed.</p>
+    <a href="#pricing" class="btn-enroll">
+      Enroll — ₹8,999 Early Access
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+  </div>
+</div>
+
+<!-- ── CURRICULUM ACCORDION ──────────────────────────────── -->
+<section class="section curriculum-section reveal" aria-labelledby="curriculum-h2">
+  <div class="inner">
+    <span class="stag">The curriculum</span>
+    <h2 class="sh2" id="curriculum-h2">6 Phases. 40+ Hours.<br/>One Complete Production System.</h2>
+    <p class="slead">Every phase ends with a concrete deliverable — not just watched content. By Phase 6 you have a deployed, monitored system.</p>
+
+    <div class="curriculum-grid" role="list" id="curriculum">
+
+      <!-- PHASE 1 -->
+      <div class="phase-item" role="listitem">
+        <button class="phase-header" aria-expanded="false" aria-controls="phase-1-body" onclick="togglePhase(this)">
+          <div class="phase-num" aria-hidden="true">01</div>
+          <div class="phase-title-wrap">
+            <div class="phase-title">Business Use Case Analysis</div>
+            <div class="phase-subtitle">Does this problem actually need RAG?</div>
+          </div>
+          <span class="phase-badge pb-free">Free preview</span>
+          <svg class="phase-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <div class="phase-body" id="phase-1-body" aria-hidden="true">
+          <div class="phase-body-inner">
+            <div class="phase-goal">Most teams skip this decision and pay for it in month two. This phase gives you a repeatable framework for evaluating whether RAG is the right choice — and what type.</div>
+            <div class="phase-topics">
+              <div class="phase-topic"><div class="phase-topic-dot"></div>RAG vs fine-tuning vs prompt engineering — decision tree</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Content type analysis: structured, unstructured, semi-structured</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Retrieval pattern selection based on use case</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>When NOT to use RAG — and why</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Use case template used in real enterprise projects</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Naive RAG vs advanced RAG vs agentic RAG — maturity model</div>
+            </div>
+            <div class="phase-deliverable">
+              <span class="deliverable-label">Deliverable</span>
+              A completed use case analysis document with architecture recommendation and justification — the same artifact presented to stakeholders before building begins.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PHASE 2 -->
+      <div class="phase-item" role="listitem">
+        <button class="phase-header" aria-expanded="false" aria-controls="phase-2-body" onclick="togglePhase(this)">
+          <div class="phase-num" aria-hidden="true">02</div>
+          <div class="phase-title-wrap">
+            <div class="phase-title">Ingestion Pipeline</div>
+            <div class="phase-subtitle">From raw documents to queryable vector store</div>
+          </div>
+          <span class="phase-badge pb-free">Free preview</span>
+          <svg class="phase-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <div class="phase-body" id="phase-2-body" aria-hidden="true">
+          <div class="phase-body-inner">
+            <div class="phase-goal">The ingestion pipeline is where most RAG systems accumulate silent technical debt. This phase covers every decision that determines retrieval quality before a single query is made.</div>
+            <div class="phase-topics">
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Source connectors: S3, SharePoint, Confluence, APIs, web scraping</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Document parsing: PyMuPDF, Unstructured.io, OCR, table extraction</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Chunking strategies: fixed, sentence, semantic, recursive, parent-child</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Embedding model selection: cost, latency, MTEB benchmarks compared</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Vector store schema design for scale, multi-tenancy, updates</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Failure handling, idempotency, dead-letter queues</div>
+            </div>
+            <div class="phase-deliverable">
+              <span class="deliverable-label">Deliverable</span>
+              A working ingestion pipeline handling 3 document types with chunking strategy documented and justified in an ADR. Idempotent — safe to run multiple times.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PHASE 3 -->
+      <div class="phase-item" role="listitem">
+        <button class="phase-header" aria-expanded="false" aria-controls="phase-3-body" onclick="togglePhase(this)">
+          <div class="phase-num teal" aria-hidden="true">03</div>
+          <div class="phase-title-wrap">
+            <div class="phase-title">Query Pipeline</div>
+            <div class="phase-subtitle">Hybrid search, reranking, context assembly</div>
+          </div>
+          <span class="phase-badge pb-paid">Course only</span>
+          <svg class="phase-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <div class="phase-body" id="phase-3-body" aria-hidden="true">
+          <div class="phase-body-inner">
+            <div class="phase-goal">Vector-only search fails at scale. This phase covers hybrid retrieval, query transformation, and everything that happens between a user's question and the LLM's context window.</div>
+            <div class="phase-topics">
+              <div class="phase-topic"><div class="phase-topic-dot"></div>HyDE (hypothetical document embeddings) for query transformation</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Hybrid search: BM25 + semantic with Reciprocal Rank Fusion</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Cross-encoder reranking — Cohere, BGE, custom rerankers</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Context window assembly and prompt compression</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>LLM selection, model routing, cost-aware fallback chains</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Citation generation and source attribution patterns</div>
+            </div>
+            <div class="phase-deliverable">
+              <span class="deliverable-label">Deliverable</span>
+              A hybrid retrieval system returning ranked, reranked results for 100 test queries. Latency benchmarked. Model routing configured.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PHASE 4 -->
+      <div class="phase-item" role="listitem">
+        <button class="phase-header" aria-expanded="false" aria-controls="phase-4-body" onclick="togglePhase(this)">
+          <div class="phase-num" aria-hidden="true">04</div>
+          <div class="phase-title-wrap">
+            <div class="phase-title">Evaluation Framework</div>
+            <div class="phase-subtitle">Measure before you optimize — not after</div>
+          </div>
+          <span class="phase-badge pb-paid">Course only</span>
+          <svg class="phase-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <div class="phase-body" id="phase-4-body" aria-hidden="true">
+          <div class="phase-body-inner">
+            <div class="phase-goal">Most courses never touch evaluation. This course builds the evaluation framework in Phase 4 and uses it to measure every RAG variant in Phase 5. You will know, quantitatively, which system is better.</div>
+            <div class="phase-topics">
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Golden dataset construction — what makes a good test set</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>RAGAS metrics: faithfulness, answer relevancy, context precision, recall</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Business-specific KPI definition — beyond RAGAS</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Baseline establishment before any optimization</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>LLM-as-judge evaluation patterns for open-ended answers</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Evaluation pipeline automation and regression testing</div>
+            </div>
+            <div class="phase-deliverable">
+              <span class="deliverable-label">Deliverable</span>
+              A golden dataset of 50+ question-answer pairs with RAGAS scores and business KPIs established as your baseline. Automated eval pipeline that runs on every code change.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PHASE 5 -->
+      <div class="phase-item" role="listitem">
+        <button class="phase-header" aria-expanded="false" aria-controls="phase-5-body" onclick="togglePhase(this)">
+          <div class="phase-num" aria-hidden="true">05</div>
+          <div class="phase-title-wrap">
+            <div class="phase-title">RAG Variants and Optimization</div>
+            <div class="phase-subtitle">Measure each variant against your baseline</div>
+          </div>
+          <span class="phase-badge pb-paid">Course only</span>
+          <svg class="phase-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <div class="phase-body" id="phase-5-body" aria-hidden="true">
+          <div class="phase-body-inner">
+            <div class="phase-goal">Advanced RAG techniques taught in isolation are useless without a way to compare them. This phase implements each variant and measures it against the Phase 4 baseline — so you know which one to ship.</div>
+            <div class="phase-topics">
+              <div class="phase-topic"><div class="phase-topic-dot"></div>HyDE and multi-query expansion — when they help and when they don't</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Parent-child chunking and small-to-big retrieval</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Corrective RAG — self-grading retrieval quality</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Self-RAG — iterative retrieval with reflection</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>GraphRAG — when knowledge graphs beat vector search</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Semantic caching — reducing cost and latency at scale</div>
+            </div>
+            <div class="phase-deliverable">
+              <span class="deliverable-label">Deliverable</span>
+              A comparison report showing RAGAS + business KPI scores for at least 3 RAG variants against your baseline. One justified, documented winning architecture ready to deploy.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PHASE 6 -->
+      <div class="phase-item" role="listitem">
+        <button class="phase-header" aria-expanded="false" aria-controls="phase-6-body" onclick="togglePhase(this)">
+          <div class="phase-num teal" aria-hidden="true">06</div>
+          <div class="phase-title-wrap">
+            <div class="phase-title">Production Deployment, Observability, Re-Indexing</div>
+            <div class="phase-subtitle">Ship it. Monitor it. Keep it healthy.</div>
+          </div>
+          <span class="phase-badge pb-paid">Course only</span>
+          <svg class="phase-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <div class="phase-body" id="phase-6-body" aria-hidden="true">
+          <div class="phase-body-inner">
+            <div class="phase-goal">Deploying is not the finish line. This phase covers everything that keeps a production RAG system reliable — the parts that no tutorial covers because they only matter after you ship.</div>
+            <div class="phase-topics">
+              <div class="phase-topic"><div class="phase-topic-dot"></div>FastAPI service design — API contracts, async, error handling</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Containerization and deployment — Docker, latency SLAs</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Token cost dashboards — track spend per query type</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Hallucination monitoring with LLM-as-judge at scale</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Re-indexing: full, incremental, event-triggered strategies</div>
+              <div class="phase-topic"><div class="phase-topic-dot"></div>Drift detection and automatic re-index triggers</div>
+            </div>
+            <div class="phase-deliverable">
+              <span class="deliverable-label">Deliverable</span>
+              A deployed FastAPI RAG service with token cost tracking, P95 latency monitoring, hallucination scoring, and a re-indexing pipeline. The complete system — production-ready.
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /curriculum-grid -->
+  </div>
+</section>
+
+<!-- ── INCLUSIONS ─────────────────────────────────────────── -->
+<section class="section inclusions-section reveal" aria-labelledby="inclusions-h2">
+  <div class="inner">
+    <span class="stag" style="color:var(--teal)">What's included</span>
+    <h2 class="sh2" style="color:#fff" id="inclusions-h2">Everything You Need to Ship<br/>a Production RAG System</h2>
+    <div class="inclusions-grid">
+      <div class="inclusion-card reveal">
+        <div class="inclusion-name">6 Pipeline Phases</div>
+        <div class="inclusion-desc">Full implementation code for every phase — not pseudocode. The same code structure used in enterprise production systems.</div>
+      </div>
+      <div class="inclusion-card reveal">
+        <div class="inclusion-name">Private GitHub Repository</div>
+        <div class="inclusion-desc">Production-grade code, not tutorial code. Properly structured, documented, and ready to adapt to your use case.</div>
+      </div>
+      <div class="inclusion-card reveal">
+        <div class="inclusion-name">Architecture Decision Records</div>
+        <div class="inclusion-desc">Every major tradeoff — chunking strategy, vector store selection, reranker choice — documented with the reasoning and alternatives considered.</div>
+      </div>
+      <div class="inclusion-card reveal">
+        <div class="inclusion-name">Golden Evaluation Dataset Template</div>
+        <div class="inclusion-desc">RAGAS-integrated evaluation pipeline + the template for creating your own golden dataset for any use case.</div>
+      </div>
+      <div class="inclusion-card reveal">
+        <div class="inclusion-name">Cost and Latency Dashboard</div>
+        <div class="inclusion-desc">Grafana-ready monitoring dashboard for token spend, P95 latency, retrieval quality, and hallucination rate. Plug in your stack.</div>
+      </div>
+      <div class="inclusion-card reveal">
+        <div class="inclusion-name">Discord Community Access</div>
+        <div class="inclusion-desc">Engineers building production GenAI systems. Post your architecture, your evaluation results, your questions. The community and I will help.</div>
+      </div>
+      <div class="inclusion-card reveal">
+        <div class="inclusion-name">Lifetime Access + Updates</div>
+        <div class="inclusion-desc">The course updates as the ecosystem evolves. You pay once and get everything — including new phases and content added in future.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── WHY DIFFERENT ─────────────────────────────────────── -->
+<section class="section why-section reveal" aria-labelledby="why-h2">
+  <div class="inner">
+    <span class="stag">Why this course is different</span>
+    <h2 class="sh2" id="why-h2">Three Things Missing from<br/>Every Other RAG Course</h2>
+    <div class="why-grid">
+      <div class="why-card reveal">
+        <div class="why-card-num">01</div>
+        <div class="why-card-title">Evaluation is built into the curriculum — not an afterthought</div>
+        <div class="why-card-body">Most courses never touch evaluation. Phase 4 builds the golden dataset and RAGAS baseline. Phase 5 uses it to compare every RAG variant. You know, with numbers, which system is better — before you ship it.</div>
+      </div>
+      <div class="why-card reveal">
+        <div class="why-card-num">02</div>
+        <div class="why-card-title">Architecture Decision Records for every major tradeoff</div>
+        <div class="why-card-body">You don't just learn what to build — you learn why, documented in the same format senior engineers use to defend architectural decisions to their teams. Every chunking strategy, vector store choice, and reranker selection has an ADR.</div>
+      </div>
+      <div class="why-card reveal">
+        <div class="why-card-num">03</div>
+        <div class="why-card-title">Re-indexing is covered — because no other course does</div>
+        <div class="why-card-body">When your corpus changes, how do you re-index without downtime? Full re-index vs incremental vs event-triggered — which to use and when. Phase 6 covers all three strategies. This is the thing that breaks production systems that tutorials never mention.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── CTA BRIDGE 2 ─────────────────────────────────────── -->
+<div class="cta-bridge reveal" aria-label="Enroll prompt">
+  <div class="cta-bridge-inner">
+    <p class="cta-bridge-copy"><strong>Every other RAG course stops where the problems start.</strong> This one is built for what comes after — the evaluation, the observability, the re-indexing, the production reality.</p>
+    <a href="#pricing" class="btn-enroll">
+      Enroll — ₹8,999 Early Access
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+  </div>
+</div>
+
+<!-- ── INSTRUCTOR ─────────────────────────────────────────── -->
+<section class="section instructor-section reveal" aria-labelledby="instructor-h2">
+  <div class="inner">
+    <span class="stag">The instructor</span>
+    <h2 class="sh2" id="instructor-h2">Built by Someone Who Has<br/>Done This in Production</h2>
+    <div class="instructor-card">
+      <div>
+        <div class="instructor-avatar" aria-hidden="true">PAE</div>
+      </div>
+      <div>
+        <div class="instructor-name">Production AI Engineering<!-- PLACEHOLDER: your name --></div>
+        <div class="instructor-title">Senior GenAI Engineer · 9+ years enterprise experience</div>
+        <p class="instructor-bio">
+          I have architected, designed, and deployed AI/ML/GenAI systems at enterprise scale for over 9 years — for Fortune 500 data teams, early-stage AI startups, and everything in between. I have seen what fails in production that no tutorial covers: the retrieval degradation, the evaluation gaps, the re-indexing surprises, the cost overruns.<br/><br/>
+          This course is the education I wish had existed when I started. Free content first, always. Paid courses only when the depth justifies it.
+        </p>
+        <div class="instructor-creds">
+          <div class="instructor-cred"><div class="cred-dot"></div>9+ years architecting enterprise AI/ML/GenAI systems</div>
+          <div class="instructor-cred"><div class="cred-dot"></div>Production RAG systems deployed at Fortune 500 scale</div>
+          <div class="instructor-cred"><div class="cred-dot"></div>Built systems across finance, legal, HR, and customer support domains</div>
+          <div class="instructor-cred"><div class="cred-dot"></div>Free YouTube series — production GenAI, no fluff</div>
+        </div>
+        <div class="yt-badge">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M23.5 6.5s-.3-2-1.2-2.8c-1.1-1.2-2.4-1.2-3-1.3C16.8 2.2 12 2.2 12 2.2s-4.8 0-7.3.2c-.6.1-1.9.1-3 1.3C.7 4.5.5 6.5.5 6.5S.2 8.8.2 11.2v2.2c0 2.3.3 4.6.3 4.6s.3 2 1.2 2.8c1.1 1.2 2.6 1.1 3.3 1.2C7.2 22 12 22 12 22s4.8 0 7.3-.2c.6-.1 1.9-.1 3-1.3.9-.8 1.2-2.8 1.2-2.8s.3-2.3.3-4.6v-2.2C23.8 8.8 23.5 6.5 23.5 6.5zM9.7 15.5V8.4l8.1 3.6-8.1 3.5z"/></svg>
+          youtube.com/@ProductionAIEngineering<!-- PLACEHOLDER: update subscriber count when known -->
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── FAQ ─────────────────────────────────────────────────── -->
+<section class="section faq-section reveal" aria-labelledby="faq-h2">
+  <div class="inner">
+    <span class="stag">Common questions</span>
+    <h2 class="sh2" id="faq-h2">Before You Enroll</h2>
+    <div class="faq-list" id="faq">
+
+      <div class="faq-item">
+        <button class="faq-q" aria-expanded="false" aria-controls="faq-1" onclick="toggleFaq(this)">
+          I already know LangChain / LlamaIndex. Is this for me?
+          <svg class="faq-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="faq-a" id="faq-1" aria-hidden="true">
+          <div class="faq-a-inner">Yes. This course is framework-agnostic — we use LangChain in some phases and raw API calls in others. The goal is to understand the production concepts so you can implement them in any framework. If you already know LangChain, you'll understand why some of the decisions it makes for you are wrong for production at scale.</div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q" aria-expanded="false" aria-controls="faq-2" onclick="toggleFaq(this)">
+          Do I need to understand how transformers or attention work?
+          <svg class="faq-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="faq-a" id="faq-2" aria-hidden="true">
+          <div class="faq-a-inner">No. You need to be a competent engineer — comfortable with Python, REST APIs, and basic ML concepts. You do not need to understand backpropagation, attention mechanisms, or how to fine-tune a model. This is a production engineering course, not an ML research course.</div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q" aria-expanded="false" aria-controls="faq-3" onclick="toggleFaq(this)">
+          Is this relevant for agents and multi-agent systems?
+          <svg class="faq-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="faq-a" id="faq-3" aria-hidden="true">
+          <div class="faq-a-inner">Yes. RAG is the most critical component in most agent architectures — agents that can't retrieve reliably fail reliably. The evaluation and observability frameworks in this course apply directly to agent systems. A dedicated multi-agent systems course is planned — subscribers to the YouTube channel will hear about it first.</div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q" aria-expanded="false" aria-controls="faq-4" onclick="toggleFaq(this)">
+          What if I get stuck or have questions?
+          <svg class="faq-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="faq-a" id="faq-4" aria-hidden="true">
+          <div class="faq-a-inner">Discord community access is included. Post your architecture, your code, your evaluation results — the community and I will help you move forward. This is not a "post a question and wait 3 weeks" situation. Active engineers building real systems get real answers.</div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q" aria-expanded="false" aria-controls="faq-5" onclick="toggleFaq(this)">
+          What is the refund policy?
+          <svg class="faq-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="faq-a" id="faq-5" aria-hidden="true">
+          <div class="faq-a-inner">14-day full refund if you've completed fewer than 2 phases and don't feel the course is worth it. No forms, no questions. Email us and the refund is processed immediately. We'd rather you get your money back than feel stuck with something that doesn't work for you.</div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q" aria-expanded="false" aria-controls="faq-6" onclick="toggleFaq(this)">
+          Is there a live cohort option if I want more support?
+          <svg class="faq-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="faq-a" id="faq-6" aria-hidden="true">
+          <div class="faq-a-inner">Yes. The live cohort covers the same 6 phases with 8 live sessions, personal code review, and a cohort of max 20 engineers. It runs at ₹18,000 for the first cohort. If you want accountability, deadlines, and live feedback on your implementation — the cohort is the better option. Details at <!-- PLACEHOLDER: cohort page URL -->cohort.html.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── PRICING ─────────────────────────────────────────────── -->
+<section class="pricing-section" id="pricing" aria-labelledby="pricing-h2">
+  <div class="pricing-inner">
+    <div class="pricing-card reveal">
+      <div class="pricing-tag">Early Access Pricing — Limited Window</div>
+      <h2 class="pricing-h2" id="pricing-h2">Production RAG Engineering</h2>
+      <p class="pricing-desc">Self-paced. Start immediately. Work through all 6 phases at your own speed with full access to the private repo, evaluation framework, and community.</p>
+      <div class="price-row">
+        <span class="price-main">₹8,999</span>
+        <span class="price-strike">₹12,999</span>
+      </div>
+      <p class="price-note">Early access pricing available until Cohort 1 launch. Price increases after that.</p>
+      <div class="inclusions-check" role="list">
+        <div class="inc-item" role="listitem"><span class="inc-check" aria-hidden="true">✓</span>6 pipeline phases with full implementation code</div>
+        <div class="inc-item" role="listitem"><span class="inc-check" aria-hidden="true">✓</span>Private GitHub repository — production-grade, not tutorial code</div>
+        <div class="inc-item" role="listitem"><span class="inc-check" aria-hidden="true">✓</span>Architecture Decision Records for every major tradeoff</div>
+        <div class="inc-item" role="listitem"><span class="inc-check" aria-hidden="true">✓</span>Golden evaluation dataset template + RAGAS integration</div>
+        <div class="inc-item" role="listitem"><span class="inc-check" aria-hidden="true">✓</span>Cost and latency monitoring dashboard (Grafana-ready)</div>
+        <div class="inc-item" role="listitem"><span class="inc-check" aria-hidden="true">✓</span>Discord community access</div>
+        <div class="inc-item" role="listitem"><span class="inc-check" aria-hidden="true">✓</span>Lifetime access + all future course updates</div>
+      </div>
+      <div class="pricing-cta-wrap">
+        <!-- PLACEHOLDER: Replace href with your Stripe Payment Link URL -->
+        <a href="#stripe-payment-link-PLACEHOLDER" class="btn-enroll btn-enroll-lg" style="justify-content:center">
+          Enroll Now — ₹8,999
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </a>
+        <div class="trust-row">
+          <span class="trust-item">✓ 14-day refund policy</span>
+          <span class="trust-item">✓ Instant access after payment</span>
+          <span class="trust-item">✓ UPI · Net Banking · Cards accepted</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── FINAL CTA ──────────────────────────────────────────── -->
+<section class="final-section" aria-labelledby="final-h2">
+  <h2 class="final-h2" id="final-h2">The Production RAG System You Build<br/>Is Real Enough to Put in Your Portfolio</h2>
+  <p class="final-sub">Not a tutorial project. A complete, deployed, monitored, evaluated system — built with the same standards used at enterprise scale.</p>
+  <div class="final-actions">
+    <!-- PLACEHOLDER: Replace href with your Stripe Payment Link URL -->
+    <a href="#stripe-payment-link-PLACEHOLDER" class="btn-enroll btn-enroll-lg">
+      Enroll in Production RAG Engineering
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+    <a href="index.html" class="btn-ghost-light">← Back to free content</a>
+  </div>
+</section>
+
+<!-- ── FOOTER ─────────────────────────────────────────────── -->
+<footer>
+  <div class="footer-inner">
+    <span class="footer-copy">© 2025 Production AI Engineering. Built for engineers who ship to production.</span>
+    <nav class="footer-links" aria-label="Footer links">
+      <a href="index.html" class="footer-link">Home</a>
+      <a href="https://www.youtube.com/@ProductionAIEngineering" target="_blank" rel="noopener" class="footer-link">YouTube</a>
+      <a href="#github" class="footer-link">GitHub<!-- PLACEHOLDER: GitHub URL --></a>
+      <a href="#discord" class="footer-link">Discord<!-- PLACEHOLDER: Discord URL --></a>
+      <a href="mailto:PLACEHOLDER@productionaiengineering.com" class="footer-link">Contact</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+/* ── REDUCED MOTION CHECK ──────────────────────────────── */
+const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ── SCROLL REVEAL ────────────────────────────────────── */
+if (!prefersReducedMotion) {
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (!e.isIntersecting) return;
+      const siblings = [...(e.target.parentElement?.children||[])].filter(c=>c.classList.contains('reveal'));
+      const idx = siblings.indexOf(e.target);
+      setTimeout(()=>e.target.classList.add('visible'), idx*75);
+      io.unobserve(e.target);
+    });
+  }, {threshold:.07,rootMargin:'0px 0px -36px 0px'});
+  document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+} else {
+  document.querySelectorAll('.reveal').forEach(el=>el.classList.add('visible'));
+}
+
+/* ── ACCORDION: CURRICULUM PHASES ──────────────────────── */
+function togglePhase(btn) {
+  const isOpen = btn.getAttribute('aria-expanded') === 'true';
+  const bodyId = btn.getAttribute('aria-controls');
+  const body = document.getElementById(bodyId);
+
+  // Close all others
+  document.querySelectorAll('.phase-header[aria-expanded="true"]').forEach(b => {
+    if (b !== btn) {
+      b.setAttribute('aria-expanded','false');
+      const bid = b.getAttribute('aria-controls');
+      const bd = document.getElementById(bid);
+      bd.classList.remove('open');
+      bd.setAttribute('aria-hidden','true');
+    }
+  });
+
+  const next = !isOpen;
+  btn.setAttribute('aria-expanded', String(next));
+  body.setAttribute('aria-hidden', String(!next));
+  body.classList.toggle('open', next);
+}
+
+/* ── ACCORDION: FAQ ────────────────────────────────────── */
+function toggleFaq(btn) {
+  const isOpen = btn.getAttribute('aria-expanded') === 'true';
+  const bodyId = btn.getAttribute('aria-controls');
+  const body = document.getElementById(bodyId);
+
+  document.querySelectorAll('.faq-q[aria-expanded="true"]').forEach(b => {
+    if (b !== btn) {
+      b.setAttribute('aria-expanded','false');
+      const bd = document.getElementById(b.getAttribute('aria-controls'));
+      bd.classList.remove('open');
+      bd.setAttribute('aria-hidden','true');
+    }
+  });
+
+  const next = !isOpen;
+  btn.setAttribute('aria-expanded', String(next));
+  body.setAttribute('aria-hidden', String(!next));
+  body.classList.toggle('open', next);
+}
+</script>
+</body>
+</html>
