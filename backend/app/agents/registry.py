@@ -35,6 +35,8 @@ def _ensure_registered() -> None:
     """Force import of all agent modules so they register themselves."""
     import app.agents.adaptive_path  # noqa: F401
     import app.agents.adaptive_quiz  # noqa: F401
+    import app.agents.billing_support  # noqa: F401
+    import app.agents.career_coach  # noqa: F401
     import app.agents.code_review  # noqa: F401
     import app.agents.coding_assistant  # noqa: F401
     import app.agents.community_celebrator  # noqa: F401
@@ -50,6 +52,7 @@ def _ensure_registered() -> None:
     import app.agents.portfolio_builder  # noqa: F401
     import app.agents.progress_report  # noqa: F401
     import app.agents.project_evaluator  # noqa: F401
+    import app.agents.resume_reviewer  # noqa: F401
     import app.agents.socratic_tutor  # noqa: F401
     import app.agents.spaced_repetition  # noqa: F401
     import app.agents.student_buddy  # noqa: F401

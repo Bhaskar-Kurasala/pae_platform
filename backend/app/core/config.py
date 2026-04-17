@@ -65,6 +65,19 @@ class Settings(BaseSettings):
     meilisearch_host: str = "http://localhost:7700"
     meilisearch_master_key: str = "masterKey123"
 
+    # OAuth
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    google_client_id: str = ""
+    google_client_secret: str = ""
+
+    # Stripe price IDs
+    stripe_pro_price_id: str = "price_pro_test"
+    stripe_team_price_id: str = "price_team_test"
+
+    # SendGrid
+    sendgrid_from_email: str = "noreply@pae.dev"
+
     # CORS
     cors_origins: list[str] = ["http://localhost:3000"]
 

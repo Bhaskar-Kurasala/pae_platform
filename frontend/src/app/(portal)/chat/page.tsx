@@ -1,209 +1,466 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Bot, Loader2, Send } from "lucide-react";
-import { useAgentChat } from "@/lib/hooks/use-agent-chat";
-import { ChatMessageBubble, type ChatMessage } from "@/components/features/chat-message";
+import { ArrowLeft, ChevronDown, Clock, PanelLeft, X } from "lucide-react";
+import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
+import { cn } from "@/lib/utils";
+import { api } from "@/lib/api-client";
+import { useStream } from "@/hooks/use-stream";
 
-const AGENTS = [
-  {
-    id: "socratic_tutor",
-    label: "Socratic Tutor",
-    description: "Guides you to answers through questions",
-    color: "border-primary bg-primary/5 text-primary",
-  },
-  {
-    id: "code_review",
-    label: "Code Review",
-    description: "Reviews your code for production readiness",
-    color: "border-[#7C3AED] bg-[#7C3AED]/5 text-[#7C3AED]",
-  },
-  {
-    id: "adaptive_quiz",
-    label: "Adaptive Quiz",
-    description: "Tests your knowledge with adaptive MCQs",
-    color: "border-yellow-500 bg-yellow-50 text-yellow-700",
-  },
-] as const;
+// ── Types ────────────────────────────────────────────────────────
+interface AgentListItem {
+  name: string;
+  description: string;
+}
 
-type AgentId = (typeof AGENTS)[number]["id"] | null;
+interface ConversationEntry {
+  id: string;
+  preview: string;
+  agentName?: string;
+  timestamp: Date;
+}
 
-export default function ChatPage() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [selectedAgent, setSelectedAgent] = useState<AgentId>(null);
-  const [conversationId, setConversationId] = useState<string | undefined>(undefined);
-  const endRef = useRef<HTMLDivElement>(null);
-  const { mutateAsync: sendMessage, isPending } = useAgentChat();
+// ── Agent selector dropdown ──────────────────────────────────────
+function AgentSelector({
+  agents,
+  selected,
+  onSelect,
+}: {
+  agents: AgentListItem[];
+  selected: string | null;
+  onSelect: (name: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  async function handleSend(e: React.FormEvent) {
-    e.preventDefault();
-    const text = input.trim();
-    if (!text || isPending) return;
-
-    const userMsg: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: text,
-      timestamp: new Date(),
-    };
-    setMessages((prev) => [...prev, userMsg]);
-    setInput("");
-
-    try {
-      const result = await sendMessage({
-        message: text,
-        agentName: selectedAgent ?? undefined,
-        conversationId,
-      });
-
-      setConversationId(result.conversation_id);
-
-      const agentMsg: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: result.response,
-        agentName: result.agent_name,
-        evaluationScore: result.evaluation_score,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, agentMsg]);
-    } catch {
-      const errMsg: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: "Failed to reach the AI agents. Make sure the backend is running at http://localhost:8000.",
-        agentName: "system",
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, errMsg]);
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
     }
-  }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const selectedLabel = selected
+    ? selected
+        .split("_")
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ")
+    : "Auto-route";
 
   return (
-    <div className="flex flex-col h-full max-h-screen">
-      {/* Header */}
-      <div className="px-6 py-4 border-b bg-card shrink-0">
-        <h1 className="font-bold text-lg">AI Tutor</h1>
-        <p className="text-sm text-muted-foreground">
-          {selectedAgent
-            ? `Using: ${AGENTS.find((a) => a.id === selectedAgent)?.label}`
-            : "Auto-routing to the best agent for your question"}
-        </p>
-      </div>
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-label="Select agent"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-medium hover:bg-muted transition-colors"
+      >
+        <span>{selectedLabel}</span>
+        <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+      </button>
 
-      {/* Agent selector */}
-      <div className="flex gap-2 px-4 py-3 border-b bg-muted/30 shrink-0 overflow-x-auto">
-        <button
-          onClick={() => setSelectedAgent(null)}
-          className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-            selectedAgent === null
-              ? "border-foreground bg-foreground text-background"
-              : "border-border text-muted-foreground hover:border-foreground"
-          }`}
+      {open && (
+        <div
+          role="listbox"
+          aria-label="Agent selection"
+          className="absolute top-full mt-1 left-0 z-50 min-w-[220px] rounded-xl border bg-popover shadow-lg overflow-hidden py-1"
         >
-          Auto
-        </button>
-        {AGENTS.map((agent) => (
           <button
-            key={agent.id}
-            onClick={() => setSelectedAgent(agent.id)}
-            className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-              selectedAgent === agent.id
-                ? agent.color
-                : "border-border text-muted-foreground hover:border-foreground"
-            }`}
-            title={agent.description}
+            role="option"
+            aria-selected={selected === null}
+            onClick={() => {
+              onSelect(null);
+              setOpen(false);
+            }}
+            className={cn(
+              "w-full text-left px-4 py-2.5 text-sm hover:bg-muted transition-colors",
+              selected === null && "text-primary font-medium",
+            )}
           >
-            {agent.label}
+            <span className="font-medium">Auto-route</span>
+            <p className="text-xs text-muted-foreground mt-0.5">MOA picks the best agent</p>
           </button>
-        ))}
-      </div>
+          <div className="border-t my-1" />
+          {agents.map((agent) => (
+            <button
+              key={agent.name}
+              role="option"
+              aria-selected={selected === agent.name}
+              onClick={() => {
+                onSelect(agent.name);
+                setOpen(false);
+              }}
+              className={cn(
+                "w-full text-left px-4 py-2.5 text-sm hover:bg-muted transition-colors",
+                selected === agent.name && "text-primary font-medium",
+              )}
+            >
+              <span className="font-medium capitalize">
+                {agent.name.split("_").join(" ")}
+              </span>
+              {agent.description && (
+                <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
+                  {agent.description}
+                </p>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
-      {/* Message list */}
-      <div className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center gap-4 py-16">
-            <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center">
-              <Bot className="h-7 w-7 text-primary" aria-hidden="true" />
+// ── History Drawer ───────────────────────────────────────────────
+function HistoryDrawer({
+  open,
+  onClose,
+  conversations,
+  activeId,
+  onSelect,
+}: {
+  open: boolean;
+  onClose: () => void;
+  conversations: ConversationEntry[];
+  activeId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <>
+      {/* Backdrop */}
+      {open && (
+        <div
+          className="fixed inset-0 z-40 bg-black/40 md:bg-transparent"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Drawer panel */}
+      <aside
+        aria-label="Conversation history"
+        className={cn(
+          "fixed left-0 top-0 bottom-0 z-50 w-72 bg-card border-r shadow-xl",
+          "flex flex-col transition-transform duration-300 ease-out",
+          open ? "translate-x-0" : "-translate-x-full",
+        )}
+      >
+        <div className="flex items-center justify-between h-14 px-4 border-b shrink-0">
+          <div className="flex items-center gap-2">
+            <Clock className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            <span className="font-semibold text-sm">History</span>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close history"
+            className="rounded p-1 hover:bg-muted transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto py-2">
+          {conversations.length === 0 ? (
+            <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+              No conversations yet. Start chatting!
             </div>
-            <div>
-              <h2 className="font-semibold text-lg">Ask your AI Tutor</h2>
-              <p className="text-muted-foreground text-sm mt-1 max-w-sm">
-                Ask a concept question, paste code for review, or request a quiz. The right agent will handle it.
+          ) : (
+            conversations.map((conv) => (
+              <button
+                key={conv.id}
+                onClick={() => {
+                  onSelect(conv.id);
+                  onClose();
+                }}
+                aria-label={`Open conversation: ${conv.preview}`}
+                className={cn(
+                  "w-full text-left px-4 py-3 hover:bg-muted transition-colors",
+                  activeId === conv.id && "bg-primary/10",
+                )}
+              >
+                <p className="text-sm font-medium truncate">{conv.preview}</p>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  {conv.agentName && (
+                    <span className="text-xs text-primary capitalize">
+                      {conv.agentName.split("_").join(" ")}
+                    </span>
+                  )}
+                  <span className="text-xs text-muted-foreground">
+                    {conv.timestamp.toLocaleDateString()}
+                  </span>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      </aside>
+    </>
+  );
+}
+
+// ── Chat wrapper that captures history entries ────────────────────
+function ChatWithHistory({
+  agentName,
+  onNewMessage,
+}: {
+  agentName: string | undefined;
+  onNewMessage: (preview: string, agent: string | undefined) => void;
+}) {
+  const { messages, isStreaming, sendMessage } = useStream({ agentName });
+  const [input, setInput] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastReportedLength = useRef(0);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
+  }, [input]);
+
+  // Report new assistant messages for history
+  useEffect(() => {
+    if (messages.length > lastReportedLength.current) {
+      const last = messages[messages.length - 1];
+      if (last?.role === "user" && messages.length === 1) {
+        onNewMessage(last.content.slice(0, 60), agentName);
+      }
+      lastReportedLength.current = messages.length;
+    }
+  }, [messages, agentName, onNewMessage]);
+
+  const handleSend = async () => {
+    const text = input.trim();
+    if (!text || isStreaming) return;
+    setInput("");
+    await sendMessage(text);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      void handleSend();
+    }
+  };
+
+  const SUGGESTED_PROMPTS = [
+    "What is RAG and how does it work?",
+    "Review my Python code for production readiness",
+    "Quiz me on LangGraph concepts",
+    "Help me build my AI engineering portfolio",
+  ];
+
+  const isEmpty = messages.length === 0;
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Messages area */}
+      <div className="flex-1 overflow-y-auto px-6 py-6" aria-live="polite">
+        {isEmpty ? (
+          <div className="flex flex-col items-center justify-center h-full text-center gap-6 py-16">
+            <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center">
+              <span className="text-2xl font-bold text-primary">AI</span>
+            </div>
+            <div className="max-w-sm">
+              <h2 className="font-semibold text-xl">Ask your AI Coach</h2>
+              <p className="text-muted-foreground text-sm mt-2">
+                {agentName
+                  ? `${agentName.split("_").join(" ")} — powered by Claude`
+                  : "The right agent is automatically selected for your question."}
               </p>
             </div>
-            <div className="flex flex-wrap gap-2 justify-center">
-              {["What is RAG?", "Review my code", "Quiz me on LangGraph"].map((prompt) => (
+            <div className="flex flex-wrap gap-2 justify-center max-w-lg">
+              {SUGGESTED_PROMPTS.map((prompt) => (
                 <button
                   key={prompt}
                   onClick={() => setInput(prompt)}
-                  className="rounded-full border px-3 py-1.5 text-sm hover:bg-muted transition-colors"
+                  aria-label={`Suggested prompt: ${prompt}`}
+                  className="rounded-full border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
                 >
                   {prompt}
                 </button>
               ))}
             </div>
           </div>
+        ) : (
+          <>
+            {messages.map((msg, i) => {
+              const isLast = i === messages.length - 1;
+              if (msg.role === "user") {
+                return (
+                  <div key={msg.id} className="flex justify-end mb-4">
+                    <div className="max-w-[70%] rounded-2xl rounded-tr-sm bg-primary px-4 py-3 text-sm text-primary-foreground leading-relaxed">
+                      {msg.content}
+                    </div>
+                  </div>
+                );
+              }
+              return (
+                <div key={msg.id} className="mb-6 max-w-3xl">
+                  {msg.agentName && msg.agentName !== "system" && (
+                    <p className="text-xs font-medium text-muted-foreground mb-1.5 capitalize">
+                      {msg.agentName.split("_").join(" ")}
+                    </p>
+                  )}
+                  <div className="prose prose-sm dark:prose-invert max-w-none text-foreground leading-relaxed whitespace-pre-wrap">
+                    {msg.content}
+                    {isStreaming && isLast && (
+                      <span
+                        className="inline-block w-0.5 h-4 bg-primary animate-pulse rounded-full ml-0.5 align-middle"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </>
         )}
-        {messages.map((msg) => (
-          <ChatMessageBubble key={msg.id} message={msg} />
-        ))}
-        {isPending && (
-          <div className="flex gap-3 items-center text-muted-foreground">
-            <div className="h-8 w-8 rounded-full bg-[#7C3AED]/10 flex items-center justify-center">
-              <Bot className="h-4 w-4 text-[#7C3AED]" aria-hidden="true" />
-            </div>
-            <div className="flex items-center gap-2 text-sm">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              AI is thinking…
-            </div>
-          </div>
-        )}
-        <div ref={endRef} />
+        <div ref={messagesEndRef} />
       </div>
 
       {/* Input */}
-      <form
-        onSubmit={handleSend}
-        className="px-4 py-4 border-t bg-card shrink-0"
-      >
-        <div className="flex gap-2 max-w-3xl mx-auto">
+      <div className="shrink-0 border-t bg-card px-6 py-4">
+        <div className="flex gap-3 max-w-3xl mx-auto items-end">
           <textarea
+            ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void handleSend(e);
-              }
-            }}
-            placeholder="Ask a question, paste code, or request a quiz… (Shift+Enter for newline)"
+            onKeyDown={handleKeyDown}
+            placeholder="Ask your AI coach anything..."
             rows={1}
+            disabled={isStreaming}
             aria-label="Message input"
-            className="flex-1 resize-none rounded-xl border border-input bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/50 transition max-h-36 overflow-y-auto"
+            className={cn(
+              "flex-1 resize-none rounded-xl border border-input bg-background px-4 py-3 text-sm leading-relaxed outline-none",
+              "focus:ring-2 focus:ring-primary/30 focus:border-primary transition",
+              "max-h-[120px] overflow-y-auto disabled:opacity-60",
+            )}
           />
           <button
-            type="submit"
-            disabled={isPending || !input.trim()}
-            aria-label="Send message"
-            className="h-12 w-12 shrink-0 rounded-xl bg-primary flex items-center justify-center text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            onClick={() => void handleSend()}
+            disabled={isStreaming || !input.trim()}
+            aria-label={isStreaming ? "Generating response" : "Send message"}
+            className={cn(
+              "shrink-0 h-11 w-11 rounded-xl flex items-center justify-center transition-colors",
+              "bg-primary text-primary-foreground hover:bg-primary/90",
+              "disabled:opacity-40 disabled:cursor-not-allowed",
+            )}
           >
-            {isPending ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
+            {isStreaming ? (
+              <span className="flex gap-0.5" aria-hidden="true">
+                <span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:0ms]" />
+                <span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:150ms]" />
+                <span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:300ms]" />
+              </span>
             ) : (
-              <Send className="h-5 w-5" />
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5" aria-hidden="true">
+                <path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" />
+              </svg>
             )}
           </button>
         </div>
         <p className="text-center text-xs text-muted-foreground mt-2">
-          Powered by Claude {selectedAgent ? `→ ${selectedAgent}` : "via MOA auto-routing"}
+          {isStreaming ? "Generating…" : "Cmd+Enter to send · Powered by Claude"}
         </p>
-      </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Page ─────────────────────────────────────────────────────────
+export default function ChatPage() {
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [conversations, setConversations] = useState<ConversationEntry[]>([]);
+  const [activeConvId] = useState<string | null>(null);
+  // Key to force remount ChatWithHistory when agent changes
+  const [chatKey, setChatKey] = useState(0);
+
+  const { data: agents = [] } = useQuery<AgentListItem[]>({
+    queryKey: ["agents", "list"],
+    queryFn: () => api.get<AgentListItem[]>("/api/v1/agents/list"),
+    staleTime: 60_000,
+  });
+
+  const handleAgentSelect = (name: string | null) => {
+    setSelectedAgent(name);
+    setChatKey((k) => k + 1); // Reset chat when agent changes
+  };
+
+  const handleNewMessage = (preview: string, agent: string | undefined) => {
+    setConversations((prev) => [
+      {
+        id: crypto.randomUUID(),
+        preview,
+        agentName: agent,
+        timestamp: new Date(),
+      },
+      ...prev.slice(0, 19), // Keep last 20
+    ]);
+  };
+
+  return (
+    <div className="flex h-full overflow-hidden bg-background">
+      {/* History drawer */}
+      <HistoryDrawer
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        conversations={conversations}
+        activeId={activeConvId}
+        onSelect={() => setHistoryOpen(false)}
+      />
+
+      {/* Main chat column */}
+      <div className="flex flex-col flex-1 overflow-hidden min-w-0">
+        {/* Top bar */}
+        <header className="flex items-center gap-3 h-14 px-4 border-b bg-card shrink-0">
+          <Link
+            href="/dashboard"
+            aria-label="Back to dashboard"
+            className="rounded p-1.5 hover:bg-muted transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
+
+          <div className="flex-1 min-w-0 flex items-center gap-3">
+            <AgentSelector
+              agents={agents}
+              selected={selectedAgent}
+              onSelect={handleAgentSelect}
+            />
+          </div>
+
+          <button
+            onClick={() => setHistoryOpen(true)}
+            aria-label="Open conversation history"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-muted transition-colors"
+          >
+            <PanelLeft className="h-4 w-4" aria-hidden="true" />
+            <span className="hidden sm:inline">History</span>
+          </button>
+        </header>
+
+        {/* Chat area */}
+        <div className="flex-1 overflow-hidden">
+          <ChatWithHistory
+            key={chatKey}
+            agentName={selectedAgent ?? undefined}
+            onNewMessage={handleNewMessage}
+          />
+        </div>
+      </div>
     </div>
   );
 }

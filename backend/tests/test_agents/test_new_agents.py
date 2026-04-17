@@ -109,9 +109,11 @@ async def test_deep_capturer_stub() -> None:
 
     agent = DeepCapturerAgent()
     state = AgentState(student_id="s1", task="weekly summary")
+    # deep_capturer now returns markdown (no API key → fallback synthesis)
     result = await agent.execute(state)
-    data = json.loads(result.response or "{}")
-    assert "week_theme" in data or "connections" in data
+    response = result.response or ""
+    # Fallback synthesis contains concept connections section
+    assert "Concept Connections" in response or "concept" in response.lower()
 
 
 # ── Learning Agents ────────────────────────────────────────────────────────────

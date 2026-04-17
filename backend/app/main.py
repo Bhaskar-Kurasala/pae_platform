@@ -52,9 +52,13 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.admin import router as admin_router
     from app.api.v1.routes.agents import router as agents_router
     from app.api.v1.routes.auth import router as auth_router
+    from app.api.v1.routes.billing import router as billing_router
     from app.api.v1.routes.courses import router as courses_router
+    from app.api.v1.routes.demo import router as demo_router
     from app.api.v1.routes.exercises import router as exercises_router
     from app.api.v1.routes.lessons import router as lessons_router
+    from app.api.v1.routes.oauth import router as oauth_router
+    from app.api.v1.routes.stream import router as stream_router
     from app.api.v1.routes.students import router as students_router
     from app.api.v1.routes.webhooks import router as webhooks_router
 
@@ -67,6 +71,10 @@ def create_app() -> FastAPI:
         students_router,
         webhooks_router,
         agents_router,
+        stream_router,
+        demo_router,
+        billing_router,
+        oauth_router,
     ]
     for r in api_routers:
         app.include_router(r, prefix="/api/v1")

@@ -44,6 +44,10 @@ ROUTABLE_AGENTS = [
     "disrupt_prevention",
     "peer_matching",
     "community_celebrator",
+    # WS4 new agents
+    "career_coach",
+    "resume_reviewer",
+    "billing_support",
 ]
 
 _CLASSIFIER_PROMPT = """You are the Master Orchestrator for a production AI engineering learning platform.
@@ -71,6 +75,9 @@ Available agents and their purposes:
 - disrupt_prevention: re-engagement messages, inactive students
 - peer_matching: "study partner", "find peers", "study group"
 - community_celebrator: celebrations, milestones, "I finished", "I passed"
+- career_coach: career planning, "become AI engineer", skill roadmap, career transition
+- resume_reviewer: resume review, CV feedback, resume critique, before/after improvements
+- billing_support: billing questions, subscription, refund, cancel, upgrade plan
 
 Respond with ONLY the agent name. No explanation.
 
@@ -95,6 +102,10 @@ _KEYWORD_MAP: list[tuple[list[str], str]] = [
     (["ingest", "youtube.com", "github.com/", "new video", "process content"], "content_ingestion"),
     (["generate question", "create mcq", "make quiz", "question bank"], "mcq_factory"),
     (["capstone", "grade my project", "evaluate project"], "project_evaluator"),
+    # WS4 new agent keyword patterns
+    (["career plan", "career roadmap", "become ai engineer", "what skills do i need", "career transition", "career coaching"], "career_coach"),
+    (["review my resume", "resume feedback", "improve cv", "resume critique", "check my resume"], "resume_reviewer"),
+    (["billing", "subscription", "refund", "cancel subscription", "upgrade plan", "payment issue", "invoice"], "billing_support"),
 ]
 
 

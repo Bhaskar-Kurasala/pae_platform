@@ -3,13 +3,18 @@ from pathlib import Path
 from typing import Any
 
 import structlog
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import SecretStr
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.agents.base_agent import AgentState, BaseAgent
 from app.agents.registry import register
+from app.core.config import settings
 
 log = structlog.get_logger()
 
-_PROMPT_PATH = Path(__file__).parent / "prompts" / "spaced_repetition.md"
+_PROMPT = (Path(__file__).parent / "prompts" / "spaced_repetition.md").read_text()
 
 # Mock MCQ bank for due card sampling
 _MOCK_MCQ_BANK = [
@@ -41,8 +46,18 @@ def _apply_sm2(
 
 @register
 class SpacedRepetitionAgent(BaseAgent):
+    """Implements SM-2 spaced repetition algorithm with LLM explanations.
+
+    The SM-2 algorithm runs deterministically (no LLM cost). When
+    `last_answer_correct` is False in context, Claude Haiku generates a
+    'why you got this wrong' explanation to reinforce learning.
+    """
+
     name = "spaced_repetition"
-    description = "Implements SM-2 spaced repetition algorithm to schedule optimal review times for each student."
+    description = (
+        "Implements SM-2 spaced repetition algorithm to schedule optimal review times. "
+        "When an answer is wrong, generates a targeted 'why you got this wrong' explanation."
+    )
     trigger_conditions = [
         "review",
         "flashcard",
@@ -50,18 +65,58 @@ class SpacedRepetitionAgent(BaseAgent):
         "due cards",
         "review time",
     ]
-    model = "claude-sonnet-4-6"
+    model = "claude-haiku-4-5"
+
+    def _build_llm(self) -> ChatAnthropic:
+        return ChatAnthropic(  # type: ignore[call-arg]
+            model=self.model,
+            anthropic_api_key=SecretStr(settings.anthropic_api_key) if settings.anthropic_api_key else None,
+            max_tokens=256,
+        )
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        reraise=True,
+    )
+    async def _explain_wrong_answer(
+        self,
+        llm: ChatAnthropic,
+        question: str,
+        student_answer: str,
+        correct_answer: str,
+        concept: str,
+    ) -> str:
+        """Generate a brief 'why you got this wrong' explanation."""
+        messages: list[Any] = [
+            SystemMessage(content=_PROMPT),
+            HumanMessage(
+                content=(
+                    f"The student answered a question incorrectly.\n\n"
+                    f"Concept: {concept}\n"
+                    f"Question: {question}\n"
+                    f"Student's answer: {student_answer or 'Not provided'}\n"
+                    f"Correct answer: {correct_answer or 'Not provided'}\n\n"
+                    "In 2-3 concise sentences, explain:\n"
+                    "1. The key misconception that likely caused the wrong answer\n"
+                    "2. The correct mental model to apply for this concept\n\n"
+                    "Be direct and specific — no padding."
+                )
+            ),
+        ]
+        response = await llm.ainvoke(messages)
+        return str(response.content)
 
     async def execute(self, state: AgentState) -> AgentState:
         card_history: list[dict[str, Any]] = state.context.get("card_history", [])
+        last_answer_correct: bool | None = state.context.get("last_answer_correct")
 
-        # Aggregate SM-2 across all historical answers
+        # ── SM-2 algorithm (deterministic, no LLM) ────────────────────────────
         interval = _DEFAULT_INTERVAL
         ease_factor = _DEFAULT_EASE_FACTOR
 
         for entry in card_history:
             correct: bool = bool(entry.get("correct", False))
-            # Use the stored interval if available, otherwise carry forward
             prev_interval: int = int(entry.get("interval_days", interval))
             prev_ease: float = float(entry.get("ease_factor", ease_factor))
             interval, ease_factor = _apply_sm2(correct, prev_interval, prev_ease)
@@ -76,6 +131,30 @@ class SpacedRepetitionAgent(BaseAgent):
             "due_cards": due_cards,
             "cards_reviewed": len(card_history),
         }
+
+        # ── LLM explanation for wrong answers (Claude Haiku — fast) ──────────
+        wrong_answer_explanation: str | None = None
+        if last_answer_correct is False and settings.anthropic_api_key:
+            last_card = card_history[-1] if card_history else {}
+            question = last_card.get("question", state.task)
+            student_answer = str(last_card.get("student_answer", ""))
+            correct_answer = str(last_card.get("correct_answer", ""))
+            concept = last_card.get("concept", "AI Engineering")
+            try:
+                llm = self._build_llm()
+                wrong_answer_explanation = await self._explain_wrong_answer(
+                    llm, question, student_answer, correct_answer, concept
+                )
+            except Exception as exc:
+                self._log.warning("spaced_repetition.llm_failed", error=str(exc))
+                wrong_answer_explanation = (
+                    f"Review the '{concept}' concept carefully. "
+                    f"The key idea to focus on: make sure you understand the "
+                    f"distinction between the correct answer and your response."
+                )
+
+        if wrong_answer_explanation:
+            schedule["wrong_answer_explanation"] = wrong_answer_explanation
 
         return state.model_copy(
             update={
