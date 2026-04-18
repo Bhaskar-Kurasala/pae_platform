@@ -35,6 +35,7 @@ from app.services.misconception_service import (
 )
 from app.services.preferences_service import PreferencesService
 from app.services.scaffolding_service import ScaffoldingLevel, load_level
+from app.services.student_context_service import build_context_block
 
 _SOCRATIC_STRICT_OVERLAY = (
     "\n\n---\nUser has enabled SOCRATIC STRICT mode. Under this mode you MUST NOT "
@@ -130,6 +131,7 @@ async def _token_generator(
     code_context: str | None = None,
     scaffolding: ScaffoldingLevel | None = None,
     tutor_mode: str = "standard",
+    student_context_block: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Yield SSE-formatted token chunks from Claude's stream."""
     try:
@@ -138,6 +140,11 @@ async def _token_generator(
 
         llm = build_llm()
         system_prompt = _get_system_prompt(agent_name)
+
+        # Baseline student state goes first — scaffolding, socratic overlays, and
+        # code context all read better when they have a picture of who's asking.
+        if student_context_block:
+            system_prompt += "\n\n" + student_context_block
 
         if tutor_mode == "socratic_strict":
             system_prompt += _SOCRATIC_STRICT_OVERLAY
@@ -251,6 +258,7 @@ async def stream_chat(
 
     scaffolding: ScaffoldingLevel | None = None
     tutor_mode = "standard"
+    student_context_block: str | None = None
     async with AsyncSessionLocal() as session:
         prefs = await PreferencesService(session).get_or_create(current_user.id)
         tutor_mode = prefs.tutor_mode
@@ -269,6 +277,16 @@ async def stream_chat(
                     effective_confidence=scaffolding.effective_confidence,
                     decayed=scaffolding.decayed,
                 )
+        # Student-state context (P3 3A-1). Build once per request so the tutor
+        # can calibrate opening/tone. Failure here must never break the stream
+        # — we fall back to no block and keep going.
+        try:
+            student_context_block, _missing = await build_context_block(
+                session, current_user.id
+            )
+        except Exception as exc:
+            log.warning("stream.student_context_failed", error=str(exc))
+            student_context_block = None
 
     return StreamingResponse(
         _token_generator(
@@ -278,6 +296,7 @@ async def stream_chat(
             code_context,
             scaffolding,
             tutor_mode,
+            student_context_block,
         ),
         media_type="text/event-stream",
         headers={
