@@ -22,7 +22,6 @@ def test_today_in_utc_accepts_aware_datetime() -> None:
 
 def test_today_in_utc_converts_offset() -> None:
     # 23:30 Pacific (-08:00) is 07:30 UTC the next morning.
-    pacific = timezone.offset_delta = None  # noqa: F841 - placeholder; see below
     from datetime import timedelta
 
     pst = timezone(timedelta(hours=-8))
