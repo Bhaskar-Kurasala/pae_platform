@@ -35,6 +35,7 @@ from app.services.disagreement_service import (
     DISAGREEMENT_OVERLAY,
     maybe_log_disagreement,
 )
+from app.services.honesty_service import HONESTY_OVERLAY, detect_honesty_hedge
 from app.services.intent_before_debug_service import (
     INTENT_BEFORE_DEBUG_OVERLAY,
     should_apply_intent_overlay,
@@ -240,6 +241,11 @@ async def _token_generator(
         # based on conversation-history awareness from the directive.
         system_prompt += CONFIDENCE_CALIBRATION_OVERLAY
 
+        # Honesty rule (P3 3A-8): when not confident, say so rather than
+        # fabricating. We don't rewrite the reply — we just observe via
+        # the post-stream hedge detector below.
+        system_prompt += HONESTY_OVERLAY
+
         messages: list[Any] = [SystemMessage(content=system_prompt)]
 
         for turn in conversation_history[-6:]:
@@ -297,6 +303,18 @@ async def _token_generator(
                     )
                     if logged is not None:
                         await log_session.commit()
+
+            # Honesty hedge telemetry (P3 3A-8): observe when the tutor
+            # actually admitted uncertainty so we can track the rule
+            # firing — no DB writes, just a structured log event.
+            hedge = detect_honesty_hedge(full_reply)
+            if hedge is not None:
+                log.info(
+                    "tutor.honesty_hedge_triggered",
+                    user_id=str(user_id),
+                    agent=agent_name,
+                    marker=hedge.marker,
+                )
 
     except Exception as exc:
         log.warning("stream.token_generator_error", error=str(exc))
