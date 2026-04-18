@@ -6,7 +6,7 @@
 
 **Parallel work:** If you're the teammate shipping 3B in parallel, read [`CONTRIBUTING-P3.md`](CONTRIBUTING-P3.md) first. Your scope = Skill Map + Studio + Receipts + Admin + Infra + Meta + Career (39 tickets). My scope = all of 3A + remaining 3B areas. File ownership, claim protocol, migration numbering, and browser-verification protocol are all in that doc.
 
-**Next migration number to reserve:** `0013` (current head: `0009_submission_sharing`; `0010_conversation_memory` (3A-2) + `0011_socratic_level` (3A-3) + `0012_student_misconceptions` (3A-6) reserved — always verify with `ls backend/alembic/versions/ | sort | tail -1` before claiming, since Phase 3A is also adding migrations).
+**Next migration number to reserve:** `0014` (current head: `0009_submission_sharing`; `0010_conversation_memory` (3A-2) + `0011_socratic_level` (3A-3) + `0012_student_misconceptions` (3A-6) + `0013_confidence_reports` (3A-7) reserved — always verify with `ls backend/alembic/versions/ | sort | tail -1` before claiming, since Phase 3A is also adding migrations).
 
 ---
 
@@ -84,7 +84,7 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `tutor.disagreement_logged { topic }`.
 
 ### 3A-7: Confidence calibration (NEW)
-- [ ] not started
+- [x] DONE (2c85289)
 - **Why:** Overconfidence is the #1 predictor of gaps. After concept questions, tutor asks "how confident 1-5?" Collected as self-knowledge signal.
 - **Touches:** prompt addition (socratic tutor asks post-answer), new row in `user_skill_states.confidence_reports` or separate table `confidence_reports (user_id, skill_id, value, asked_at, answered_at)`.
 - **Acceptance:** after 2-3 answers in a session, tutor asks confidence once.
