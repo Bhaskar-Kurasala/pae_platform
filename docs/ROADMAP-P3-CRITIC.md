@@ -223,8 +223,8 @@ Grouped by area. Within each area, tickets are independent and can be done in an
 
 ### 3B — Meta (2 tickets)
 
-- [ ] #177 Feedback widget (floating button, feedback table, admin triage)
-- [ ] #180 Pulse dashboard (single page, 5 numbers)
+- [~] #177 Feedback widget (floating button, feedback table, admin triage) (p3b, feat/p3b-meta)
+- [~] #180 Pulse dashboard (single page, 5 numbers) (p3b, feat/p3b-meta)
 
 ### 3B — Tutor extras (already in 3A core list)
 
