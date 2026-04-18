@@ -722,4 +722,27 @@ export const srsApi = {
     api.post<SRSCard>(`/api/v1/srs/cards/${cardId}/review`, { quality }),
 };
 
+// ── Clarification pills (3A-4) ───────────────────────────────────
+export interface ClarifyPill {
+  key: string;
+  label: string;
+}
+
+export interface ClarifyCheckResponse {
+  show_pills: boolean;
+  reason: string;
+  pills: ClarifyPill[];
+}
+
+export interface FollowupResponse {
+  pills: ClarifyPill[];
+}
+
+export const clarifyApi = {
+  check: (message: string) =>
+    api.post<ClarifyCheckResponse>("/api/v1/clarify/check", { message }),
+  followups: (reply: string) =>
+    api.post<FollowupResponse>("/api/v1/clarify/followups", { reply }),
+};
+
 export { ApiError, API_BASE };

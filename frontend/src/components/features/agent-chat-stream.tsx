@@ -6,6 +6,14 @@ import remarkGfm from "remark-gfm";
 import { Check, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useStream, type StreamMessage } from "@/hooks/use-stream";
+import { clarifyApi, type ClarifyPill } from "@/lib/api-client";
+import { ChatSuggestionPills } from "@/components/features/chat-suggestion-pills";
+
+const CLARIFY_MODIFIER: Record<string, string> = {
+  direct: "Please just give me the direct answer.",
+  hint: "Please give me a hint rather than the full answer.",
+  challenge: "Please challenge me with a question rather than answering.",
+};
 
 // ── Suggested prompts shown in the empty state ───────────────────
 const SUGGESTED_PROMPTS = [
@@ -234,6 +242,39 @@ export function AgentChatStream({ agentName, initialContext }: AgentChatStreamPr
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [clarifyPills, setClarifyPills] = useState<ClarifyPill[]>([]);
+  const [pendingMessage, setPendingMessage] = useState<string>("");
+  const [followupPills, setFollowupPills] = useState<ClarifyPill[]>([]);
+  const [followupAnchorId, setFollowupAnchorId] = useState<string | null>(null);
+
+  // After a streamed assistant reply finishes, fetch follow-up pills
+  const lastMsg = messages[messages.length - 1];
+  useEffect(() => {
+    if (isStreaming) return;
+    if (!lastMsg || lastMsg.role !== "assistant") return;
+    if (lastMsg.agentName === "system") return;
+    if (!lastMsg.content || lastMsg.content.length < 80) {
+      setFollowupPills([]);
+      setFollowupAnchorId(null);
+      return;
+    }
+    if (followupAnchorId === lastMsg.id) return;
+
+    let cancelled = false;
+    clarifyApi
+      .followups(lastMsg.content)
+      .then((res) => {
+        if (cancelled) return;
+        setFollowupPills(res.pills);
+        setFollowupAnchorId(lastMsg.id);
+      })
+      .catch(() => {
+        /* pills are optional — degrade silently */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isStreaming, lastMsg, followupAnchorId]);
 
   // Auto-scroll to bottom when messages update
   useEffect(() => {
@@ -252,9 +293,43 @@ export function AgentChatStream({ agentName, initialContext }: AgentChatStreamPr
   const handleSend = useCallback(async () => {
     const text = input.trim();
     if (!text || isStreaming) return;
+    // Clear any stale pill state from prior turns
+    setFollowupPills([]);
+    setFollowupAnchorId(null);
+
+    // Ask backend whether to show clarify pills first
+    try {
+      const decision = await clarifyApi.check(text);
+      if (decision.show_pills && decision.pills.length > 0) {
+        setClarifyPills(decision.pills);
+        setPendingMessage(text);
+        setInput("");
+        return;
+      }
+    } catch {
+      // If clarify check fails, fall through and send normally
+    }
+
     setInput("");
     await sendMessage(text);
   }, [input, isStreaming, sendMessage]);
+
+  const handleClarifyPick = useCallback(
+    async (pill: ClarifyPill) => {
+      const base = pendingMessage;
+      const modifier = CLARIFY_MODIFIER[pill.key] ?? "";
+      const composed = modifier ? `${base}\n\n(${modifier})` : base;
+      setClarifyPills([]);
+      setPendingMessage("");
+      await sendMessage(composed);
+    },
+    [pendingMessage, sendMessage],
+  );
+
+  const handleFollowupPick = useCallback((pill: ClarifyPill) => {
+    setInput(pill.label);
+    textareaRef.current?.focus();
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -313,20 +388,48 @@ export function AgentChatStream({ agentName, initialContext }: AgentChatStreamPr
             </div>
           </div>
         ) : (
-          messages.map((msg) => (
-            <MessageBubble
-              key={msg.id}
-              message={msg}
-              isStreaming={
-                isStreaming &&
-                msg === messages[messages.length - 1] &&
-                msg.role === "assistant"
-              }
-            />
-          ))
+          messages.map((msg, idx) => {
+            const isLastAssistant =
+              msg.role === "assistant" && idx === messages.length - 1;
+            return (
+              <div key={msg.id}>
+                <MessageBubble
+                  message={msg}
+                  isStreaming={
+                    isStreaming &&
+                    msg === messages[messages.length - 1] &&
+                    msg.role === "assistant"
+                  }
+                />
+                {isLastAssistant &&
+                  !isStreaming &&
+                  followupAnchorId === msg.id &&
+                  followupPills.length > 0 && (
+                    <ChatSuggestionPills
+                      pills={followupPills}
+                      onPick={handleFollowupPick}
+                      variant="followup"
+                    />
+                  )}
+              </div>
+            );
+          })
         )}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Clarify pills — rendered above the input when show_pills returns true */}
+      {clarifyPills.length > 0 && (
+        <div className="shrink-0 border-t bg-card px-4 pt-3">
+          <div className="max-w-3xl mx-auto">
+            <ChatSuggestionPills
+              pills={clarifyPills}
+              onPick={handleClarifyPick}
+              variant="clarify"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Input area */}
       <div className="shrink-0 border-t bg-card px-4 py-4">

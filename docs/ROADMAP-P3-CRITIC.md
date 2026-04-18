@@ -60,7 +60,8 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `preference.socratic_level_changed { from, to }`.
 
 ### 3A-4: Intent clarification + follow-up suggestions (#54 + #69)
-- [~] backend DONE; frontend pill component deferred (Turbopack-blocked)
+- [x] DONE — FE wired post-3B-integration.
+- **Frontend:** `components/features/chat-suggestion-pills.tsx` (pure presentation, clarify/followup variants, 5/5 Vitest tests). Wired into `agent-chat-stream.tsx`: pre-send `clarifyApi.check()` gates a pill row above the input with 3 options that append a modifier to the pending message (`direct`/`hint`/`challenge`) before `sendMessage` fires; post-stream `clarifyApi.followups()` renders up to 3 pills under the last assistant bubble, click prefills the input. Pill buttons dispatch `tutor.clarify_pill_clicked` / `tutor.followup_clicked` CustomEvents for telemetry wiring.
 - **Backend:** `clarification_service` pure helpers — `should_clarify(message, socratic_level)` gates pills off at level 0 / short messages / explicit direct-or-practice asks; triggers on ambiguity-words (`how`/`why`/`stuck`/`help`/etc.). Returns 3 pills `(direct, hint, challenge)`. `generate_followups(reply)` returns context-aware follow-up pill triples — code family (`refactor/edge_cases/production`), concept family (`contrast/example/quiz`), or generic (`example/practice/deeper`); empty tuple on short replies. New routes: `POST /clarify/check` (reads `user_preferences.socratic_level`), `POST /clarify/followups`. Emits `tutor.clarification_shown`. 11 pure tests green via `run_3a4_tests.py`.
 - **Why:** Tutor gives answers when student wanted practice. Biggest single lever in the roadmap.
 - **Touches:** MOA classifier returns confidence; if <0.7, stream emits a "clarify" event first with 3 pill options (direct answer / hint / challenge). At end of every substantive reply, emit 3 follow-up pills based on context.
