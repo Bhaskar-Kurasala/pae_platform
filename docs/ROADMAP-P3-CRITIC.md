@@ -212,7 +212,7 @@ Grouped by area. Within each area, tickets are independent and can be done in an
 
 ### 3B — Infrastructure (8 tickets)
 
-- [ ] #158 Structured logging audit
+- [~] #158 Structured logging audit (p3b, feat/p3b-infra)
 - [ ] #159 Request ID propagation
 - [ ] #160 Deep health checks (/health/live, /health/ready)
 - [ ] #162 DB pool tuning (config line)
