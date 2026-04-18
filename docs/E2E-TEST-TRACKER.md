@@ -246,6 +246,40 @@ These are issues found *during* test authoring or execution, independent of the 
 
 ---
 
+## Deferred Fixes — Open Discoveries With Planned Fix Window
+
+**Purpose of this section:** so no open discovery is silently forgotten. Every `open` row in the table above has an entry here with: why we chose **not** to fix it in the current session, when the fix is planned, and which test(s) must re-run to confirm green. The Discovery row stays `open` until re-test passes **and** a linked fix commit lands.
+
+**Decision rule:** the E2E sweep prioritises **functional coverage** (find every bug) over **fix latency** (fix each bug immediately). We batch fixes across discoveries that share a code surface so one PR closes multiple rows.
+
+| Discovery | Severity | Planned fix window | Re-tests that must pass before closing | Reason for deferral |
+|---|---|---|---|---|
+| E2E-DISC-1 — `celery-beat` in restart loop | high | **after E2E sweep** (one Celery/infra fix PR after all specs run) | A scheduled-tasks smoke (weekly letter + disrupt_prevention trigger) — add to infra spec bucket | Stack is stable without it for the full learning loop; scheduled tasks are background-only. Fixing now would pull the current docker stack down and delay the sweep. |
+| E2E-DISC-3 — Backend port mismatch in docs | medium | **batched with next docs PR** | Docs-only — verify `ARCHITECTURE.md` / `.env.example` / `CLAUDE.md` agree post-fix | Pure documentation drift; does not affect any test flow. |
+| E2E-DISC-4 — 2 pre-existing failing frontend tests | low | **chore ticket — separate PR, post-sweep** | `pnpm test` in `frontend/` is green | Unrelated to B5; pre-existing before this session. |
+| E2E-DISC-6 — 7 footer links 404 | low | **UI polish pass — post-sweep** | Every footer link returns 200 (no RSC 404s) | Cosmetic; appears in every page console but doesn't break any flow. |
+| E2E-DISC-10 — slowapi 429 body key mismatch | low | **bundled with DISC-11 (auth hardening PR)** | Re-run A3 (register 11th) + A10 (login 21st); banner should read the specific backend message, not "Too Many Requests" | Same area as DISC-11; fixing in the same PR avoids churning `api-client.ts::request()` twice. |
+| E2E-DISC-11 — no `/auth/refresh` endpoint + client flow | **high** | **Auth Hardening PR — scheduled after the full E2E sweep closes (post all 13 suites)** | Re-run **A6** and **A7** end-to-end: install expired JWT, confirm silent refresh fires, confirm original request retries transparently; confirm 7-day expiry boots the user with an explanatory banner | Users won't hit this inside a single session (access token = 8h). Fixing now forces a schema change and a client-wide refactor; safer to batch with DISC-10/12/13 in one auth-hardening PR where we can design the refresh interceptor once. |
+| E2E-DISC-12 — no cross-tab logout sync | medium | **bundled with DISC-11 (auth hardening PR)** | Re-run **A8**: open two tabs, logout in Tab A, confirm Tab B redirects to `/login` within 1s without a page reload | Lives in the same store (`auth-store.ts`); fits cleanly alongside the refresh-token client work. |
+| E2E-DISC-13 — `?next=` not captured/honored | medium | **bundled with DISC-11 (auth hardening PR)** | Re-run **A9**: deep-link `/studio` logged-out → login → land on `/studio`, not `/today`. Also confirm `next` is sanitized against open-redirect (reject `next=http://evil.com`) | Same code surfaces as DISC-11 (`api-client.ts::clearAuthAndRedirect` + `login/page.tsx`); one PR, one review, one release. |
+
+### "Auth Hardening PR" — explicit bundle definition
+
+One PR will close DISC-10, DISC-11, DISC-12, DISC-13 together. **Scope:**
+
+1. **Backend:** add `POST /api/v1/auth/refresh` — accepts the refresh token, returns a fresh access token. Reject reused refresh tokens; rotate on use.
+2. **Backend:** swap slowapi's default 429 handler for one that emits `{"detail": "..."}` (FastAPI-native shape).
+3. **Frontend — `api-client.ts`:** on 401, attempt `/auth/refresh` before redirecting; if refresh also 401s, append `?next={location.pathname}${location.search}` and redirect to `/login`. Single-flight the refresh (multiple concurrent 401s must only trigger one refresh).
+4. **Frontend — `auth-store.ts`:** subscribe to `storage` events; when `auth-storage` is cleared from another tab, run `clearAuth()` + `router.replace('/login')`.
+5. **Frontend — `login/page.tsx` + `register/page.tsx`:** read `?next=`, validate it's a same-origin absolute-path (regex `^\/[^/].*`), `router.replace(next ?? defaultLanding)`.
+6. **Re-test:** A3, A6, A7, A8, A9, A10 must all flip from `failing` → `closed` with fresh 3-bullet outcomes.
+
+**When:** After the full E2E sweep (all 13 suites) lands — currently projected for the end of this B5 cycle. We'll open the PR before CI is set up (per the "functional-correctness-first" direction).
+
+**Who re-tests:** whoever executes the Auth Hardening PR opens re-runs A3 + A6–A10 against the docker stack, updates the tracker rows, and **only then** may flip each DISC-N row from `open` → `fixed`.
+
+---
+
 ## Outcome Note Template
 
 Copy this into a row's outcome cell when closing a test:
