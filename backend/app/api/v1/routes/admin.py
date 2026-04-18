@@ -1,7 +1,10 @@
 import uuid
+from datetime import datetime as dt
 from typing import Any
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel as PydanticModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +18,38 @@ from app.services.confusion_heatmap_service import compute_heatmap
 from app.services.student_note_service import add_note, list_notes
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+log = structlog.get_logger()
+
+
+# ── Pydantic schemas ─────────────────────────────────────────────────────────
+
+
+class AuditLogItem(PydanticModel):
+    id: str
+    student_id: str | None
+    agent_name: str
+    action_type: str
+    status: str
+    duration_ms: int | None
+    created_at: dt
+
+
+class LessonPerformance(PydanticModel):
+    lesson_id: str
+    lesson_title: str
+    question_count: int
+    confusion_count: int
+
+
+class CourseUpdateRequest(PydanticModel):
+    title: str | None = None
+    description: str | None = None
+
+
+class ExerciseRubricUpdateRequest(PydanticModel):
+    rubric: dict[str, Any]
+    test_cases: list[dict[str, Any]] | None = None
 
 
 def _require_admin(current_user: User = Depends(get_current_user)) -> User:
@@ -288,3 +323,135 @@ async def list_student_notes(
     await _require_student(db, student_id)
     notes = await list_notes(db, student_id=student_id, limit=limit)
     return [StudentNoteResponse.model_validate(n) for n in notes]
+
+
+# ── #142: Audit log viewer ────────────────────────────────────────────────────
+
+
+@router.get("/audit-log", response_model=list[AuditLogItem])
+async def get_audit_log(
+    limit: int = Query(50, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(_require_admin),
+) -> list[AuditLogItem]:
+    """Paginated agent action audit log (#142)."""
+    result = await db.execute(
+        select(AgentAction)
+        .order_by(AgentAction.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    rows = result.scalars().all()
+    log.info("admin.audit_log_viewed", limit=limit, offset=offset, count=len(rows))
+    return [
+        AuditLogItem(
+            id=str(r.id),
+            student_id=str(r.student_id) if r.student_id else None,
+            agent_name=r.agent_name,
+            action_type=r.action_type,
+            status=r.status,
+            duration_ms=r.duration_ms,
+            created_at=r.created_at,
+        )
+        for r in rows
+    ]
+
+
+# ── #148: Content performance per-lesson stats ───────────────────────────────
+
+
+@router.get("/content-performance", response_model=list[LessonPerformance])
+async def get_content_performance(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(_require_admin),
+) -> list[LessonPerformance]:
+    """Per-lesson confusion and question event counts (#148)."""
+    from app.models.lesson import Lesson
+
+    # Fetch up to 1000 recent actions; group in Python to stay DB-agnostic
+    result = await db.execute(
+        select(AgentAction).order_by(AgentAction.created_at.desc()).limit(1000)
+    )
+    actions = result.scalars().all()
+
+    # Extract lesson_id from input_data JSON (key: "lesson_id")
+    from collections import defaultdict
+
+    counts: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "confusion": 0})
+    for action in actions:
+        lid: str | None = None
+        if isinstance(action.input_data, dict):
+            lid = action.input_data.get("lesson_id")
+        if not lid:
+            continue
+        counts[lid]["total"] += 1
+        if action.agent_name == "socratic_tutor":
+            counts[lid]["confusion"] += 1
+
+    if not counts:
+        return []
+
+    lesson_ids = [uuid.UUID(lid) for lid in counts if lid]
+    lessons_result = await db.execute(
+        select(Lesson.id, Lesson.title).where(Lesson.id.in_(lesson_ids))
+    )
+    title_map = {str(r.id): r.title for r in lessons_result.all()}
+
+    rows = sorted(counts.items(), key=lambda kv: kv[1]["total"], reverse=True)[:50]
+    log.info("admin.content_performance_viewed", lesson_count=len(rows))
+    return [
+        LessonPerformance(
+            lesson_id=lid,
+            lesson_title=title_map.get(lid, lid),
+            question_count=vals["total"],
+            confusion_count=vals["confusion"],
+        )
+        for lid, vals in rows
+    ]
+
+
+# ── Course + rubric JSON editor (folds #144 + #145) ──────────────────────────
+
+
+@router.patch("/courses/{course_id}", status_code=204)
+async def update_course(
+    course_id: uuid.UUID,
+    body: CourseUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(_require_admin),
+) -> None:
+    """Update course title/description (#144)."""
+    from app.models.course import Course
+
+    result = await db.execute(select(Course).where(Course.id == course_id))
+    course = result.scalar_one_or_none()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    if body.title is not None:
+        course.title = body.title
+    if body.description is not None:
+        course.description = body.description
+    await db.commit()
+    log.info("admin.course_updated", course_id=str(course_id))
+
+
+@router.patch("/exercises/{exercise_id}/rubric", status_code=204)
+async def update_exercise_rubric(
+    exercise_id: uuid.UUID,
+    body: ExerciseRubricUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(_require_admin),
+) -> None:
+    """Update exercise rubric and test cases (#145)."""
+    from app.models.exercise import Exercise
+
+    result = await db.execute(select(Exercise).where(Exercise.id == exercise_id))
+    exercise = result.scalar_one_or_none()
+    if not exercise:
+        raise HTTPException(status_code=404, detail="Exercise not found")
+    exercise.rubric = body.rubric
+    if body.test_cases is not None:
+        exercise.test_cases = body.test_cases  # type: ignore[assignment]
+    await db.commit()
+    log.info("admin.rubric_updated", exercise_id=str(exercise_id))
