@@ -6,7 +6,7 @@
 
 **Parallel work:** If you're the teammate shipping 3B in parallel, read [`CONTRIBUTING-P3.md`](CONTRIBUTING-P3.md) first. Your scope = Skill Map + Studio + Receipts + Admin + Infra + Meta + Career (39 tickets). My scope = all of 3A + remaining 3B areas. File ownership, claim protocol, migration numbering, and browser-verification protocol are all in that doc.
 
-**Next migration number to reserve:** `0014` (current head: `0009_submission_sharing`; `0010_conversation_memory` (3A-2) + `0011_socratic_level` (3A-3) + `0012_student_misconceptions` (3A-6) + `0013_confidence_reports` (3A-7) reserved — always verify with `ls backend/alembic/versions/ | sort | tail -1` before claiming, since Phase 3A is also adding migrations).
+**Next migration number to reserve:** `0015` (current head: `0009_submission_sharing`; `0010_conversation_memory` (3A-2) + `0011_socratic_level` (3A-3) + `0012_student_misconceptions` (3A-6) + `0013_confidence_reports` (3A-7) + `0014_student_notes` (3A-18) reserved — always verify with `ls backend/alembic/versions/ | sort | tail -1` before claiming, since Phase 3A is also adding migrations).
 
 ---
 
@@ -163,7 +163,7 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `today.micro_win_shown { kind }`.
 
 ### 3A-18: Admin student intervention notes (#146)
-- [ ] not started
+- [x] DONE (99255f1)
 - **Why:** The admin support ticket. Admin sees struggling student → writes "saw him stuck on embeddings, reached out 3/14." Continuity of support.
 - **Touches:** table `student_notes (admin_id, student_id, body_md, created_at)`, `POST /admin/students/{id}/notes`, side panel on `/admin/students/{id}`.
 - **Acceptance:** admin writes a note; reloads; it's there.
