@@ -69,3 +69,28 @@ async def test_admin_students_list(client: AsyncClient) -> None:
     assert resp.status_code == 200
     students = resp.json()
     assert isinstance(students, list)
+
+
+@pytest.mark.asyncio
+async def test_admin_pulse_returns_5_metrics(client: AsyncClient) -> None:
+    token = await _admin_token(client)
+    resp = await client.get("/api/v1/admin/pulse", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "active_students_24h" in data
+    assert "agent_calls_24h" in data
+    assert "avg_eval_score_24h" in data
+    assert "new_enrollments_7d" in data
+    assert "open_feedback" in data
+    # All values should be numeric
+    assert isinstance(data["active_students_24h"], int)
+    assert isinstance(data["agent_calls_24h"], int)
+    assert isinstance(data["new_enrollments_7d"], int)
+    assert isinstance(data["open_feedback"], int)
+
+
+@pytest.mark.asyncio
+async def test_admin_pulse_requires_admin(client: AsyncClient) -> None:
+    token = await _student_token(client)
+    resp = await client.get("/api/v1/admin/pulse", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 403

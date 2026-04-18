@@ -76,6 +76,7 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.teach_back import router as teach_back_router
     from app.api.v1.routes.students import router as students_router
     from app.api.v1.routes.webhooks import router as webhooks_router
+    from app.api.v1.routes.feedback import router as feedback_router
 
     api_routers = [
         auth_router,
@@ -105,6 +106,7 @@ def create_app() -> FastAPI:
         misconceptions_router,
         interview_router,
         teach_back_router,
+        feedback_router,
     ]
     for r in api_routers:
         app.include_router(r, prefix="/api/v1")
