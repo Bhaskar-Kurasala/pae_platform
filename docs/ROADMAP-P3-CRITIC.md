@@ -270,12 +270,12 @@ Covered in 3A. No additional 3B tutor tickets.
 
 ### 3B — Receipts (7 tickets)
 
-- [x] #75 Week-on-week diff DONE
-- [x] #76 Concept coverage miniature skill map DONE
-- [x] #79 Portfolio items this week DONE
-- [x] #81 Reflection aggregation DONE
-- [x] #82 Time investment chart DONE
-- [x] #83 Next-week suggestion DONE
+- [x] #75 Week-on-week diff DONE (18ded48)
+- [x] #76 Concept coverage miniature skill map DONE (18ded48)
+- [x] #79 Portfolio items this week DONE (18ded48)
+- [x] #81 Reflection aggregation DONE (18ded48)
+- [x] #82 Time investment chart DONE (18ded48)
+- [x] #83 Next-week suggestion DONE (18ded48)
 - [ ] #78 Gap analysis → in 3A-16 already
 
 ### 3B — Community (2 tickets)
