@@ -4,6 +4,10 @@
 
 **Principle (frustrated-critic):** every ticket must answer "does this change student behavior or support?" If the answer is "it's nice-to-have" or "it's a feature parity", it's dropped.
 
+**Parallel work:** If you're the teammate shipping 3B in parallel, read [`CONTRIBUTING-P3.md`](CONTRIBUTING-P3.md) first. Your scope = Skill Map + Studio + Receipts + Admin + Infra + Meta + Career (39 tickets). My scope = all of 3A + remaining 3B areas. File ownership, claim protocol, migration numbering, and browser-verification protocol are all in that doc.
+
+**Next migration number to reserve:** `0010` (current head: `0009_submission_sharing` — always verify with `ls backend/alembic/versions/ | sort | tail -1` before claiming, since Phase 3A is also adding migrations).
+
 ---
 
 ## Scope Summary
@@ -33,7 +37,7 @@ Ship after 3A. Pure frontend polish, admin views, infra, receipts, map, studio p
 Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 
 ### 3A-1: Student-state context injection (NEW)
-- [x] DONE (sha-pending)
+- [x] DONE (3a74d62)
 - **Why:** Every tutor call is currently mostly stateless per-session. Before prompt work, the tutor must see: active goal, skill mastery distribution, last 3 confusions, last reflection mood, preferred socratic level. This ticket is plumbing that makes everything downstream land.
 - **Touches:** `backend/app/services/student_context_service.py` (new), `backend/app/api/v1/routes/stream.py` (inject into system prompt).
 - **Edge cases:** new student (empty state), student with no goal yet, student with no reflections.
