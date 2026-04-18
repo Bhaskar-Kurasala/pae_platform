@@ -1,7 +1,7 @@
 """career tables — resumes and interview_questions (#168 #169)
 
-Revision ID: 0015
-Revises: 0011
+Revision ID: 0022
+Revises: 0021
 Create Date: 2026-04-18 21:00:00.000000
 
 Creates two new tables for the career module:
@@ -17,8 +17,8 @@ from sqlalchemy.dialects.postgresql import UUID
 
 from alembic import op
 
-revision: str = "0015"
-down_revision: str | None = "0011"
+revision: str = "0022"
+down_revision: str | None = "0021"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

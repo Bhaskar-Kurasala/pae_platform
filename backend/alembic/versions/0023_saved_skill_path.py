@@ -1,7 +1,7 @@
 """saved_skill_paths table (P3 3B-#24 path saving)
 
-Revision ID: 0016
-Revises: 0013
+Revision ID: 0023
+Revises: 0022
 Create Date: 2026-04-18 21:00:00.000000
 
 Creates a dedicated table for student-saved skill paths.  Uses sa.Text to
@@ -16,8 +16,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0016"
-down_revision: str | None = "0013"
+revision: str = "0023"
+down_revision: str | None = "0022"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -6,7 +6,7 @@
 
 **Parallel work:** If you're the teammate shipping 3B in parallel, read [`CONTRIBUTING-P3.md`](CONTRIBUTING-P3.md) first. Your scope = Skill Map + Studio + Receipts + Admin + Infra + Meta + Career (39 tickets). My scope = all of 3A + remaining 3B areas. File ownership, claim protocol, migration numbering, and browser-verification protocol are all in that doc.
 
-**Next migration number to reserve:** `0018` (current head: `0009_submission_sharing`; `0010_conversation_memory` (3A-2) + `0011_socratic_level` (3A-3) + `0012_student_misconceptions` (3A-6) + `0013_confidence_reports` (3A-7) + `0014_student_notes` (3A-18) + `0015_submission_self_explanation` (3A-9) + `0016_daily_intentions` (3A-11) + `0017_reflection_kind` (3A-12) reserved — always verify with `ls backend/alembic/versions/ | sort | tail -1` before claiming, since Phase 3A is also adding migrations).
+**Next migration number to reserve:** `0025` (current head: `0024_feedback_table`; post-3B-integration chain is linear `0010→0024`; 3B add-ons that were originally numbered 0015/0016/0017 were renumbered to 0022/0023/0024 on 2026-04-18 to resolve a multi-head divergence after the merge — always verify with `ls backend/alembic/versions/ | sort | tail -1` before claiming).
 
 ---
 
@@ -328,11 +328,13 @@ Covered in 3A. No additional 3B tutor tickets.
 
 | Number | Area | Ticket | Purpose |
 |---|---|---|---|
-| 0014 | meta | #177 | feedback table |
-| 0015 | career | #168/#169 | resumes + interview_questions tables |
-| 0016 | skillmap | #24 | saved_skill_paths table (if agent uses DB approach) |
+| 0022 | career | #168/#169 | resumes + interview_questions tables (renumbered 2026-04-18 post-merge, was 0015) |
+| 0023 | skillmap | #24 | saved_skill_paths table (renumbered 2026-04-18 post-merge, was 0016) |
+| 0024 | meta | #177 | feedback table (renumbered 2026-04-18 post-merge, was 0017) |
 
-Next available: 0017
+Next available: 0025
+
+**Note:** The 3A branch and 3B branch both reserved 0015/0016/0017 while working in parallel. After the 3B integration merge (2026-04-18), the 3B additions were renumbered to 0022/0023/0024 to append after the 3A chain and restore a single linear head (currently 0024). No data loss — fresh `alembic upgrade head` is idempotent.
 
 ---
 
