@@ -17,6 +17,7 @@ from app.models.skill import Skill
 from app.models.skill_edge import SkillEdge
 from app.models.srs_card import SRSCard
 from app.models.student_misconception import StudentMisconception
+from app.models.student_note import StudentNote
 from app.models.student_progress import StudentProgress
 from app.models.user import User
 from app.models.user_preferences import UserPreferences
@@ -44,6 +45,7 @@ __all__ = [
     "SkillEdge",
     "SRSCard",
     "StudentMisconception",
+    "StudentNote",
     "UserPreferences",
     "UserSkillState",
 ]

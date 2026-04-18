@@ -1,3 +1,4 @@
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -8,8 +9,10 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.agent_action import AgentAction
 from app.models.user import User
+from app.schemas.student_note import StudentNoteCreate, StudentNoteResponse
 from app.services.at_risk_student_service import compute_at_risk_students
 from app.services.confusion_heatmap_service import compute_heatmap
+from app.services.student_note_service import add_note, list_notes
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -232,3 +235,56 @@ async def get_at_risk_students(
         }
         for s in students
     ]
+
+
+async def _require_student(db: AsyncSession, student_id: uuid.UUID) -> User:
+    user = (
+        await db.execute(
+            select(User).where(
+                User.id == student_id, User.is_deleted.is_(False)
+            )
+        )
+    ).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Student not found"
+        )
+    return user
+
+
+@router.post(
+    "/students/{student_id}/notes",
+    response_model=StudentNoteResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_student_note(
+    student_id: uuid.UUID,
+    payload: StudentNoteCreate,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(_require_admin),
+) -> StudentNoteResponse:
+    """Record an admin intervention note on a student (P3 3A-18)."""
+    await _require_student(db, student_id)
+    note = await add_note(
+        db,
+        admin_id=admin.id,
+        student_id=student_id,
+        body_md=payload.body_md.strip(),
+    )
+    return StudentNoteResponse.model_validate(note)
+
+
+@router.get(
+    "/students/{student_id}/notes",
+    response_model=list[StudentNoteResponse],
+)
+async def list_student_notes(
+    student_id: uuid.UUID,
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(_require_admin),
+) -> list[StudentNoteResponse]:
+    """Return notes for a student, newest first."""
+    await _require_student(db, student_id)
+    notes = await list_notes(db, student_id=student_id, limit=limit)
+    return [StudentNoteResponse.model_validate(n) for n in notes]
