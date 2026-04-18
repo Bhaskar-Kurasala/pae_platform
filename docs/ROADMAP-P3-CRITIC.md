@@ -6,7 +6,7 @@
 
 **Parallel work:** If you're the teammate shipping 3B in parallel, read [`CONTRIBUTING-P3.md`](CONTRIBUTING-P3.md) first. Your scope = Skill Map + Studio + Receipts + Admin + Infra + Meta + Career (39 tickets). My scope = all of 3A + remaining 3B areas. File ownership, claim protocol, migration numbering, and browser-verification protocol are all in that doc.
 
-**Next migration number to reserve:** `0012` (current head: `0009_submission_sharing`; `0010_conversation_memory` (3A-2) + `0011_socratic_level` (3A-3) reserved — always verify with `ls backend/alembic/versions/ | sort | tail -1` before claiming, since Phase 3A is also adding migrations).
+**Next migration number to reserve:** `0013` (current head: `0009_submission_sharing`; `0010_conversation_memory` (3A-2) + `0011_socratic_level` (3A-3) + `0012_student_misconceptions` (3A-6) reserved — always verify with `ls backend/alembic/versions/ | sort | tail -1` before claiming, since Phase 3A is also adding migrations).
 
 ---
 
@@ -76,7 +76,7 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `tutor.intent_before_debug_triggered`.
 
 ### 3A-6: Disagreement pushback + misconception log (#55 + #67)
-- [ ] not started
+- [x] DONE (b9dec71)
 - **Why:** A yes-machine tutor is worse than no tutor. Must say "actually, that's wrong, here's why."
 - **Touches:** prompt addition across all tutor agents; new guardrail in `stream.py` that checks for agreement with known-wrong patterns from `misconceptions` table; logs disagreement to `misconceptions (user_id, topic, student_assertion, tutor_correction, created_at)`.
 - **Edge cases:** must only pushback when student makes a factual claim (not questions, not uncertainty).
