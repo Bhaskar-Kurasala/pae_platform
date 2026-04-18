@@ -125,21 +125,21 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `today.intention_set`, `today.intention_length`.
 
 ### 3A-12: End-of-day reflection (#13)
-- [~] backend DONE (e468262); frontend evening card blocked by Turbopack CSS
+- [x] DONE — existing TodayReflection (mood + note) now gated to evening via 3A-13 rotation
 - **Why:** Captures felt experience, not just metrics. Evening card: "how did today go? good / ok / rough" + optional note.
 - **Touches:** extend `reflections` table with `kind='day_end'`, component `today-day-end.tsx`, shows only after 6pm local.
 - **Acceptance:** after 6pm, card appears on Today; submit persists.
 - **Telemetry:** `today.day_end_answered { mood }`.
 
 ### 3A-13: Morning/evening Today rotation (#14)
-- [ ] not started
+- [x] DONE — Today page reads local hour; intention shows before 18:00, reflection after; telemetry event `today.variant_shown` emitted on mount
 - **Why:** Morning = intention + next action. Evening = reflection + tomorrow preview. Same page, different emphasis by hour.
 - **Touches:** Today page reads local hour; conditionally shows intention card (morning) or day-end card (evening).
 - **Acceptance:** mock system clock; verify rotation at 6pm.
 - **Telemetry:** `today.variant_shown { variant: "morning"|"evening" }`.
 
 ### 3A-14: Consistency surfacing, no points (#150 reframed)
-- [~] backend shipped — widget wiring Turbopack-blocked
+- [x] DONE — today-consistency.tsx renders "X of 7 days this week" with activity track and percentage; test green
 - **Why:** Replace the current streak number with honest data: "You showed up 4 of 7 days last week." No points, no loss aversion.
 - **Touches:** existing streak widget on Today replaced; pure count from `agent_actions` (any activity = show-up).
 - **Acceptance:** widget renders; reads right.
@@ -161,7 +161,7 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `receipts.gap_analysis_shown { gap_count }`.
 
 ### 3A-17: Micro-wins tied to disagreement log (#154 + depends on 3A-6)
-- [~] backend shipped — Today page wiring Turbopack-blocked
+- [x] DONE — today-micro-wins.tsx renders recent wins with relative timestamps and kind-specific icons; test green
 - **Why:** "You unblocked X yesterday" — specific, verifiable, not a badge.
 - **Touches:** Today page shows micro-wins from last 48h: misconceptions resolved (tutor disagreed, student acknowledged), lesson completions, exercise passes on hard problems.
 - **Acceptance:** trigger a disagreement, resolve it, see the micro-win on Today.
