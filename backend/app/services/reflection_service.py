@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta, timezone
 
 import structlog
 from sqlalchemy import desc, select
@@ -13,6 +13,27 @@ log = structlog.get_logger()
 
 def _today_utc() -> date:
     return datetime.now(UTC).date()
+
+
+# P3 3A-12: evening threshold. Ticket specifies "only after 6pm local".
+_DAY_END_HOUR = 18
+
+
+def is_day_end_window(
+    now: datetime, *, tz_offset_hours: int, hour_floor: int = _DAY_END_HOUR
+) -> bool:
+    """True if `now` is past 6pm in the caller's local timezone.
+
+    The frontend passes the student's timezone offset; we do the clock
+    math here so the gate lives next to the rest of the reflection
+    logic. If the frontend omits an offset (e.g., a server-side call),
+    `tz_offset_hours=0` is treated as UTC.
+    """
+    local_tz = timezone(timedelta(hours=tz_offset_hours))
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=UTC)
+    local = now.astimezone(local_tz)
+    return local.hour >= hour_floor
 
 
 class ReflectionService:
@@ -52,6 +73,7 @@ class ReflectionService:
         if existing is not None:
             existing.mood = payload.mood
             existing.note = payload.note
+            existing.kind = payload.kind
             await self.db.flush()
             await self.db.refresh(existing)
             log.info(
@@ -59,8 +81,15 @@ class ReflectionService:
                 user_id=str(user.id),
                 mood=payload.mood,
                 reflection_date=on_date.isoformat(),
+                kind=payload.kind,
                 updated=True,
             )
+            if payload.kind == "day_end":
+                log.info(
+                    "today.day_end_answered",
+                    user_id=str(user.id),
+                    mood=payload.mood,
+                )
             return existing, False
 
         reflection = Reflection(
@@ -68,6 +97,7 @@ class ReflectionService:
             reflection_date=on_date,
             mood=payload.mood,
             note=payload.note,
+            kind=payload.kind,
         )
         self.db.add(reflection)
         await self.db.flush()
@@ -77,6 +107,13 @@ class ReflectionService:
             user_id=str(user.id),
             mood=payload.mood,
             reflection_date=on_date.isoformat(),
+            kind=payload.kind,
             updated=False,
         )
+        if payload.kind == "day_end":
+            log.info(
+                "today.day_end_answered",
+                user_id=str(user.id),
+                mood=payload.mood,
+            )
         return reflection, True
