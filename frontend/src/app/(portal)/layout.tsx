@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { FeedbackWidget } from "@/components/features/feedback-widget";
 import { PortalLayout } from "@/components/layouts/portal-layout";
 import { useAuthStore } from "@/stores/auth-store";
 
@@ -23,5 +24,10 @@ export default function PortalRootLayout({ children }: { children: React.ReactNo
     );
   }
 
-  return <PortalLayout>{children}</PortalLayout>;
+  return (
+    <PortalLayout>
+      {children}
+      <FeedbackWidget />
+    </PortalLayout>
+  );
 }

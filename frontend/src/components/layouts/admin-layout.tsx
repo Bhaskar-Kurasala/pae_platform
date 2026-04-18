@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Activity,
   AlertTriangle,
   BarChart3,
   BookOpen,
@@ -10,6 +11,7 @@ import {
   Flame,
   LayoutDashboard,
   LineChart,
+  MessageSquare,
   Settings,
   Users,
   Zap,
@@ -20,9 +22,11 @@ import { Kbd } from "@/components/ui/kbd";
 
 const adminNavItems = [
   { href: "/admin", label: "Overview", icon: LayoutDashboard },
+  { href: "/admin/pulse", label: "Pulse", icon: Activity },
   { href: "/admin/students", label: "Students", icon: Users },
   { href: "/admin/confusion", label: "Confusion", icon: Flame },
   { href: "/admin/at-risk", label: "At-risk", icon: AlertTriangle },
+  { href: "/admin/feedback", label: "Feedback", icon: MessageSquare },
   { href: "/admin/courses", label: "Courses", icon: BookOpen },
   { href: "/admin/agents", label: "Agents", icon: Zap },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },

@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime as dt
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
@@ -17,6 +17,8 @@ from app.services.at_risk_student_service import compute_at_risk_students
 from app.services.confusion_heatmap_service import compute_heatmap
 from app.services.student_note_service import add_note, list_notes
 
+log = structlog.get_logger()
+
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 log = structlog.get_logger()
@@ -32,7 +34,7 @@ class AuditLogItem(PydanticModel):
     action_type: str
     status: str
     duration_ms: int | None
-    created_at: dt
+    created_at: datetime
 
 
 class LessonPerformance(PydanticModel):
@@ -74,17 +76,11 @@ async def get_stats(
         )
     ).scalar_one()
 
-    total_enrollments = (
-        await db.execute(select(func.count(Enrollment.id)))
-    ).scalar_one()
+    total_enrollments = (await db.execute(select(func.count(Enrollment.id)))).scalar_one()
 
-    total_submissions = (
-        await db.execute(select(func.count(ExerciseSubmission.id)))
-    ).scalar_one()
+    total_submissions = (await db.execute(select(func.count(ExerciseSubmission.id)))).scalar_one()
 
-    total_agent_actions = (
-        await db.execute(select(func.count(AgentAction.id)))
-    ).scalar_one()
+    total_agent_actions = (await db.execute(select(func.count(AgentAction.id)))).scalar_one()
 
     total_revenue_cents = (
         await db.execute(
@@ -129,8 +125,7 @@ async def get_agents_health(
             await db.execute(
                 select(
                     func.avg(AgentAction.duration_ms),
-                )
-                .where(AgentAction.agent_name == name)
+                ).where(AgentAction.agent_name == name)
             )
         ).one()
 
@@ -189,9 +184,7 @@ async def list_students(
 
         agent_interactions = (
             await db.execute(
-                select(func.count(AgentAction.id)).where(
-                    AgentAction.student_id == student.id
-                )
+                select(func.count(AgentAction.id)).where(AgentAction.student_id == student.id)
             )
         ).scalar_one()
 
@@ -201,7 +194,9 @@ async def list_students(
                 "email": student.email,
                 "full_name": student.full_name,
                 "created_at": student.created_at.isoformat(),
-                "last_login_at": student.last_login_at.isoformat() if student.last_login_at else None,
+                "last_login_at": student.last_login_at.isoformat()
+                if student.last_login_at
+                else None,
                 "lessons_completed": lessons_completed,
                 "agent_interactions": agent_interactions,
                 "is_active": student.is_active,
@@ -264,8 +259,7 @@ async def get_at_risk_students(
             "low_mood_count": s.low_mood_count,
             "progress_pct": s.progress_pct,
             "signals": [
-                {"name": sig.name, "weight": sig.weight, "reason": sig.reason}
-                for sig in s.signals
+                {"name": sig.name, "weight": sig.weight, "reason": sig.reason} for sig in s.signals
             ],
         }
         for s in students
@@ -455,3 +449,64 @@ async def update_exercise_rubric(
         exercise.test_cases = body.test_cases  # type: ignore[assignment]
     await db.commit()
     log.info("admin.rubric_updated", exercise_id=str(exercise_id))
+
+
+@router.get("/pulse")
+async def get_pulse(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(_require_admin),
+) -> dict[str, Any]:
+    """5-metric platform health view (#180)."""
+    from app.models.enrollment import Enrollment
+    from app.models.feedback import Feedback
+
+    now = datetime.now(UTC)
+    day_ago = now - timedelta(hours=24)
+    week_ago = now - timedelta(days=7)
+
+    active_students: int = (
+        await db.execute(
+            select(func.count(func.distinct(AgentAction.student_id))).where(
+                AgentAction.created_at >= day_ago
+            )
+        )
+    ).scalar() or 0
+
+    agent_calls: int = (
+        await db.execute(
+            select(func.count(AgentAction.id)).where(AgentAction.created_at >= day_ago)
+        )
+    ).scalar() or 0
+
+    # evaluation_score is not a dedicated column — derive from output_data or use 0
+    # (future: add evaluation_score column to agent_actions)
+    avg_score_raw = (
+        await db.execute(
+            select(func.avg(AgentAction.duration_ms)).where(
+                AgentAction.created_at >= day_ago,
+                AgentAction.duration_ms.isnot(None),
+            )
+        )
+    ).scalar()
+    # Normalise: treat 0 ms → 0.0, ≥2000 ms → 1.0 as a proxy quality indicator
+    avg_duration = float(avg_score_raw or 0)
+    avg_score: float = round(min(avg_duration / 2000.0, 1.0), 2)
+
+    new_enrollments: int = (
+        await db.execute(select(func.count(Enrollment.id)).where(Enrollment.created_at >= week_ago))
+    ).scalar() or 0
+
+    open_feedback: int = (
+        await db.execute(
+            select(func.count(Feedback.id)).where(Feedback.resolved.is_(False))  # noqa: E712
+        )
+    ).scalar() or 0
+
+    log.info("admin.pulse_viewed", active_students=active_students)
+    return {
+        "active_students_24h": active_students,
+        "agent_calls_24h": agent_calls,
+        "avg_eval_score_24h": avg_score,
+        "new_enrollments_7d": new_enrollments,
+        "open_feedback": open_feedback,
+    }

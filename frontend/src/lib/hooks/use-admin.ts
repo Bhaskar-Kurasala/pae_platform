@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 
 export interface AdminStats {
@@ -105,5 +105,53 @@ export function useAtRiskStudents(minScore: number = 0.35) {
         `/api/v1/admin/at-risk-students?min_score=${minScore}&limit=50`,
       ),
     staleTime: 60_000,
+  });
+}
+
+// ── Feedback triage (#177) ────────────────────────────────────────
+export interface FeedbackItem {
+  id: string;
+  user_id: string | null;
+  route: string;
+  body: string;
+  sentiment: string | null;
+  resolved: boolean;
+  created_at: string;
+}
+
+export function useAdminFeedback() {
+  return useQuery<FeedbackItem[]>({
+    queryKey: ["admin", "feedback"],
+    queryFn: () => api.get<FeedbackItem[]>("/api/v1/feedback/admin"),
+    staleTime: 30_000,
+  });
+}
+
+export function useResolveFeedback() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (id: string) => api.patch<void>(`/api/v1/feedback/admin/${id}/resolve`, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin", "feedback"] });
+      void queryClient.invalidateQueries({ queryKey: ["admin", "pulse"] });
+    },
+  });
+}
+
+// ── Pulse dashboard (#180) ─────────────────────────────────────────
+export interface PulseData {
+  active_students_24h: number;
+  agent_calls_24h: number;
+  avg_eval_score_24h: number;
+  new_enrollments_7d: number;
+  open_feedback: number;
+}
+
+export function useAdminPulse() {
+  return useQuery<PulseData>({
+    queryKey: ["admin", "pulse"],
+    queryFn: () => api.get<PulseData>("/api/v1/admin/pulse"),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
   });
 }
