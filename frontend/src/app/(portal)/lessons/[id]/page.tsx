@@ -6,6 +6,7 @@ import { ArrowLeft, ArrowRight, CheckCircle2, Loader2 } from "lucide-react";
 import { useLesson } from "@/lib/hooks/use-courses";
 import { useMyProgress, useCompleteLesson } from "@/lib/hooks/use-progress";
 import type { ProgressResponse } from "@/lib/api-client";
+import { RetrievalQuizInline } from "@/components/features/retrieval-quiz-inline";
 
 function isCompleted(lessonId: string, progress: ProgressResponse | undefined): boolean {
   return progress?.courses.some((c) =>
@@ -100,6 +101,8 @@ export default function LessonPage({ params }: { params: Promise<{ id: string }>
 print("Welcome to", "${lesson.title}")`}</code>
         </pre>
       </div>
+
+      {alreadyDone && <RetrievalQuizInline lessonId={id} />}
 
       {/* Mark complete + navigation */}
       <div className="flex items-center justify-between pt-2">

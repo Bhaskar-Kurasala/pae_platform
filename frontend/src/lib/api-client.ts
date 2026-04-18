@@ -727,6 +727,42 @@ export const srsApi = {
     api.post<SRSCard>(`/api/v1/srs/cards/${cardId}/review`, { quality }),
 };
 
+// ── Retrieval quiz (3A-10) ───────────────────────────────────────
+export interface RetrievalQuestion {
+  id: string;
+  question: string;
+  options: Record<string, string>;
+}
+
+export interface RetrievalQuizResponse {
+  questions: RetrievalQuestion[];
+}
+
+export interface GradedQuestion {
+  mcq_id: string;
+  correct: boolean;
+  correct_answer: string;
+  explanation: string | null;
+}
+
+export interface RetrievalQuizResult {
+  correct: number;
+  total: number;
+  graded: GradedQuestion[];
+}
+
+export const retrievalQuizApi = {
+  get: (lessonId: string) =>
+    api.get<RetrievalQuizResponse>(
+      `/api/v1/students/me/lessons/${lessonId}/retrieval-quiz`,
+    ),
+  submit: (lessonId: string, answers: Record<string, string>) =>
+    api.post<RetrievalQuizResult>(
+      `/api/v1/students/me/lessons/${lessonId}/retrieval-quiz`,
+      { answers },
+    ),
+};
+
 // ── Clarification pills (3A-4) ───────────────────────────────────
 export interface ClarifyPill {
   key: string;

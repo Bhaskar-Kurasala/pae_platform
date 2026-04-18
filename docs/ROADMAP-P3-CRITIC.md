@@ -109,7 +109,8 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `exercise.self_explanation_submitted { exercise_id, length }`.
 
 ### 3A-10: Post-lesson retrieval quiz (#95)
-- [~] backend DONE (3da768c); frontend inline quiz blocked by Turbopack CSS
+- [x] DONE — FE wired post-3B-integration.
+- **Frontend:** `components/features/retrieval-quiz-inline.tsx` rendered on the lesson page after the lesson is marked complete. Loads MCQs from `GET /students/me/lessons/{id}/retrieval-quiz`, renders radio-group options per question, disables Grade until every question is answered, POSTs answers for grading, then shows per-question correctness with explanation. Empty-bank case falls back to a 1-line reflection prompt per ticket edge case. 2/2 Vitest tests + tsc clean.
 - **Why:** Testing effect — students remember 2x more with immediate recall.
 - **Touches:** `POST /students/me/lessons/{id}/complete` now returns 3 MCQs from `mcq_bank` filtered to the lesson's skill. Frontend shows inline quiz. Answers update `user_skill_states.confidence`.
 - **Edge cases:** no MCQs in bank for that skill → skip gracefully with a reflection prompt instead.
