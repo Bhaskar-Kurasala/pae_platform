@@ -10,6 +10,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from app.core.config import settings
 from app.core.rate_limit import limiter
+from app.core.request_id import RequestIDMiddleware
 
 log = structlog.get_logger()
 
@@ -28,6 +29,9 @@ def create_app() -> FastAPI:
         debug=settings.debug,
         lifespan=lifespan,
     )
+
+    # Request ID — must be outermost so every log line gets the correlation ID
+    app.add_middleware(RequestIDMiddleware)
 
     # Rate limiting
     app.state.limiter = limiter
