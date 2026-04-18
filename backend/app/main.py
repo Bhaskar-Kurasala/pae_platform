@@ -62,6 +62,7 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.diagnostic import router as diagnostic_router
     from app.api.v1.routes.execute import router as execute_router
     from app.api.v1.routes.exercises import router as exercises_router
+    from app.api.v1.routes.format import router as format_router
     from app.api.v1.routes.goals import router as goals_router
     from app.api.v1.routes.interview import router as interview_router
     from app.api.v1.routes.lessons import router as lessons_router
@@ -109,6 +110,7 @@ def create_app() -> FastAPI:
         srs_router,
         diagnostic_router,
         execute_router,
+        format_router,
         misconceptions_router,
         interview_router,
         teach_back_router,
