@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     redis_host: str = "localhost"
     redis_port: int = 6379
     redis_password: str = ""
+    redis_key_prefix: str = "pae"  # namespace prefix — prevents key collisions across envs
 
     @property
     def redis_url(self) -> str:

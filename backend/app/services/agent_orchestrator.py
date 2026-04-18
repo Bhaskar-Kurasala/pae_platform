@@ -29,13 +29,20 @@ async def _get_redis() -> Any:
         return None
 
 
+def _conv_key(conversation_id: str) -> str:
+    """Return namespaced Redis key for a conversation."""
+    from app.core.redis import redis_key
+
+    return redis_key(f"conv:{conversation_id}")
+
+
 async def _load_history(
     redis: Any, conversation_id: str
 ) -> list[dict[str, Any]]:
     if not redis:
         return []
     try:
-        raw = await redis.get(f"conv:{conversation_id}")
+        raw = await redis.get(_conv_key(conversation_id))
         if raw:
             return json.loads(raw)
     except Exception:
@@ -52,7 +59,7 @@ async def _save_history(
         return
     try:
         await redis.setex(
-            f"conv:{conversation_id}",
+            _conv_key(conversation_id),
             _HISTORY_TTL,
             json.dumps(history),
         )

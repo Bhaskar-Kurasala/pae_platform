@@ -196,7 +196,9 @@ class InterviewSessionStore:
 
     @staticmethod
     def _key(session_id: str) -> str:
-        return f"{_SESSION_PREFIX}{session_id}"
+        from app.core.redis import redis_key
+
+        return redis_key(f"{_SESSION_PREFIX}{session_id}")
 
     async def create(self, user_id: uuid.UUID, problem: InterviewProblem) -> InterviewSession:
         session = InterviewSession(
