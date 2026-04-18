@@ -91,7 +91,7 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `tutor.confidence_reported { skill_id, value }`.
 
 ### 3A-8: "I don't know" honesty guardrail (NEW)
-- [ ] not started
+- [x] DONE (00b24e6)
 - **Why:** Hallucinated answers erode trust forever. When RAG/context has no strong match, tutor must say so.
 - **Touches:** prompt instruction block ("If you're not confident, say 'I'm not sure; let me think out loud' and offer 2-3 hypotheses"). Optional post-response check: if response confidence score (from self-reflection prompt) is <0.5, prepend a hedge.
 - **Acceptance:** ask tutor about a made-up library; it says it's unsure rather than hallucinating.
@@ -325,10 +325,11 @@ Covered in 3A. No additional 3B tutor tickets.
 
 | Number | Area | Ticket | Purpose |
 |---|---|---|---|
-| 0010 | meta | #177 | feedback table |
-| 0011 | career | #168/#169 | resumes + interview_questions tables |
+| 0014 | meta | #177 | feedback table |
+| 0015 | career | #168/#169 | resumes + interview_questions tables |
+| 0016 | skillmap | #24 | saved_skill_paths table (if agent uses DB approach) |
 
-Next available: 0012
+Next available: 0017
 
 ---
 
