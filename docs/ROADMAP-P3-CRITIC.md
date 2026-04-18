@@ -249,12 +249,12 @@ Covered in 3A. No additional 3B tutor tickets.
 
 ### 3B — Skill Map (6 tickets)
 
-- [ ] #21 Cluster collapse
-- [ ] #22 Mastery legend
-- [ ] #24 Path saving
-- [ ] #25 Skill side panel (+ folds #28 search)
-- [ ] #26 Prereq warning
-- [ ] #27 Progress rings on nodes
+- [x] #21 Cluster collapse DONE (55ed7ea)
+- [x] #22 Mastery legend DONE (55ed7ea)
+- [x] #24 Path saving DONE (8f15637)
+- [x] #25 Skill side panel (+ folds #28 search) DONE (55ed7ea)
+- [x] #26 Prereq warning DONE (55ed7ea)
+- [x] #27 Progress rings on nodes DONE (55ed7ea)
 
 ### 3B — Studio (9 tickets)
 
