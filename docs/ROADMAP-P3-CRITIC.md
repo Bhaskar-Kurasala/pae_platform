@@ -6,7 +6,7 @@
 
 **Parallel work:** If you're the teammate shipping 3B in parallel, read [`CONTRIBUTING-P3.md`](CONTRIBUTING-P3.md) first. Your scope = Skill Map + Studio + Receipts + Admin + Infra + Meta + Career (39 tickets). My scope = all of 3A + remaining 3B areas. File ownership, claim protocol, migration numbering, and browser-verification protocol are all in that doc.
 
-**Next migration number to reserve:** `0010` (current head: `0009_submission_sharing` — always verify with `ls backend/alembic/versions/ | sort | tail -1` before claiming, since Phase 3A is also adding migrations).
+**Next migration number to reserve:** `0011` (current head: `0009_submission_sharing`; `0010_conversation_memory` reserved by 3A-2 — always verify with `ls backend/alembic/versions/ | sort | tail -1` before claiming, since Phase 3A is also adding migrations).
 
 ---
 
@@ -45,7 +45,7 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `tutor.context_injected { context_lines, missing_fields[] }`.
 
 ### 3A-2: Per-skill conversation memory (#51)
-- [ ] not started
+- [x] DONE (pending-sha)
 - **Why:** Tutor forgets what you covered last time. Continuity = less wasted intro.
 - **Touches:** new table `conversation_memory (user_id, skill_id, summary_text, last_updated)`, Alembic migration, `student_context_service` (load top 5 per session).
 - **Edge cases:** no skill detected yet, first conversation ever.

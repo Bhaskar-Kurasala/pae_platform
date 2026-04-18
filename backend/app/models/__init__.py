@@ -1,4 +1,5 @@
 from app.models.agent_action import AgentAction
+from app.models.conversation_memory import ConversationMemory
 from app.models.course import Course
 from app.models.enrollment import Enrollment
 from app.models.exercise import Exercise
@@ -30,6 +31,7 @@ __all__ = [
     "QuizResult",
     "MCQBank",
     "AgentAction",
+    "ConversationMemory",
     "Payment",
     "Notification",
     "GoalContract",

@@ -30,6 +30,11 @@ from app.models.goal_contract import GoalContract
 from app.models.reflection import Reflection
 from app.models.user_preferences import UserPreferences
 from app.models.user_skill_state import UserSkillState
+from app.services.conversation_memory_service import (
+    MemoryEntry,
+    load_recent_memories,
+    render_memory_lines,
+)
 
 log = structlog.get_logger()
 
@@ -63,6 +68,9 @@ class StudentContext:
     recent_reflection_days_ago: int | None
     socratic_level: int                # 0-3, 0 = off, 3 = strict
     tutor_mode: str                    # "standard" | "socratic_strict"
+    # Top-N per-skill recall entries, freshest first (3A-2). Empty for new
+    # students; rendered only when non-empty so the block stays concise.
+    recent_memories: list[MemoryEntry] = field(default_factory=list)
     # Present for telemetry — which fields had to fall back to defaults.
     missing_fields: list[str] = field(default_factory=list)
 
@@ -113,6 +121,10 @@ def render_context_block(ctx: StudentContext) -> str:
         lines.append(f"- Last reflection: {ctx.recent_reflection_mood} ({when})")
     else:
         lines.append("- Last reflection: none recorded")
+
+    memory_lines = render_memory_lines(ctx.recent_memories)
+    if memory_lines:
+        lines.extend(memory_lines)
 
     if ctx.socratic_level > 0 or ctx.tutor_mode == "socratic_strict":
         level_label = {0: "off", 1: "gentle", 2: "standard", 3: "strict"}.get(
@@ -258,6 +270,10 @@ async def load_student_context(
     if prefs is None:
         missing.append("preferences")
 
+    memories = await load_recent_memories(db, user_id, limit=5, now=current)
+    if not memories:
+        missing.append("memories")
+
     return StudentContext(
         goal_summary=goal_summary,
         motivation=motivation,
@@ -266,6 +282,7 @@ async def load_student_context(
         recent_reflection_days_ago=age,
         socratic_level=socratic_level,
         tutor_mode=tutor_mode,
+        recent_memories=memories,
         missing_fields=missing,
     )
 
@@ -289,5 +306,13 @@ async def build_context_block(
         user_id=str(user_id),
         context_lines=block.count("\n") + 1,
         missing_fields=ctx.missing_fields,
+        memories_loaded=len(ctx.recent_memories),
     )
+    for mem in ctx.recent_memories:
+        log.info(
+            "tutor.memory_loaded",
+            user_id=str(user_id),
+            skill_slug=mem.skill_slug,
+            memory_age_hours=mem.age_hours,
+        )
     return block, ctx.missing_fields

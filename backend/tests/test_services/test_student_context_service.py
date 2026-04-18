@@ -10,6 +10,7 @@ import uuid
 from datetime import UTC, date, datetime, timedelta
 
 from app.models.user_skill_state import UserSkillState
+from app.services.conversation_memory_service import MemoryEntry
 from app.services.student_context_service import (
     SkillDistribution,
     StudentContext,
@@ -128,6 +129,30 @@ def test_render_socratic_strict_surfaces_mode() -> None:
     block = render_context_block(ctx)
     assert "Socratic level: strict" in block
     assert "socratic_strict" in block
+
+
+def test_render_includes_memory_lines_when_present() -> None:
+    ctx = StudentContext(
+        goal_summary=None,
+        motivation=None,
+        skill_distribution=SkillDistribution(),
+        recent_reflection_mood=None,
+        recent_reflection_days_ago=None,
+        socratic_level=0,
+        tutor_mode="standard",
+        recent_memories=[
+            MemoryEntry(
+                skill_slug="rag",
+                skill_name="RAG",
+                summary_text="chunking strategies",
+                age_hours=4,
+            )
+        ],
+    )
+    block = render_context_block(ctx)
+    assert "Recall on RAG" in block
+    assert "chunking strategies" in block
+    assert "4h ago" in block
 
 
 def test_render_never_quote_instruction_present() -> None:
