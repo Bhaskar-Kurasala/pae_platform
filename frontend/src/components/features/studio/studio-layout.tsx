@@ -5,28 +5,62 @@ import {
   Brain,
   ChevronDown,
   ChevronUp,
+  Clock,
   Code2,
+  GitCompare,
+  History,
   Loader2,
   MessageSquare,
   Play,
   Sparkles,
+  Terminal,
   UserCheck,
 } from "lucide-react";
 import { ResizableSplit } from "./resizable-split";
 import { StudioPane } from "./studio-pane";
 import { CodeEditor } from "./code-editor";
+import { DiffViewer } from "./diff-viewer";
 import { StudioChat } from "./studio-chat";
 import { ExecutionTrace } from "./execution-trace";
 import { MisconceptionsPanel } from "./misconceptions-panel";
 import { QualityPanel } from "./quality-panel";
+import { RunHistoryPanel } from "./run-history-panel";
+import { PromptPreviewPanel } from "./prompt-preview-panel";
+import { SnippetToolbar } from "./snippet-toolbar";
 import { StudioProvider, useStudio } from "./studio-context";
 import { UglyDraftToggle } from "./ugly-draft-toggle";
 import { SeniorReviewPanel } from "./senior-review-panel";
 import { useSeniorReview } from "@/lib/hooks/use-senior-review";
 
+function PromptPreviewPanelWrapper() {
+  const { code } = useStudio();
+  return <PromptPreviewPanel code={code} />;
+}
+
 function CodePane() {
-  const { setCode } = useStudio();
-  return <CodeEditor onCodeChange={setCode} />;
+  const { setCode, showDiff, previousCode, code } = useStudio();
+
+  const handleInsert = (snippet: string) => {
+    // Insert snippet at end of current code
+    setCode(code + (code.endsWith("\n") ? "" : "\n") + snippet);
+  };
+
+  if (showDiff && previousCode !== null) {
+    return (
+      <div className="flex h-full flex-col">
+        <DiffViewer original={previousCode} modified={code} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full flex-col">
+      <SnippetToolbar onInsert={handleInsert} />
+      <div className="flex-1 overflow-hidden">
+        <CodeEditor onCodeChange={setCode} />
+      </div>
+    </div>
+  );
 }
 
 function RunButton() {
@@ -52,6 +86,28 @@ function RunButton() {
   );
 }
 
+function DiffToggleButton() {
+  const { showDiff, setShowDiff, previousCode } = useStudio();
+  if (previousCode === null) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => setShowDiff(!showDiff)}
+      aria-pressed={showDiff}
+      aria-label={showDiff ? "Show editor" : "Show diff from last run"}
+      title={showDiff ? "Back to editor" : "Compare with last run"}
+      className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium transition ${
+        showDiff
+          ? "border-primary bg-primary/10 text-primary"
+          : "border-border bg-background text-foreground hover:bg-muted"
+      }`}
+    >
+      <GitCompare className="h-3.5 w-3.5" aria-hidden="true" />
+      <span>{showDiff ? "Editor" : "Diff"}</span>
+    </button>
+  );
+}
+
 function SeniorReviewButton({ onClick }: { onClick: () => void }) {
   const { code } = useStudio();
   const disabled = code.trim().length === 0;
@@ -73,13 +129,14 @@ function SeniorReviewButton({ onClick }: { onClick: () => void }) {
 function CodePaneActions({ onReview }: { onReview: () => void }) {
   return (
     <div className="flex items-center gap-1.5">
+      <DiffToggleButton />
       <SeniorReviewButton onClick={onReview} />
       <RunButton />
     </div>
   );
 }
 
-type BottomTab = "trace" | "quality" | "mental-model";
+type BottomTab = "trace" | "quality" | "mental-model" | "history" | "prompt-preview";
 
 function QualityBadge() {
   const { result } = useStudio();
@@ -90,6 +147,16 @@ function QualityBadge() {
   return (
     <span className={`ml-1 rounded px-1.5 py-0.5 text-[10px] font-semibold ${tone}`}>
       {issues.length}
+    </span>
+  );
+}
+
+function HistoryBadge() {
+  const { history } = useStudio();
+  if (history.length === 0) return null;
+  return (
+    <span className="ml-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+      {history.length}
     </span>
   );
 }
@@ -183,6 +250,33 @@ function StudioLayoutInner() {
       </button>
       <button
         type="button"
+        onClick={() => setBottomTab("history")}
+        aria-pressed={bottomTab === "history"}
+        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition ${
+          bottomTab === "history"
+            ? "bg-muted text-foreground"
+            : "text-muted-foreground hover:bg-muted/50"
+        }`}
+      >
+        <History className="h-3 w-3" aria-hidden="true" />
+        History
+        <HistoryBadge />
+      </button>
+      <button
+        type="button"
+        onClick={() => setBottomTab("prompt-preview")}
+        aria-pressed={bottomTab === "prompt-preview"}
+        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition ${
+          bottomTab === "prompt-preview"
+            ? "bg-muted text-foreground"
+            : "text-muted-foreground hover:bg-muted/50"
+        }`}
+      >
+        <Terminal className="h-3 w-3" aria-hidden="true" />
+        Preview
+      </button>
+      <button
+        type="button"
         onClick={toggleTrace}
         aria-label={traceCollapsed ? "Expand panel" : "Collapse panel"}
         className="ml-1 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -201,9 +295,22 @@ function StudioLayoutInner() {
       ? "Execution Trace"
       : bottomTab === "quality"
         ? "Code Quality"
-        : "Mental Model Check";
+        : bottomTab === "history"
+          ? "Run History"
+          : bottomTab === "prompt-preview"
+            ? "Prompt Preview"
+            : "Mental Model Check";
+
   const BottomIcon =
-    bottomTab === "trace" ? Play : bottomTab === "quality" ? Sparkles : Brain;
+    bottomTab === "trace"
+      ? Play
+      : bottomTab === "quality"
+        ? Sparkles
+        : bottomTab === "history"
+          ? Clock
+          : bottomTab === "prompt-preview"
+            ? Terminal
+            : Brain;
 
   const bottomRow = (
     <StudioPane title={bottomTitle} icon={BottomIcon} action={bottomTabs}>
@@ -211,6 +318,10 @@ function StudioLayoutInner() {
         <ExecutionTrace />
       ) : bottomTab === "quality" ? (
         <QualityPanel />
+      ) : bottomTab === "history" ? (
+        <RunHistoryPanel />
+      ) : bottomTab === "prompt-preview" ? (
+        <PromptPreviewPanelWrapper />
       ) : (
         <MisconceptionsPanel />
       )}

@@ -73,6 +73,7 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.skills import router as skills_router
     from app.api.v1.routes.srs import router as srs_router
     from app.api.v1.routes.stream import router as stream_router
+    from app.api.v1.routes.format import router as format_router
     from app.api.v1.routes.teach_back import router as teach_back_router
     from app.api.v1.routes.students import router as students_router
     from app.api.v1.routes.webhooks import router as webhooks_router
@@ -102,6 +103,7 @@ def create_app() -> FastAPI:
         srs_router,
         diagnostic_router,
         execute_router,
+        format_router,
         misconceptions_router,
         interview_router,
         teach_back_router,

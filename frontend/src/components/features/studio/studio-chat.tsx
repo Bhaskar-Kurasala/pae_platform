@@ -52,13 +52,32 @@ const SUGGESTED = [
   "How would you refactor this?",
 ];
 
+// #40 — parse line references from tutor messages (e.g. "line 5:")
+const LINE_REF_PATTERN = /line (\d+):/gi;
+
 export function StudioChat() {
-  const { code, hasRunOnce } = useStudio();
+  const { code, hasRunOnce, exerciseTitle, addTutorPin } = useStudio();
   const { data: prefs } = useMyPreferences();
   const codeRef = useRef(code);
   codeRef.current = code;
+  const exerciseTitleRef = useRef(exerciseTitle);
+  exerciseTitleRef.current = exerciseTitle;
 
   const locked = prefs?.ugly_draft_mode === true && !hasRunOnce;
+
+  // #50 — inject exercise context into every chat message
+  const buildMessageWithContext = useCallback(
+    (userMessage: string): string => {
+      const title = exerciseTitleRef.current;
+      const snippet = codeRef.current.slice(0, 500);
+      if (!title) {
+        // No exercise — still include code
+        return `[Current code:\n\`\`\`python\n${snippet}\n\`\`\`]\n\nStudent question: ${userMessage}`;
+      }
+      return `[Context: Exercise "${title}". Current code:\n\`\`\`python\n${snippet}\n\`\`\`]\n\nStudent question: ${userMessage}`;
+    },
+    [],
+  );
 
   const { messages, isStreaming, sendMessage } = useStream({
     agentName: "studio_tutor",
@@ -72,12 +91,35 @@ export function StudioChat() {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // #40 — after a message is sent, parse tutor response for line pins
+  const prevMessagesLength = useRef(messages.length);
+  useEffect(() => {
+    if (messages.length <= prevMessagesLength.current) {
+      prevMessagesLength.current = messages.length;
+      return;
+    }
+    prevMessagesLength.current = messages.length;
+    const lastMsg = messages[messages.length - 1];
+    if (!lastMsg || lastMsg.role !== "assistant") return;
+    // Parse "line N:" patterns and add pins
+    let match;
+    LINE_REF_PATTERN.lastIndex = 0;
+    while ((match = LINE_REF_PATTERN.exec(lastMsg.content)) !== null) {
+      const lineNum = parseInt(match[1], 10);
+      if (!isNaN(lineNum)) {
+        addTutorPin(lineNum, lastMsg.content.slice(0, 120));
+      }
+    }
+  }, [messages, addTutorPin]);
+
   const handleSend = useCallback(async () => {
     const text = input.trim();
     if (!text || isStreaming) return;
     setInput("");
-    await sendMessage(text);
-  }, [input, isStreaming, sendMessage]);
+    // #50 — inject exercise + code context
+    const contextualMessage = buildMessageWithContext(text);
+    await sendMessage(contextualMessage);
+  }, [input, isStreaming, sendMessage, buildMessageWithContext]);
 
   const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
