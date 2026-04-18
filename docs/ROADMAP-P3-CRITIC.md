@@ -285,11 +285,11 @@ Covered in 3A. No additional 3B tutor tickets.
 
 ### 3B — Career (5 tickets)
 
-- [~] #168 Resume builder (+ folds #174 LinkedIn blurb)
-- [~] #169 Interview question bank (searchable)
-- [ ] #171 JD → fit score
-- [ ] #172 Skill gap vs JD
-- [ ] #173 Learning plan for JD
+- [x] #168 Resume builder (+ folds #174 LinkedIn blurb) DONE
+- [x] #169 Interview question bank (searchable) DONE
+- [x] #171 JD → fit score DONE
+- [x] #172 Skill gap vs JD DONE
+- [x] #173 Learning plan for JD DONE
 
 ---
 
