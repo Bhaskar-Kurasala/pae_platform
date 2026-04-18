@@ -6,7 +6,7 @@
 
 **Parallel work:** If you're the teammate shipping 3B in parallel, read [`CONTRIBUTING-P3.md`](CONTRIBUTING-P3.md) first. Your scope = Skill Map + Studio + Receipts + Admin + Infra + Meta + Career (39 tickets). My scope = all of 3A + remaining 3B areas. File ownership, claim protocol, migration numbering, and browser-verification protocol are all in that doc.
 
-**Next migration number to reserve:** `0017` (current head: `0009_submission_sharing`; `0010_conversation_memory` (3A-2) + `0011_socratic_level` (3A-3) + `0012_student_misconceptions` (3A-6) + `0013_confidence_reports` (3A-7) + `0014_student_notes` (3A-18) + `0015_submission_self_explanation` (3A-9) + `0016_daily_intentions` (3A-11) reserved — always verify with `ls backend/alembic/versions/ | sort | tail -1` before claiming, since Phase 3A is also adding migrations).
+**Next migration number to reserve:** `0018` (current head: `0009_submission_sharing`; `0010_conversation_memory` (3A-2) + `0011_socratic_level` (3A-3) + `0012_student_misconceptions` (3A-6) + `0013_confidence_reports` (3A-7) + `0014_student_notes` (3A-18) + `0015_submission_self_explanation` (3A-9) + `0016_daily_intentions` (3A-11) + `0017_reflection_kind` (3A-12) reserved — always verify with `ls backend/alembic/versions/ | sort | tail -1` before claiming, since Phase 3A is also adding migrations).
 
 ---
 
@@ -121,7 +121,7 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `today.intention_set`, `today.intention_length`.
 
 ### 3A-12: End-of-day reflection (#13)
-- [ ] not started
+- [~] backend DONE (e468262); frontend evening card blocked by Turbopack CSS
 - **Why:** Captures felt experience, not just metrics. Evening card: "how did today go? good / ok / rough" + optional note.
 - **Touches:** extend `reflections` table with `kind='day_end'`, component `today-day-end.tsx`, shows only after 6pm local.
 - **Acceptance:** after 6pm, card appears on Today; submit persists.
