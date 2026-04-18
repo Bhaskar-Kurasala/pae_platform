@@ -55,10 +55,25 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.billing import router as billing_router
     from app.api.v1.routes.courses import router as courses_router
     from app.api.v1.routes.demo import router as demo_router
+    from app.api.v1.routes.diagnostic import router as diagnostic_router
+    from app.api.v1.routes.execute import router as execute_router
     from app.api.v1.routes.exercises import router as exercises_router
+    from app.api.v1.routes.goals import router as goals_router
+    from app.api.v1.routes.interview import router as interview_router
     from app.api.v1.routes.lessons import router as lessons_router
+    from app.api.v1.routes.misconceptions import router as misconceptions_router
     from app.api.v1.routes.oauth import router as oauth_router
+    from app.api.v1.routes.notifications import router as notifications_router
+    from app.api.v1.routes.portfolio_autopsy import router as portfolio_autopsy_router
+    from app.api.v1.routes.preferences import router as preferences_router
+    from app.api.v1.routes.receipts import router as receipts_router
+    from app.api.v1.routes.reflections import router as reflections_router
+    from app.api.v1.routes.senior_review import router as senior_review_router
+    from app.api.v1.routes.skill_path import router as skill_path_router
+    from app.api.v1.routes.skills import router as skills_router
+    from app.api.v1.routes.srs import router as srs_router
     from app.api.v1.routes.stream import router as stream_router
+    from app.api.v1.routes.teach_back import router as teach_back_router
     from app.api.v1.routes.students import router as students_router
     from app.api.v1.routes.webhooks import router as webhooks_router
 
@@ -75,6 +90,21 @@ def create_app() -> FastAPI:
         demo_router,
         billing_router,
         oauth_router,
+        goals_router,
+        notifications_router,
+        preferences_router,
+        receipts_router,
+        portfolio_autopsy_router,
+        reflections_router,
+        senior_review_router,
+        skills_router,
+        skill_path_router,
+        srs_router,
+        diagnostic_router,
+        execute_router,
+        misconceptions_router,
+        interview_router,
+        teach_back_router,
     ]
     for r in api_routers:
         app.include_router(r, prefix="/api/v1")

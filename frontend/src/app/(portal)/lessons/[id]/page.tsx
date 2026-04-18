@@ -7,14 +7,16 @@ import { useLesson } from "@/lib/hooks/use-courses";
 import { useMyProgress, useCompleteLesson } from "@/lib/hooks/use-progress";
 import type { ProgressResponse } from "@/lib/api-client";
 
-function isCompleted(lessonId: string, progress: ProgressResponse[]): boolean {
-  return progress.some((p) => p.lesson_id === lessonId && p.status === "completed");
+function isCompleted(lessonId: string, progress: ProgressResponse | undefined): boolean {
+  return progress?.courses.some((c) =>
+    c.lessons.some((l) => l.id === lessonId && l.status === "completed"),
+  ) ?? false;
 }
 
 export default function LessonPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { data: lesson, isLoading } = useLesson(id);
-  const { data: progress = [] } = useMyProgress();
+  const { data: progress } = useMyProgress();
   const completeLesson = useCompleteLesson();
   const [completed, setCompleted] = useState(false);
 

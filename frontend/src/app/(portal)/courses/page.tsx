@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { BookOpen } from "lucide-react";
 import { useCourses } from "@/lib/hooks/use-courses";
 import { CourseCard } from "@/components/features/course-card";
 
@@ -14,21 +16,21 @@ function CourseSkeleton() {
   );
 }
 
-export default function PublicCoursesPage() {
+export default function PortalCoursesPage() {
   const { data: courses, isLoading, isError } = useCourses();
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-12">
-      <div className="mb-10">
-        <h1 className="text-3xl font-bold">Courses</h1>
-        <p className="text-muted-foreground mt-2">
+    <div className="p-6 md:p-8 max-w-6xl mx-auto">
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold tracking-tight">Courses</h1>
+        <p className="text-muted-foreground text-sm mt-1">
           Production-grade GenAI engineering courses built by practitioners.
         </p>
       </div>
 
       {isError && (
-        <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive">
-          Failed to load courses. Make sure the API server is running.
+        <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive mb-6">
+          Failed to load courses. Please try refreshing.
         </div>
       )}
 
@@ -40,9 +42,19 @@ export default function PublicCoursesPage() {
         </div>
       )}
 
-      {courses && courses.length === 0 && (
-        <div className="text-center py-20 text-muted-foreground">
-          No courses published yet. Check back soon!
+      {!isLoading && courses && courses.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <BookOpen className="h-12 w-12 text-muted-foreground/30 mb-4" aria-hidden="true" />
+          <h2 className="font-semibold text-lg mb-1">No courses published yet</h2>
+          <p className="text-muted-foreground text-sm mb-6">
+            Check back soon — new courses are on the way.
+          </p>
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center gap-2 h-9 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            Back to dashboard
+          </Link>
         </div>
       )}
 

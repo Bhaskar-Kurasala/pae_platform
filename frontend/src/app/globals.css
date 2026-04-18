@@ -49,9 +49,33 @@
   /* Brand colors */
   --color-brand-teal: oklch(0.63 0.13 164);
   --color-brand-purple: oklch(0.52 0.25 283);
+  /* Portal (Linear) brand indigo — #5e6ad2 */
+  --color-brand-indigo: oklch(0.58 0.15 275);
+  /* Chat (Claude) brand terracotta — warm accent */
+  --color-brand-terracotta: oklch(0.64 0.14 38);
   /* Gradient mesh accent colors (low opacity for hero backgrounds) */
   --color-mesh-teal: oklch(0.63 0.13 164 / 0.15);
   --color-mesh-purple: oklch(0.52 0.25 283 / 0.12);
+
+  /* ── Motion tokens ─── */
+  --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-in-out-quad: cubic-bezier(0.45, 0, 0.55, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --motion-instant: 0ms;
+  --motion-fast: 150ms;
+  --motion-base: 250ms;
+  --motion-slow: 400ms;
+  --motion-slower: 600ms;
+
+  /* ── Tracking (Linear display scale) ─── */
+  --tracking-display-xxl: -0.04em;
+  --tracking-display-xl: -0.03em;
+  --tracking-display-lg: -0.022em;
+  --tracking-display-md: -0.015em;
+  --tracking-display-sm: -0.01em;
+  --tracking-body: 0em;
+  --tracking-eyebrow: 0.14em;
+  --tracking-caps: 0.08em;
 }
 
 :root {
@@ -89,6 +113,21 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.90 0 0);
   --sidebar-ring: oklch(0.63 0.13 164);
+
+  /* ── Elevation (Public/Stripe zone — shadow-as-border) ─── */
+  --elevation-1: 0 1px 2px 0 rgb(0 0 0 / 0.04);
+  --elevation-2: 0 2px 4px -1px rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.04);
+  --elevation-3: 0 4px 8px -2px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.04);
+  --elevation-4: 0 12px 24px -6px rgb(0 0 0 / 0.1), 0 4px 8px -2px rgb(0 0 0 / 0.04);
+  --elevation-5: 0 24px 48px -12px rgb(0 0 0 / 0.18), 0 12px 24px -6px rgb(0 0 0 / 0.08);
+
+  /* Whisper borders (Linear zone) */
+  --whisper-1: rgba(0, 0, 0, 0.06);
+  --whisper-2: rgba(0, 0, 0, 0.1);
+  --whisper-3: rgba(0, 0, 0, 0.14);
+
+  /* OpenType features for Inter (Linear identity) */
+  --font-feature-inter: "cv01", "cv02", "cv11", "ss03";
 }
 
 .dark {
@@ -123,6 +162,18 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.70 0.13 164);
+
+  /* ── Elevation overrides for dark (Portal/Linear zone) ─── */
+  --elevation-1: 0 1px 2px 0 rgb(0 0 0 / 0.35);
+  --elevation-2: 0 2px 4px -1px rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.3);
+  --elevation-3: 0 4px 8px -2px rgb(0 0 0 / 0.45), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+  --elevation-4: 0 12px 24px -6px rgb(0 0 0 / 0.5), 0 4px 8px -2px rgb(0 0 0 / 0.3);
+  --elevation-5: 0 24px 48px -12px rgb(0 0 0 / 0.6), 0 12px 24px -6px rgb(0 0 0 / 0.35);
+
+  /* Whisper borders (Linear dark — rgba white at 2-8%) */
+  --whisper-1: rgba(255, 255, 255, 0.06);
+  --whisper-2: rgba(255, 255, 255, 0.1);
+  --whisper-3: rgba(255, 255, 255, 0.14);
 }
 
 @layer base {
@@ -134,6 +185,10 @@
   }
   html {
     @apply font-sans;
+    font-feature-settings: var(--font-feature-inter);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
@@ -155,6 +210,18 @@
   }
   to {
     opacity: 1;
+  }
+}
+
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(150%);
+  }
+  100% {
+    transform: translateX(400%);
   }
 }
 
@@ -183,12 +250,48 @@
 /* ─── Utility classes backed by keyframes ─── */
 @layer utilities {
   .animate-fade-up {
-    animation: fade-up 350ms cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+    animation: fade-up 350ms var(--ease-out-quad) both;
   }
   .animate-fade-in {
-    animation: fade-in 350ms cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+    animation: fade-in 350ms var(--ease-out-quad) both;
   }
   .animate-blink-cursor {
     animation: blink-cursor 1s step-end infinite;
   }
+
+  /* Elevation utilities (tokens consumed via shadow) */
+  .elevation-1 { box-shadow: var(--elevation-1); }
+  .elevation-2 { box-shadow: var(--elevation-2); }
+  .elevation-3 { box-shadow: var(--elevation-3); }
+  .elevation-4 { box-shadow: var(--elevation-4); }
+  .elevation-5 { box-shadow: var(--elevation-5); }
+
+  /* Linear-scale display tracking */
+  .tracking-display-xxl { letter-spacing: var(--tracking-display-xxl); }
+  .tracking-display-xl { letter-spacing: var(--tracking-display-xl); }
+  .tracking-display-lg { letter-spacing: var(--tracking-display-lg); }
+  .tracking-display-md { letter-spacing: var(--tracking-display-md); }
+  .tracking-display-sm { letter-spacing: var(--tracking-display-sm); }
+  .tracking-eyebrow { letter-spacing: var(--tracking-eyebrow); }
+  .tracking-caps { letter-spacing: var(--tracking-caps); }
+
+  /* Whisper borders (Portal/Linear) */
+  .border-whisper-1 { border-color: var(--whisper-1); }
+  .border-whisper-2 { border-color: var(--whisper-2); }
+  .border-whisper-3 { border-color: var(--whisper-3); }
+
+  /* Motion duration + easing utilities */
+  .duration-fast { transition-duration: var(--motion-fast); }
+  .duration-base { transition-duration: var(--motion-base); }
+  .duration-slow { transition-duration: var(--motion-slow); }
+  .duration-slower { transition-duration: var(--motion-slower); }
+  .ease-out-quad { transition-timing-function: var(--ease-out-quad); }
+  .ease-in-out-quad { transition-timing-function: var(--ease-in-out-quad); }
+  .ease-spring { transition-timing-function: var(--ease-spring); }
+
+  /* Inter OpenType features (opt-in when needed — already global on html) */
+  .font-features-inter { font-feature-settings: var(--font-feature-inter); }
+
+  /* Weight 510 (Linear's signature semibold-ish) */
+  .font-weight-510 { font-weight: 510; }
 }

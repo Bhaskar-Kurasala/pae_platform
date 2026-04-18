@@ -26,6 +26,12 @@ class Lesson(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     is_free_preview: Mapped[bool] = mapped_column(default=False, nullable=False)
     github_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
+    skill_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("skills.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     course: Mapped["Course"] = relationship(back_populates="lessons")
     exercises: Mapped[list["Exercise"]] = relationship(back_populates="lesson", lazy="select")

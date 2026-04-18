@@ -19,6 +19,12 @@ const badgeVariants = cva(
         ghost:
           "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
         link: "text-primary underline-offset-4 hover:underline",
+        success:
+          "bg-emerald-500/10 text-emerald-500 border-emerald-500/20 dark:text-emerald-400",
+        warning:
+          "bg-amber-500/10 text-amber-600 border-amber-500/20 dark:text-amber-400",
+        info:
+          "bg-blue-500/10 text-blue-600 border-blue-500/20 dark:text-blue-400",
       },
     },
     defaultVariants: {
@@ -26,6 +32,44 @@ const badgeVariants = cva(
     },
   }
 )
+
+/**
+ * Semantic dot indicator meant for use inside a Badge.
+ * <Badge variant="success"><StatusDot tone="success" /> Online</Badge>
+ */
+export function StatusDot({
+  tone = "default",
+  pulse = false,
+  className,
+}: {
+  tone?: "default" | "success" | "warning" | "destructive" | "info"
+  pulse?: boolean
+  className?: string
+}) {
+  const toneClass =
+    tone === "success"
+      ? "bg-emerald-500"
+      : tone === "warning"
+        ? "bg-amber-500"
+        : tone === "destructive"
+          ? "bg-destructive"
+          : tone === "info"
+            ? "bg-blue-500"
+            : "bg-foreground/40"
+  return (
+    <span className="relative inline-flex h-1.5 w-1.5 shrink-0" aria-hidden="true">
+      {pulse && (
+        <span
+          className={cn(
+            "absolute inline-flex h-full w-full rounded-full opacity-75 animate-ping",
+            toneClass,
+          )}
+        />
+      )}
+      <span className={cn("relative inline-flex h-1.5 w-1.5 rounded-full", toneClass, className)} />
+    </span>
+  )
+}
 
 function Badge({
   className,

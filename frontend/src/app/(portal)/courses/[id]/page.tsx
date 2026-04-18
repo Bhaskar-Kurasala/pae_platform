@@ -10,17 +10,20 @@ import { ProgressBar } from "@/components/features/progress-bar";
 import { Badge } from "@/components/ui/badge";
 import type { ProgressResponse } from "@/lib/api-client";
 
-function completedSet(progress: ProgressResponse[]): Set<string> {
-  return new Set(progress.filter((p) => p.status === "completed").map((p) => p.lesson_id));
+function completedSet(progress: ProgressResponse | undefined, courseId: string): Set<string> {
+  const course = progress?.courses.find((c) => c.course_id === courseId);
+  return new Set(
+    course?.lessons.filter((l) => l.status === "completed").map((l) => l.id) ?? [],
+  );
 }
 
 export default function CourseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { data: course, isLoading: courseLoading } = useCourse(id);
   const { data: lessons = [], isLoading: lessonsLoading } = useCourseLessons(id);
-  const { data: progress = [] } = useMyProgress();
+  const { data: progress } = useMyProgress();
 
-  const done = completedSet(progress);
+  const done = completedSet(progress, id);
   const completedCount = lessons.filter((l) => done.has(l.id)).length;
   const progressPct = lessons.length > 0 ? (completedCount / lessons.length) * 100 : 0;
 

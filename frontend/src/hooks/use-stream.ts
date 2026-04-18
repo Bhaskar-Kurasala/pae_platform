@@ -21,12 +21,18 @@ export interface StreamMessage {
   role: "user" | "assistant";
   content: string;
   agentName?: string;
+  isThinking?: boolean;
   timestamp: Date;
 }
 
 interface UseStreamOptions {
   agentName?: string;
   initialContext?: Record<string, unknown>;
+  /**
+   * Called on every sendMessage; lets callers attach up-to-date data
+   * (e.g. the Studio's current code). Merged over initialContext.
+   */
+  contextProvider?: () => Record<string, unknown> | undefined;
 }
 
 interface UseStreamReturn {
@@ -38,7 +44,9 @@ interface UseStreamReturn {
 }
 
 export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
-  const { agentName, initialContext } = options;
+  const { agentName, initialContext, contextProvider } = options;
+  const contextProviderRef = useRef(contextProvider);
+  contextProviderRef.current = contextProvider;
   const [messages, setMessages] = useState<StreamMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,13 +68,14 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
       };
       setMessages((prev) => [...prev, userMessage]);
 
-      // Placeholder assistant message that gets filled in as chunks arrive
+      // Placeholder assistant message — shown as typing indicator until first token
       const assistantId = crypto.randomUUID();
       const assistantMessage: StreamMessage = {
         id: assistantId,
         role: "assistant",
         content: "",
         agentName: agentName,
+        isThinking: true,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, assistantMessage]);
@@ -84,7 +93,10 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
           body: JSON.stringify({
             message: text,
             agent_name: agentName ?? null,
-            context: initialContext ?? null,
+            context: {
+              ...(initialContext ?? {}),
+              ...(contextProviderRef.current?.() ?? {}),
+            },
           }),
           signal: abortControllerRef.current.signal,
         });
@@ -137,7 +149,7 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
                 detectedAgentName = parsed.agent_name;
               }
 
-              if (parsed.chunk !== undefined) {
+              if (parsed.chunk !== undefined && parsed.chunk !== "") {
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === assistantId
@@ -145,8 +157,16 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
                           ...msg,
                           content: msg.content + parsed.chunk,
                           agentName: detectedAgentName,
+                          isThinking: false,
                         }
                       : msg,
+                  ),
+                );
+              } else if (parsed.agent_name) {
+                // Agent name arrived before first token — update without clearing thinking
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantId ? { ...msg, agentName: detectedAgentName } : msg,
                   ),
                 );
               }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/stores/auth-store";
@@ -11,8 +11,15 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const { login } = useAuthStore();
+  const { login, isAuthenticated, _hasHydrated } = useAuthStore();
   const router = useRouter();
+
+  // Already logged in — redirect to dashboard without adding login to history
+  useEffect(() => {
+    if (_hasHydrated && isAuthenticated) {
+      router.replace("/today");
+    }
+  }, [_hasHydrated, isAuthenticated, router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -20,7 +27,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email, password);
-      router.push("/dashboard");
+      router.replace("/today");
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);

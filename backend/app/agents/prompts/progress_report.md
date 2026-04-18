@@ -28,7 +28,8 @@ you grow — not a metrics dashboard dump. It:
 
 ## Quick Stats
 - Lessons completed: X
-- Study streak: X days
+- Skills touched this week: X
+- Consistency: X days in a row
 - Strongest concept: [concept] ([score]%)
 - Needs practice: [concept] ([score]%)
 

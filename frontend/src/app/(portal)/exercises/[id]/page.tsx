@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, Loader2, Send, Star } from "lucide-react";
 import { exercisesApi } from "@/lib/api-client";
 import { ApiError } from "@/lib/api-client";
+import { PeerGallery } from "@/components/features/peer-gallery";
 
 export default function ExerciseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -14,13 +15,19 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ score?: number; feedback?: string } | null>(null);
   const [error, setError] = useState("");
+  const [share, setShare] = useState(false);
+  const [shareNote, setShareNote] = useState("");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setSubmitting(true);
     try {
-      const sub = await exercisesApi.submit(id, code);
+      const sub = await exercisesApi.submit(id, {
+        code,
+        shared_with_peers: share,
+        share_note: share ? shareNote.trim() || undefined : undefined,
+      });
       setResult({ score: sub.score ?? undefined, feedback: sub.feedback ?? undefined });
     } catch (err) {
       if (err instanceof ApiError) {
@@ -76,6 +83,36 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
           />
         </div>
 
+        <div className="rounded-lg border border-foreground/10 bg-card p-3">
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={share}
+              onChange={(e) => setShare(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-foreground/20"
+              aria-label="Share this submission with peers"
+            />
+            <span>
+              <span className="font-medium">Share with peers (anonymous)</span>
+              <span className="block text-xs text-muted-foreground">
+                Others see your code under a handle like{" "}
+                <code className="font-mono">peer_3fa7</code> — no name or email.
+              </span>
+            </span>
+          </label>
+          {share ? (
+            <input
+              type="text"
+              value={shareNote}
+              onChange={(e) => setShareNote(e.target.value)}
+              placeholder="Optional — what should peers notice about your approach?"
+              maxLength={500}
+              className="mt-2 w-full rounded-md border border-foreground/10 bg-background px-3 py-1.5 text-sm"
+              aria-label="Share note"
+            />
+          ) : null}
+        </div>
+
         {error && (
           <div className="rounded-lg bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">
             {error}
@@ -122,6 +159,8 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
           )}
         </div>
       )}
+
+      <PeerGallery exerciseId={id} />
     </div>
   );
 }

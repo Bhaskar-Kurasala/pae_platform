@@ -13,6 +13,7 @@ from app.schemas.progress import (
     LessonProgressItem,
     ProgressResponse,
 )
+from app.services.srs_service import SRSService
 
 log = structlog.get_logger()
 
@@ -113,21 +114,53 @@ class ProgressService:
         existing = await self.repo.get_for_lesson(student.id, lesson_id)
         now = datetime.now(UTC)
         if existing:
-            return await self.repo.update(
+            progress = await self.repo.update(
                 existing,
                 {"status": "completed", "completed_at": now},
             )
-        progress = await self.repo.create(
-            {
-                "student_id": student.id,
-                "lesson_id": lesson_id,
-                "status": "completed",
-                "completed_at": now,
-            }
-        )
-        log.info(
-            "lesson.completed",
-            lesson_id=str(lesson_id),
-            student_id=str(student.id),
-        )
+        else:
+            progress = await self.repo.create(
+                {
+                    "student_id": student.id,
+                    "lesson_id": lesson_id,
+                    "status": "completed",
+                    "completed_at": now,
+                }
+            )
+            log.info(
+                "lesson.completed",
+                lesson_id=str(lesson_id),
+                student_id=str(student.id),
+            )
+
+        # P2-06: every completed lesson seeds a retrieval-practice card so the
+        # concept resurfaces on Today. Upsert is idempotent — re-completing a
+        # lesson doesn't clobber prior SM-2 state.
+        await self._seed_retrieval_card(student.id, lesson_id)
         return progress
+
+    async def _seed_retrieval_card(
+        self, student_id: uuid.UUID, lesson_id: str | uuid.UUID
+    ) -> None:
+        lesson = await self.lesson_repo.get_active(lesson_id)
+        if lesson is None:
+            return
+        concept_key = f"lesson:{lesson.slug}"
+        prompt = (
+            f"Recall — {lesson.title}. In one or two sentences, what is the "
+            "core idea and when would you reach for it?"
+        )
+        try:
+            await SRSService(self.db).upsert_card(
+                user_id=student_id,
+                concept_key=concept_key,
+                prompt=prompt,
+            )
+        except Exception as exc:
+            # SRS is a nice-to-have on the completion path — never fail the
+            # primary request if the card upsert errors.
+            log.warning(
+                "retrieval_card.upsert_failed",
+                lesson_id=str(lesson_id),
+                error=str(exc),
+            )

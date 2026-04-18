@@ -1,0 +1,61 @@
+{
+  "questions": [
+    {
+      "id": "q1",
+      "skill_slug": "python-basics",
+      "prompt": "How comfortable are you writing Python functions, loops, and dict comprehensions from scratch?"
+    },
+    {
+      "id": "q2",
+      "skill_slug": "python-async",
+      "prompt": "How comfortable are you with asyncio, coroutines, and the event loop?"
+    },
+    {
+      "id": "q3",
+      "skill_slug": "fastapi",
+      "prompt": "How comfortable are you building REST APIs with FastAPI (routes, dependencies, Pydantic)?"
+    },
+    {
+      "id": "q4",
+      "skill_slug": "sqlalchemy",
+      "prompt": "How comfortable are you modeling data and writing async queries with SQLAlchemy 2.0?"
+    },
+    {
+      "id": "q5",
+      "skill_slug": "prompt-engineering",
+      "prompt": "How comfortable are you crafting system prompts, few-shot examples, and structured outputs?"
+    },
+    {
+      "id": "q6",
+      "skill_slug": "claude-api",
+      "prompt": "How comfortable are you calling the Claude Messages API (streaming, tool use, caching)?"
+    },
+    {
+      "id": "q7",
+      "skill_slug": "rag-basics",
+      "prompt": "How comfortable are you building a retrieve-augment-generate pipeline end to end?"
+    },
+    {
+      "id": "q8",
+      "skill_slug": "agent-design",
+      "prompt": "How comfortable are you designing multi-step agents with planning, memory, and tools?"
+    },
+    {
+      "id": "q9",
+      "skill_slug": "eval-harness",
+      "prompt": "How comfortable are you setting up golden sets and LLM-as-judge evaluations?"
+    },
+    {
+      "id": "q10",
+      "skill_slug": "nextjs-basics",
+      "prompt": "How comfortable are you building Next.js App Router pages with server/client components?"
+    }
+  ],
+  "scale": [
+    {"rating": 1, "label": "Never done it", "mastery_level": "unknown", "confidence": 0.0},
+    {"rating": 2, "label": "Tried once or twice", "mastery_level": "novice", "confidence": 0.2},
+    {"rating": 3, "label": "Can do the basics", "mastery_level": "learning", "confidence": 0.45},
+    {"rating": 4, "label": "Comfortable", "mastery_level": "proficient", "confidence": 0.7},
+    {"rating": 5, "label": "Could teach it", "mastery_level": "mastered", "confidence": 0.9}
+  ]
+}

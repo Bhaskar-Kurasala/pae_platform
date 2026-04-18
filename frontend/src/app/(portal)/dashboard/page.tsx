@@ -5,17 +5,20 @@ import {
   ArrowRight,
   BookOpen,
   Bot,
+  CalendarCheck,
   CheckCircle2,
   Clock,
-  Flame,
   MessageSquare,
+  Sparkles,
   TrendingUp,
   Zap,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useCourses } from "@/lib/hooks/use-courses";
 import { useMyProgress } from "@/lib/hooks/use-progress";
+import { useMySkillStates } from "@/lib/hooks/use-skills";
 import { useAuthStore } from "@/stores/auth-store";
+import { activeDaySet, computeStreak } from "@/lib/streak";
 import { api, type CourseResponse } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 
@@ -195,40 +198,32 @@ export default function DashboardPage() {
   const { user } = useAuthStore();
 
   const { data: courses, isLoading: coursesLoading } = useCourses();
-  const { data: progress = [], isLoading: progressLoading } = useMyProgress();
+  const { data: progressData, isLoading: progressLoading } = useMyProgress();
+  const { data: skillStates } = useMySkillStates();
   const { data: stats } = useQuery<AdminStats>({
     queryKey: ["admin", "stats"],
     queryFn: () => api.get<AdminStats>("/api/v1/admin/stats"),
     staleTime: 30_000,
+    retry: false,
+    enabled: user?.role === "admin",
   });
 
   const isLoading = coursesLoading || progressLoading;
 
-  // Derived stats
-  const completedLessons = progress.filter((p) => p.status === "completed").length;
-  const courseCount = courses?.length ?? 0;
-  const overallProgress =
-    progress.length > 0 ? Math.round((completedLessons / progress.length) * 100) : 0;
+  // Derived stats from nested progress shape
+  const allLessons = progressData?.courses.flatMap((c) => c.lessons) ?? [];
+  const completedLessons = allLessons.filter((l) => l.status === "completed").length;
+  const courseCount = progressData?.courses.length ?? 0;
+  const overallProgress = Math.round(progressData?.overall_progress ?? 0);
 
-  // Current streak: days in a row with at least one completed lesson
-  const streak = (() => {
-    const completedDates = new Set(
-      progress
-        .filter((p) => p.completed_at)
-        .map((p) => new Date(p.completed_at!).toDateString()),
-    );
-    let days = 0;
-    const today = new Date();
-    while (completedDates.has(new Date(today.getTime() - days * 86400000).toDateString())) {
-      days++;
-    }
-    return days;
-  })();
+  const skillsTouched = (skillStates ?? []).filter((s) => s.last_touched_at !== null).length;
+  const streakDays = computeStreak(
+    activeDaySet((skillStates ?? []).map((s) => s.last_touched_at)),
+  );
 
-  // Recent activity from progress
-  const recentActivity = progress
-    .filter((p) => p.completed_at)
-    .sort((a, b) => new Date(b.completed_at!).getTime() - new Date(a.completed_at!).getTime())
+  // Recent completed courses (as activity proxy)
+  const recentActivity = (progressData?.courses ?? [])
+    .filter((c) => c.completed_lessons > 0)
     .slice(0, 5);
 
   const today = new Date().toLocaleDateString("en-US", {
@@ -247,14 +242,6 @@ export default function DashboardPage() {
           </h1>
           <p className="text-muted-foreground text-sm mt-0.5">{today}</p>
         </div>
-        {streak > 0 && (
-          <div className="flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-2 w-fit">
-            <Flame className="h-4 w-4 text-amber-500" aria-hidden="true" />
-            <span className="text-sm font-semibold text-amber-600">
-              {streak} day streak
-            </span>
-          </div>
-        )}
       </div>
 
       {/* KPI row */}
@@ -274,16 +261,17 @@ export default function DashboardPage() {
             accent="bg-primary/10 text-primary"
           />
           <KpiCard
-            label="Current Streak"
-            value={`${streak}d`}
-            sub={streak > 0 ? "Keep it up!" : "Start today"}
-            icon={Flame}
-            accent="bg-amber-500/10 text-amber-600"
+            label="Skills Touched"
+            value={skillsTouched}
+            sub={skillsTouched > 0 ? "Growth in motion" : "Explore the skill map"}
+            icon={Sparkles}
+            accent="bg-emerald-500/10 text-emerald-600"
           />
           <KpiCard
-            label="Agent Interactions"
-            value={stats?.total_agent_actions ?? 0}
-            icon={Bot}
+            label="Consistency"
+            value={`${streakDays}d`}
+            sub={streakDays > 0 ? "Days active in a row" : "Any activity today starts the count"}
+            icon={CalendarCheck}
             accent="bg-[#7C3AED]/10 text-[#7C3AED]"
           />
           <KpiCard
@@ -358,17 +346,12 @@ export default function DashboardPage() {
               </div>
             ) : recentActivity.length > 0 ? (
               <div className="rounded-xl border bg-card divide-y overflow-hidden">
-                {recentActivity.map((p) => (
-                  <div key={p.id} className="px-5 py-3.5">
+                {recentActivity.map((c) => (
+                  <div key={c.course_id} className="px-5 py-3.5">
                     <ActivityItem
                       icon={CheckCircle2}
-                      label="Lesson completed"
-                      sub={new Date(p.completed_at ?? p.created_at).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                      label={c.course_title}
+                      sub={`${c.completed_lessons} of ${c.total_lessons} lessons completed`}
                       accent="bg-primary/10 text-primary"
                     />
                   </div>

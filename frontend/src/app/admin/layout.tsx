@@ -6,18 +6,19 @@ import { AdminLayout } from "@/components/layouts/admin-layout";
 import { useAuthStore } from "@/stores/auth-store";
 
 export default function AdminRootLayout({ children }: { children: React.ReactNode }) {
-  const { user, isAuthenticated } = useAuthStore();
+  const { user, isAuthenticated, _hasHydrated } = useAuthStore();
   const router = useRouter();
 
   useEffect(() => {
+    if (!_hasHydrated) return;
     if (!isAuthenticated) {
       router.replace("/login");
     } else if (user && user.role !== "admin") {
       router.replace("/dashboard");
     }
-  }, [isAuthenticated, user, router]);
+  }, [_hasHydrated, isAuthenticated, user, router]);
 
-  if (!isAuthenticated || user?.role !== "admin") {
+  if (!_hasHydrated || !isAuthenticated || user?.role !== "admin") {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />

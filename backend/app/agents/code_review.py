@@ -5,10 +5,8 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
-from pydantic import SecretStr
 
 from app.agents.base_agent import AgentState, BaseAgent
 from app.agents.registry import register
@@ -90,12 +88,9 @@ class CodeReviewAgent(BaseAgent):
     ]
     model = "claude-sonnet-4-6"
 
-    def _build_llm(self) -> ChatAnthropic:
-        return ChatAnthropic(  # type: ignore[call-arg]
-            model=self.model,
-            anthropic_api_key=SecretStr(settings.anthropic_api_key) if settings.anthropic_api_key else None,
-            max_tokens=2048,
-        )
+    def _build_llm(self, max_tokens: int = 1024):
+        from app.agents.llm_factory import build_llm
+        return build_llm(max_tokens=max_tokens)
 
     async def execute(self, state: AgentState) -> AgentState:
         code = state.context.get("code", state.task)

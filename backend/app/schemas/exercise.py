@@ -17,6 +17,7 @@ class ExerciseCreate(BaseModel):
     rubric: dict[str, Any] | None = None
     points: int = 100
     order: int = 0
+    skill_id: uuid.UUID | None = None
 
 
 class ExerciseUpdate(BaseModel):
@@ -25,6 +26,7 @@ class ExerciseUpdate(BaseModel):
     difficulty: str | None = None
     points: int | None = None
     order: int | None = None
+    skill_id: uuid.UUID | None = None
 
 
 class ExerciseResponse(BaseModel):
@@ -37,5 +39,6 @@ class ExerciseResponse(BaseModel):
     difficulty: str
     points: int
     order: int
+    skill_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime

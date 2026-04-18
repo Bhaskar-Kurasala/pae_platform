@@ -1,16 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
+import { useTheme } from "next-themes";
 import {
   BookOpen,
   ChevronRight,
+  Code2,
   Dumbbell,
   LayoutDashboard,
   LogOut,
   Menu,
   MessageSquare,
+  Moon,
+  ScrollText,
+  Sun,
+  Target,
   TrendingUp,
   X,
 } from "lucide-react";
@@ -18,18 +24,54 @@ import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/auth-store";
 import { UserAvatar } from "@/components/features/user-avatar";
 import { Separator } from "@/components/ui/separator";
+import { Kbd } from "@/components/ui/kbd";
+import { useMyNotifications } from "@/lib/hooks/use-notifications";
+import { TutorModeToggle } from "@/components/features/tutor-mode-toggle";
+
+function ThemeToggle() {
+  const { resolvedTheme, setTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
+  return (
+    <button
+      type="button"
+      onClick={() => setTheme(isDark ? "light" : "dark")}
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+    >
+      {isDark ? (
+        <Sun className="h-4 w-4" aria-hidden="true" />
+      ) : (
+        <Moon className="h-4 w-4" aria-hidden="true" />
+      )}
+    </button>
+  );
+}
 
 const navItems = [
+  { href: "/today", label: "Today", icon: Sun },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/courses", label: "Courses", icon: BookOpen },
   { href: "/exercises", label: "Exercises", icon: Dumbbell },
+  { href: "/studio", label: "Studio", icon: Code2 },
+  { href: "/interview", label: "Interview", icon: Target },
   { href: "/progress", label: "Progress", icon: TrendingUp },
+  { href: "/receipts", label: "Receipts", icon: ScrollText },
   { href: "/chat", label: "AI Tutor", icon: MessageSquare },
 ];
 
 function SidebarContent({ onClose }: { onClose?: () => void }) {
   const pathname = usePathname();
+  const router = useRouter();
   const { user, logout } = useAuthStore();
+  const { data: unread } = useMyNotifications({ unreadOnly: true, limit: 50 });
+  const hasUnreadLetter = (unread ?? []).some(
+    (n) => n.notification_type === "weekly_letter",
+  );
+
+  function handleLogout() {
+    logout();
+    router.replace("/login");
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -48,6 +90,14 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
         )}
       </div>
       <Separator />
+
+      {/* Command palette hint */}
+      <div className="px-3 pt-3 pb-1">
+        <div className="flex items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+          <span className="flex-1">Jump anywhere</span>
+          <Kbd keys="mod+k" />
+        </div>
+      </div>
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
@@ -68,6 +118,12 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
             >
               <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
               <span className="flex-1">{label}</span>
+              {href === "/receipts" && hasUnreadLetter && (
+                <span
+                  className="h-2 w-2 rounded-full bg-primary"
+                  aria-label="Unread letter"
+                />
+              )}
               {active && <ChevronRight className="h-3 w-3 opacity-60" aria-hidden="true" />}
             </Link>
           );
@@ -83,8 +139,10 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
           <p className="text-sm font-medium truncate">{user?.full_name ?? "User"}</p>
           <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
         </div>
+        <TutorModeToggle />
+        <ThemeToggle />
         <button
-          onClick={logout}
+          onClick={handleLogout}
           aria-label="Sign out"
           className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
         >

@@ -10,11 +10,9 @@ matching first, then falls back to claude-haiku-4-5 for nuanced cases.
 from typing import Annotated, Any
 
 import structlog
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
-from pydantic import SecretStr
 from typing_extensions import TypedDict
 
 from app.agents.base_agent import AgentState
@@ -48,6 +46,8 @@ ROUTABLE_AGENTS = [
     "career_coach",
     "resume_reviewer",
     "billing_support",
+    # Studio context-aware tutor (P1-B-3)
+    "studio_tutor",
 ]
 
 _CLASSIFIER_PROMPT = """You are the Master Orchestrator for a production AI engineering learning platform.
@@ -117,12 +117,9 @@ class MOAGraphState(TypedDict):
     evaluation_score: float
 
 
-def _build_classifier() -> ChatAnthropic:
-    return ChatAnthropic(  # type: ignore[call-arg]
-        model="claude-haiku-4-5",
-        anthropic_api_key=SecretStr(settings.anthropic_api_key) if settings.anthropic_api_key else None,
-        max_tokens=30,
-    )
+def _build_classifier():
+    from app.agents.llm_factory import build_classifier_llm
+    return build_classifier_llm()
 
 
 def _keyword_route(task: str) -> str | None:
@@ -141,7 +138,7 @@ async def classify_intent(state: MOAGraphState) -> dict[str, Any]:
     routed = _keyword_route(task)
 
     # 2. LLM classification for nuanced cases
-    if not routed and settings.anthropic_api_key:
+    if not routed and (settings.minimax_api_key or settings.anthropic_api_key):
         try:
             llm = _build_classifier()
             resp = await llm.ainvoke(

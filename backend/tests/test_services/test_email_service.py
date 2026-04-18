@@ -83,7 +83,7 @@ async def test_send_welcome_returns_false_on_exception() -> None:
 @pytest.mark.asyncio
 async def test_send_progress_digest_success() -> None:
     svc = _make_svc_with_client()
-    stats = {"lessons_completed": 5, "streak_days": 3, "top_concept": "RAG"}
+    stats = {"lessons_completed": 5, "skills_touched": 3, "streak_days": 4, "top_concept": "RAG"}
     with patch("app.services.email_service.settings") as mock_settings:
         mock_settings.sendgrid_from_email = "noreply@pae.dev"
         result = await svc.send_progress_digest("user@example.com", "Carol", stats)

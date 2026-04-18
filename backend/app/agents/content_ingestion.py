@@ -3,9 +3,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import SecretStr
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.agents.base_agent import AgentState, BaseAgent
@@ -57,19 +55,16 @@ class ContentIngestionAgent(BaseAgent):
     ]
     model = "claude-sonnet-4-6"
 
-    def _build_llm(self) -> ChatAnthropic:
-        return ChatAnthropic(  # type: ignore[call-arg]
-            model=self.model,
-            anthropic_api_key=SecretStr(settings.anthropic_api_key) if settings.anthropic_api_key else None,
-            max_tokens=512,
-        )
+    def _build_llm(self, max_tokens: int = 1024):
+        from app.agents.llm_factory import build_llm
+        return build_llm(max_tokens=max_tokens)
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),
         reraise=True,
     )
-    async def _summarise_text(self, llm: ChatAnthropic, raw_text: str, source: str) -> dict[str, Any]:
+    async def _summarise_text(self, llm, raw_text: str, source: str) -> dict[str, Any]:
         """Use Claude to extract key concepts and suggest a lesson category."""
         messages: list[Any] = [
             SystemMessage(content=_PROMPT),
@@ -156,7 +151,7 @@ class ContentIngestionAgent(BaseAgent):
             "status": "ingested",
         }
 
-        if settings.anthropic_api_key and raw_content_parts:
+        if (settings.minimax_api_key or settings.anthropic_api_key) and raw_content_parts:
             try:
                 llm = self._build_llm()
                 summary = await self._summarise_text(llm, raw_text, url)
@@ -212,7 +207,7 @@ class ContentIngestionAgent(BaseAgent):
 
     async def _ingest_text(self, text: str) -> dict[str, Any]:
         """Use Claude to extract key concepts from free text."""
-        if settings.anthropic_api_key:
+        if settings.minimax_api_key or settings.anthropic_api_key:
             try:
                 llm = self._build_llm()
                 summary = await self._summarise_text(llm, text, "user-provided text")

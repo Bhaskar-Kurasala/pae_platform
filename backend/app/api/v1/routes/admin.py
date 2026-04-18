@@ -1,6 +1,6 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,6 +8,8 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.agent_action import AgentAction
 from app.models.user import User
+from app.services.at_risk_student_service import compute_at_risk_students
+from app.services.confusion_heatmap_service import compute_heatmap
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -169,3 +171,64 @@ async def list_students(
         )
 
     return result
+
+
+@router.get("/confusion-heatmap")
+async def get_confusion_heatmap(
+    days: int = Query(30, ge=1, le=180),
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(_require_admin),
+) -> list[dict[str, Any]]:
+    """Top confusing concepts over the last `days` days (P2-13).
+
+    Each bucket is one topic with help-request count, distinct students,
+    last-seen timestamp, ranking score, and up to 3 sample questions.
+    """
+    buckets = await compute_heatmap(db, days=days, limit=limit)
+    return [
+        {
+            "topic": b.topic,
+            "help_count": b.help_count,
+            "distinct_students": b.distinct_students,
+            "last_seen": b.last_seen.isoformat() if b.last_seen else None,
+            "score": b.score,
+            "sample_questions": b.sample_questions,
+        }
+        for b in buckets
+    ]
+
+
+@router.get("/at-risk-students")
+async def get_at_risk_students(
+    limit: int = Query(25, ge=1, le=100),
+    min_score: float = Query(0.35, ge=0.0, le=1.0),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(_require_admin),
+) -> list[dict[str, Any]]:
+    """Students likely to churn with human-readable reasons (P2-14).
+
+    Filter with `min_score` — default 0.35 — so admins see actionable names,
+    not a full leaderboard. Each entry names the 1-3 dominant risk factors.
+    """
+    students = await compute_at_risk_students(db, limit=limit, min_score=min_score)
+    return [
+        {
+            "student_id": s.student_id,
+            "email": s.email,
+            "full_name": s.full_name,
+            "risk_score": s.risk_score,
+            "reasons": s.reasons,
+            "no_login_days": s.no_login_days,
+            "lesson_stall_days": s.lesson_stall_days,
+            "help_requests_recent": s.help_requests_recent,
+            "help_requests_prior": s.help_requests_prior,
+            "low_mood_count": s.low_mood_count,
+            "progress_pct": s.progress_pct,
+            "signals": [
+                {"name": sig.name, "weight": sig.weight, "reason": sig.reason}
+                for sig in s.signals
+            ],
+        }
+        for s in students
+    ]

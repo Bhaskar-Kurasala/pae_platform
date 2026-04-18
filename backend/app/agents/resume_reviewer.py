@@ -5,9 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import SecretStr
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.agents.base_agent import AgentState, BaseAgent
@@ -48,19 +46,16 @@ class ResumeReviewerAgent(BaseAgent):
     ]
     model = "claude-sonnet-4-6"
 
-    def _build_llm(self) -> ChatAnthropic:
-        return ChatAnthropic(  # type: ignore[call-arg]
-            model=self.model,
-            anthropic_api_key=SecretStr(settings.anthropic_api_key) if settings.anthropic_api_key else None,
-            max_tokens=2048,
-        )
+    def _build_llm(self, max_tokens: int = 1024):
+        from app.agents.llm_factory import build_llm
+        return build_llm(max_tokens=max_tokens)
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),
         reraise=True,
     )
-    async def _call_llm(self, llm: ChatAnthropic, resume_text: str) -> str:
+    async def _call_llm(self, llm: Any, resume_text: str) -> str:
         messages: list[Any] = [
             SystemMessage(content=_PROMPT),
             HumanMessage(
@@ -84,7 +79,7 @@ class ResumeReviewerAgent(BaseAgent):
             self._log.info("resume_reviewer.no_resume_provided", student_id=state.student_id)
             return state.model_copy(update={"response": _ASK_FOR_RESUME})
 
-        if settings.anthropic_api_key:
+        if settings.minimax_api_key or settings.anthropic_api_key:
             try:
                 llm = self._build_llm()
                 response_text = await self._call_llm(llm, resume_text)

@@ -53,6 +53,7 @@ def _ensure_registered() -> None:
     import app.agents.progress_report  # noqa: F401
     import app.agents.project_evaluator  # noqa: F401
     import app.agents.resume_reviewer  # noqa: F401
+    import app.agents.senior_engineer  # noqa: F401
     import app.agents.socratic_tutor  # noqa: F401
     import app.agents.spaced_repetition  # noqa: F401
     import app.agents.student_buddy  # noqa: F401

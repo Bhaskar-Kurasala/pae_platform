@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  AlertTriangle,
   BarChart3,
   BookOpen,
+  Flame,
   LayoutDashboard,
   Settings,
   Users,
@@ -12,10 +14,13 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
+import { Kbd } from "@/components/ui/kbd";
 
 const adminNavItems = [
   { href: "/admin", label: "Overview", icon: LayoutDashboard },
   { href: "/admin/students", label: "Students", icon: Users },
+  { href: "/admin/confusion", label: "Confusion", icon: Flame },
+  { href: "/admin/at-risk", label: "At-risk", icon: AlertTriangle },
   { href: "/admin/courses", label: "Courses", icon: BookOpen },
   { href: "/admin/agents", label: "Agents", icon: Zap },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
@@ -38,6 +43,12 @@ export function AdminLayout({ children }: AdminLayoutProps) {
           </span>
         </div>
         <Separator />
+        <div className="px-3 pt-3 pb-1">
+          <div className="flex items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+            <span className="flex-1">Jump anywhere</span>
+            <Kbd keys="mod+k" />
+          </div>
+        </div>
         <nav className="flex-1 space-y-1 px-3 py-4">
           {adminNavItems.map(({ href, label, icon: Icon }) => (
             <Link

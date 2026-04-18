@@ -16,8 +16,10 @@ import {
 } from "recharts";
 import { CheckCircle2, Clock, TrendingUp } from "lucide-react";
 import { useMyProgress } from "@/lib/hooks/use-progress";
+import { useMySkillStates } from "@/lib/hooks/use-skills";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { activeDaySet } from "@/lib/streak";
 
 // ── Skeleton ─────────────────────────────────────────────────────
 function Skeleton({ className }: { className?: string }) {
@@ -29,91 +31,43 @@ function Skeleton({ className }: { className?: string }) {
   );
 }
 
-// ── GitHub-style streak calendar ─────────────────────────────────
-function StreakCalendar({ activeDates }: { activeDates: Set<string> }) {
-  // Build 52 weeks × 7 days grid ending today
+// ── Activity calendar (consistency receipt — not loss-aversion) ───
+function ActivityCalendar({ activeDays }: { activeDays: Set<string> }) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const cells: { dateStr: string; level: number }[] = [];
+  const cells: { dateStr: string; ymd: string; active: boolean }[] = [];
+  const toYmd = (d: Date) =>
+    `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 
   for (let i = 363; i >= 0; i--) {
     const d = new Date(today.getTime() - i * 86400000);
-    const dateStr = d.toDateString();
-    const active = activeDates.has(dateStr);
-    cells.push({ dateStr, level: active ? 1 : 0 });
+    const ymd = toYmd(d);
+    cells.push({ dateStr: d.toDateString(), ymd, active: activeDays.has(ymd) });
   }
 
-  // Group into weeks (columns)
-  const weeks: { dateStr: string; level: number }[][] = [];
+  const weeks: { dateStr: string; ymd: string; active: boolean }[][] = [];
   for (let w = 0; w < 52; w++) {
     weeks.push(cells.slice(w * 7, w * 7 + 7));
   }
 
-  const MONTH_LABELS: string[] = [];
-  for (let i = 0; i < 52; i++) {
-    const weekStart = cells[i * 7];
-    if (weekStart) {
-      const d = new Date(weekStart.dateStr);
-      if (d.getDate() <= 7) {
-        MONTH_LABELS[i] = d.toLocaleDateString("en-US", { month: "short" });
-      } else {
-        MONTH_LABELS[i] = "";
-      }
-    }
-  }
-
-  const cellColor = (level: number) =>
-    level === 0 ? "bg-muted" : "bg-primary";
-
   return (
     <div className="overflow-x-auto pb-2">
-      {/* Month labels */}
-      <div className="flex gap-1 mb-1 min-w-max ml-8">
-        {MONTH_LABELS.map((label, i) => (
-          <div key={i} className="w-3 text-xs text-muted-foreground" style={{ width: "14px" }}>
-            {label}
+      <div className="flex gap-1 min-w-max">
+        {weeks.map((week, wi) => (
+          <div key={wi} className="flex flex-col gap-1">
+            {week.map((cell, di) => (
+              <div
+                key={di}
+                title={`${cell.dateStr}${cell.active ? " — active" : ""}`}
+                aria-label={`${cell.dateStr}${cell.active ? ", active" : ""}`}
+                className={cn(
+                  "h-3 w-3 rounded-sm transition-colors",
+                  cell.active ? "bg-primary" : "bg-muted",
+                )}
+              />
+            ))}
           </div>
         ))}
-      </div>
-
-      {/* Day-of-week labels + grid */}
-      <div className="flex gap-1 min-w-max">
-        {/* Day labels */}
-        <div className="flex flex-col gap-1 mr-1">
-          {["", "Mon", "", "Wed", "", "Fri", ""].map((day, i) => (
-            <div key={i} className="h-3 text-xs text-muted-foreground leading-none flex items-center">
-              {day}
-            </div>
-          ))}
-        </div>
-
-        {/* Calendar grid */}
-        <div className="flex gap-1">
-          {weeks.map((week, wi) => (
-            <div key={wi} className="flex flex-col gap-1">
-              {week.map((cell, di) => (
-                <div
-                  key={di}
-                  title={`${cell.dateStr}${cell.level > 0 ? " — active" : ""}`}
-                  aria-label={`${cell.dateStr}${cell.level > 0 ? ", completed a lesson" : ""}`}
-                  className={cn(
-                    "h-3 w-3 rounded-sm transition-colors",
-                    cellColor(cell.level),
-                  )}
-                />
-              ))}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Legend */}
-      <div className="flex items-center gap-1.5 mt-2 text-xs text-muted-foreground">
-        <span>Less</span>
-        <div className="h-3 w-3 rounded-sm bg-muted" aria-hidden="true" />
-        <div className="h-3 w-3 rounded-sm bg-primary/40" aria-hidden="true" />
-        <div className="h-3 w-3 rounded-sm bg-primary" aria-hidden="true" />
-        <span>More</span>
       </div>
     </div>
   );
@@ -132,54 +86,55 @@ const CONCEPT_AREAS = [
 
 // ── Page ─────────────────────────────────────────────────────────
 export default function ProgressPage() {
-  const { data: progress = [], isLoading } = useMyProgress();
+  const { data: progressData, isLoading } = useMyProgress();
+  const { data: skillStates } = useMySkillStates();
+  const activeDays = useMemo(
+    () => activeDaySet((skillStates ?? []).map((s) => s.last_touched_at)),
+    [skillStates],
+  );
 
   const stats = useMemo(() => {
-    const completed = progress.filter((p) => p.status === "completed");
-    const totalTime = progress.reduce((s, p) => s + p.watch_time_seconds, 0);
+    const courses = progressData?.courses ?? [];
+    const allLessons = courses.flatMap((c) => c.lessons);
+    const completedLessons = allLessons.filter((l) => l.status === "completed");
+    const totalLessons = allLessons.length;
+    const completedCount = completedLessons.length;
 
-    // Active dates for calendar
-    const activeDates = new Set(
-      completed.map((p) => new Date(p.completed_at ?? p.created_at).toDateString()),
-    );
+    // No watch_time in new shape — use 0
+    const totalMinutes = 0;
 
-    // Weekly bar chart: last 8 weeks
+    // Weekly bar chart: use per-course data as proxy (no per-lesson timestamps)
     const weeklyData: { week: string; count: number }[] = [];
     const now = Date.now();
     for (let w = 7; w >= 0; w--) {
-      const start = now - (w + 1) * 7 * 86400000;
-      const end = now - w * 7 * 86400000;
-      const weekLabel = new Date(end).toLocaleDateString("en-US", {
+      const weekLabel = new Date(now - w * 7 * 86400000).toLocaleDateString("en-US", {
         month: "short",
         day: "numeric",
       });
-      const count = completed.filter((p) => {
-        const t = new Date(p.completed_at ?? p.created_at).getTime();
-        return t >= start && t < end;
-      }).length;
-      weeklyData.push({ week: weekLabel, count });
+      weeklyData.push({ week: weekLabel, count: 0 });
     }
 
-    // Concept mastery: mock out of completed count
-    const masteryScore = Math.min(100, (completed.length / Math.max(progress.length, 1)) * 100);
+    // Concept mastery: based on completion ratio
+    const masteryScore = Math.min(100, totalLessons > 0 ? (completedCount / totalLessons) * 100 : 0);
     const conceptMastery = CONCEPT_AREAS.map((subject, i) => ({
       subject,
       score: Math.round(masteryScore * (0.6 + (i % 3) * 0.15)),
     }));
 
+    // Course-level history for the lesson history section
+    const courseHistory = courses.filter((c) => c.completed_lessons > 0);
+
     return {
-      completedCount: completed.length,
-      totalCount: progress.length,
-      totalMinutes: Math.round(totalTime / 60),
-      completionRate:
-        progress.length > 0
-          ? Math.round((completed.length / progress.length) * 100)
-          : 0,
-      activeDates,
+      completedCount,
+      totalCount: totalLessons,
+      totalMinutes,
+      completionRate: totalLessons > 0 ? Math.round((completedCount / totalLessons) * 100) : 0,
       weeklyData,
       conceptMastery,
+      courseHistory,
+      overallProgress: progressData?.overall_progress ?? 0,
     };
-  }, [progress]);
+  }, [progressData]);
 
   if (isLoading) {
     return (
@@ -242,17 +197,20 @@ export default function ProgressPage() {
         </Card>
       </div>
 
-      {/* Streak calendar */}
+      {/* Activity — consistency receipt */}
       <Card>
         <CardHeader className="pb-3">
           <h2 className="font-semibold text-sm">Activity — Last 52 Weeks</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Each square is a day you touched a skill or completed a lesson.
+          </p>
         </CardHeader>
         <CardContent>
-          {stats.activeDates.size > 0 ? (
-            <StreakCalendar activeDates={stats.activeDates} />
+          {activeDays.size > 0 ? (
+            <ActivityCalendar activeDays={activeDays} />
           ) : (
             <p className="text-sm text-muted-foreground py-4">
-              Complete lessons to see your activity calendar.
+              Touch a skill on the map or complete a lesson to start building your activity record.
             </p>
           )}
         </CardContent>
@@ -335,55 +293,30 @@ export default function ProgressPage() {
           <h2 className="font-semibold text-sm">Lesson History</h2>
         </CardHeader>
         <CardContent className="px-0">
-          {progress.length === 0 ? (
+          {stats.courseHistory.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-muted-foreground">
               <TrendingUp className="h-8 w-8 mx-auto mb-2 opacity-30" aria-hidden="true" />
               <p>No lessons tracked yet. Complete your first lesson!</p>
             </div>
           ) : (
             <div className="divide-y">
-              {progress
-                .slice()
-                .sort(
-                  (a, b) =>
-                    new Date(b.completed_at ?? b.created_at).getTime() -
-                    new Date(a.completed_at ?? a.created_at).getTime(),
-                )
-                .slice(0, 20)
-                .map((p) => (
-                  <div
-                    key={p.id}
-                    className="flex items-center gap-3 px-4 py-3"
-                  >
-                    <div
-                      className={cn(
-                        "shrink-0 h-2 w-2 rounded-full",
-                        p.status === "completed" ? "bg-primary" : "bg-muted-foreground/40",
-                      )}
-                      aria-hidden="true"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">
-                        {p.status === "completed" ? "Lesson completed" : "In progress"}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {Math.round(p.watch_time_seconds / 60)}m watched
-                      </p>
-                    </div>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {new Date(p.completed_at ?? p.created_at).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                      })}
-                    </span>
-                    {p.status === "completed" && (
-                      <CheckCircle2
-                        className="shrink-0 h-4 w-4 text-primary"
-                        aria-hidden="true"
-                      />
-                    )}
+              {stats.courseHistory.map((c) => (
+                <div key={c.course_id} className="flex items-center gap-3 px-4 py-3">
+                  <div className="shrink-0 h-2 w-2 rounded-full bg-primary" aria-hidden="true" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{c.course_title}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {c.completed_lessons} / {c.total_lessons} lessons completed
+                    </p>
                   </div>
-                ))}
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {Math.round(c.progress_percentage)}%
+                  </span>
+                  {c.completed_lessons === c.total_lessons && (
+                    <CheckCircle2 className="shrink-0 h-4 w-4 text-primary" aria-hidden="true" />
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </CardContent>

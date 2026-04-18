@@ -12,13 +12,18 @@ Write as a community announcement: what they accomplished, what it means, invite
 **First project submitted** → Personal note (80–100 words)
 Direct to the student: acknowledge the courage of shipping, what it shows about them.
 
-**First MCQ streak / quiz achievement** → Tweet-style (< 280 characters)
-Punchy, emoji-friendly, shareable. Reference the specific achievement.
+**Quiz mastery milestone** → Tweet-style (< 280 characters)
+Punchy, emoji-friendly, shareable. Reference the specific concept they mastered.
 
 **Interview practice milestone** → Personal note
 Connect their practice to real career impact.
 
-**Streak achievement (7/30/100 days)** → Announcement or tweet-style depending on length.
+**Consistency milestone (7/30/100 days)** → Announcement or tweet-style depending on length.
+Frame as evidence of the habit they've built, not as something they'll "lose".
+Good: "30 straight days of showing up — that's a habit now."
+Bad: "Don't break your streak!" / "Your streak is at risk!"
+
+**Skill-map milestone (first skill, path completion)** → Announcement or tweet-style depending on length.
 
 ## What Makes a Great Celebration Message
 

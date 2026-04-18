@@ -52,11 +52,14 @@ class Settings(BaseSettings):
     # JWT
     secret_key: str = "changeme-in-production-at-least-32-chars-long"
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30
+    access_token_expire_minutes: int = 480  # 8 hours
     refresh_token_expire_days: int = 7
 
     # External APIs
     anthropic_api_key: str = ""
+    minimax_api_key: str = ""
+    minimax_api_base_url: str = "https://api.minimax.io/anthropic"
+    minimax_model: str = "MiniMax-M2.7"
     sendgrid_api_key: str = ""
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""

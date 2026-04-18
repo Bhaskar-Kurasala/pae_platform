@@ -113,6 +113,86 @@ async def test_complete_lesson_idempotent(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_complete_lesson_seeds_retrieval_card(client: AsyncClient) -> None:
+    """P2-06: every completed lesson surfaces as an SRS card on Today."""
+    admin_token = await _register_and_login(client, "retrieval-admin@example.com", "admin")
+    student_token = await _register_and_login(client, "retrieval-student@example.com")
+
+    course_resp = await client.post(
+        "/api/v1/courses",
+        json={**COURSE_PAYLOAD, "slug": "retrieval-course"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    course_id = course_resp.json()["id"]
+    lesson_resp = await client.post(
+        "/api/v1/lessons",
+        json={
+            "course_id": course_id,
+            "title": "Retrieval-Augmented Generation",
+            "slug": "retrieval-aug-generation",
+            "order": 1,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    lesson_id = lesson_resp.json()["id"]
+
+    # Before completion: empty queue.
+    pre = await client.get(
+        "/api/v1/srs/due",
+        headers={"Authorization": f"Bearer {student_token}"},
+    )
+    assert pre.json() == []
+
+    await client.post(
+        f"/api/v1/students/me/lessons/{lesson_id}/complete",
+        headers={"Authorization": f"Bearer {student_token}"},
+    )
+
+    post = await client.get(
+        "/api/v1/srs/due",
+        headers={"Authorization": f"Bearer {student_token}"},
+    )
+    cards = post.json()
+    assert len(cards) == 1
+    assert cards[0]["concept_key"] == "lesson:retrieval-aug-generation"
+    assert "Retrieval-Augmented Generation" in cards[0]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_complete_lesson_retrieval_card_is_idempotent(
+    client: AsyncClient,
+) -> None:
+    """Re-completing a lesson must not create a duplicate card."""
+    admin_token = await _register_and_login(client, "dup-admin@example.com", "admin")
+    student_token = await _register_and_login(client, "dup-student@example.com")
+
+    course_resp = await client.post(
+        "/api/v1/courses",
+        json={**COURSE_PAYLOAD, "slug": "dup-course"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    course_id = course_resp.json()["id"]
+    lesson_resp = await client.post(
+        "/api/v1/lessons",
+        json={"course_id": course_id, "title": "Dup", "slug": "dup-lesson", "order": 1},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    lesson_id = lesson_resp.json()["id"]
+
+    for _ in range(3):
+        await client.post(
+            f"/api/v1/students/me/lessons/{lesson_id}/complete",
+            headers={"Authorization": f"Bearer {student_token}"},
+        )
+
+    due = await client.get(
+        "/api/v1/srs/due",
+        headers={"Authorization": f"Bearer {student_token}"},
+    )
+    assert len(due.json()) == 1
+
+
+@pytest.mark.asyncio
 async def test_structured_progress_with_enrollment(
     client: AsyncClient, db_session: "AsyncSession"
 ) -> None:

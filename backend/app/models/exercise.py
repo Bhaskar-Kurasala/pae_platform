@@ -25,6 +25,12 @@ class Exercise(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     points: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
     order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     github_template_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    skill_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("skills.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     lesson: Mapped["Lesson"] = relationship(back_populates="exercises")
     submissions: Mapped[list["ExerciseSubmission"]] = relationship(

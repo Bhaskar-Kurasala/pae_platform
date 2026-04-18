@@ -3,9 +3,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import SecretStr
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.agents.base_agent import AgentState, BaseAgent
@@ -67,12 +65,9 @@ class SpacedRepetitionAgent(BaseAgent):
     ]
     model = "claude-haiku-4-5"
 
-    def _build_llm(self) -> ChatAnthropic:
-        return ChatAnthropic(  # type: ignore[call-arg]
-            model=self.model,
-            anthropic_api_key=SecretStr(settings.anthropic_api_key) if settings.anthropic_api_key else None,
-            max_tokens=256,
-        )
+    def _build_llm(self, max_tokens: int = 1024):
+        from app.agents.llm_factory import build_llm
+        return build_llm(max_tokens=max_tokens)
 
     @retry(
         stop=stop_after_attempt(3),
@@ -81,7 +76,7 @@ class SpacedRepetitionAgent(BaseAgent):
     )
     async def _explain_wrong_answer(
         self,
-        llm: ChatAnthropic,
+        llm,
         question: str,
         student_answer: str,
         correct_answer: str,
@@ -134,7 +129,7 @@ class SpacedRepetitionAgent(BaseAgent):
 
         # ── LLM explanation for wrong answers (Claude Haiku — fast) ──────────
         wrong_answer_explanation: str | None = None
-        if last_answer_correct is False and settings.anthropic_api_key:
+        if last_answer_correct is False and (settings.minimax_api_key or settings.anthropic_api_key):
             last_card = card_history[-1] if card_history else {}
             question = last_card.get("question", state.task)
             student_answer = str(last_card.get("student_answer", ""))

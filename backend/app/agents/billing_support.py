@@ -5,9 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import SecretStr
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.agents.base_agent import AgentState, BaseAgent
@@ -50,12 +48,9 @@ class BillingSupportAgent(BaseAgent):
     ]
     model = "claude-haiku-4-5"
 
-    def _build_llm(self) -> ChatAnthropic:
-        return ChatAnthropic(  # type: ignore[call-arg]
-            model=self.model,
-            anthropic_api_key=SecretStr(settings.anthropic_api_key) if settings.anthropic_api_key else None,
-            max_tokens=512,
-        )
+    def _build_llm(self, max_tokens: int = 1024):
+        from app.agents.llm_factory import build_llm
+        return build_llm(max_tokens=max_tokens)
 
     @retry(
         stop=stop_after_attempt(3),
@@ -64,7 +59,7 @@ class BillingSupportAgent(BaseAgent):
     )
     async def _call_llm(
         self,
-        llm: ChatAnthropic,
+        llm: Any,
         subscription_tier: str,
         issue_type: str,
         task: str,
@@ -86,7 +81,7 @@ class BillingSupportAgent(BaseAgent):
         subscription_tier: str = state.context.get("subscription_tier", "free")
         issue_type: str = state.context.get("issue_type", "")
 
-        if settings.anthropic_api_key:
+        if settings.minimax_api_key or settings.anthropic_api_key:
             try:
                 llm = self._build_llm()
                 response_text = await self._call_llm(llm, subscription_tier, issue_type, state.task)

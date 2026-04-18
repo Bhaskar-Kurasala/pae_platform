@@ -47,3 +47,35 @@ class SubmissionRepository(BaseRepository[ExerciseSubmission]):
     ) -> int:
         rows = await self.get_by_student_exercise(student_id, exercise_id)
         return len(rows)
+
+    async def list_shared_for_exercise(
+        self,
+        exercise_id: str | uuid.UUID,
+        *,
+        exclude_student_id: str | uuid.UUID | None = None,
+        limit: int = 20,
+    ) -> list[ExerciseSubmission]:
+        """Shared submissions for an exercise, newest first.
+
+        Only returns submissions that opted in (`shared_with_peers=True`). The
+        caller typically excludes their own submissions via `exclude_student_id`.
+        """
+        stmt = (
+            select(ExerciseSubmission)
+            .where(
+                ExerciseSubmission.exercise_id == exercise_id,
+                ExerciseSubmission.shared_with_peers.is_(True),
+            )
+            .order_by(ExerciseSubmission.created_at.desc())
+            .limit(limit)
+        )
+        if exclude_student_id is not None:
+            stmt = stmt.where(ExerciseSubmission.student_id != exclude_student_id)
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_by_id(self, submission_id: str | uuid.UUID) -> ExerciseSubmission | None:
+        result = await self.db.execute(
+            select(ExerciseSubmission).where(ExerciseSubmission.id == submission_id)
+        )
+        return result.scalar_one_or_none()

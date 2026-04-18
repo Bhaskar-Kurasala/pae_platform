@@ -1,10 +1,12 @@
 "use client";
 
+"use client";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { progressApi, type ProgressResponse } from "@/lib/api-client";
+import { progressApi, type ProgressResponse, type LessonProgressItem } from "@/lib/api-client";
 
 export function useMyProgress() {
-  return useQuery<ProgressResponse[]>({
+  return useQuery<ProgressResponse>({
     queryKey: ["progress", "mine"],
     queryFn: () => progressApi.mine(),
   });
@@ -20,6 +22,8 @@ export function useCompleteLesson() {
   });
 }
 
-export function useLessonCompleted(lessonId: string, progressList: ProgressResponse[]) {
-  return progressList.some((p) => p.lesson_id === lessonId && p.status === "completed");
+export function useLessonCompleted(lessonId: string, progress: ProgressResponse | undefined) {
+  return progress?.courses.some((c) =>
+    c.lessons.some((l) => l.id === lessonId && l.status === "completed"),
+  ) ?? false;
 }

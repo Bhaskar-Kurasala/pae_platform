@@ -16,6 +16,7 @@ class LessonCreate(BaseModel):
     order: int = 0
     is_free_preview: bool = False
     github_branch: str | None = None
+    skill_id: uuid.UUID | None = None
 
 
 class LessonUpdate(BaseModel):
@@ -27,6 +28,7 @@ class LessonUpdate(BaseModel):
     order: int | None = None
     is_published: bool | None = None
     is_free_preview: bool | None = None
+    skill_id: uuid.UUID | None = None
 
 
 class LessonResponse(BaseModel):
@@ -41,5 +43,6 @@ class LessonResponse(BaseModel):
     order: int
     is_published: bool
     is_free_preview: bool
+    skill_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime

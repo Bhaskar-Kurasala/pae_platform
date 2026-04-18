@@ -3,9 +3,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import SecretStr
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.agents.base_agent import AgentState, BaseAgent
@@ -58,19 +56,16 @@ class KnowledgeGraphAgent(BaseAgent):
     ]
     model = "claude-haiku-4-5"
 
-    def _build_llm(self) -> ChatAnthropic:
-        return ChatAnthropic(  # type: ignore[call-arg]
-            model=self.model,
-            anthropic_api_key=SecretStr(settings.anthropic_api_key) if settings.anthropic_api_key else None,
-            max_tokens=512,
-        )
+    def _build_llm(self, max_tokens: int = 1024):
+        from app.agents.llm_factory import build_llm
+        return build_llm(max_tokens=max_tokens)
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),
         reraise=True,
     )
-    async def _call_llm(self, llm: ChatAnthropic, mastery: dict[str, float], gaps: list[str]) -> str:
+    async def _call_llm(self, llm, mastery: dict[str, float], gaps: list[str]) -> str:
         """Call Claude Haiku to produce a skill-gap narrative and recommendations."""
         messages: list[Any] = [
             SystemMessage(content=_PROMPT),
@@ -119,7 +114,7 @@ class KnowledgeGraphAgent(BaseAgent):
 
         # ── LLM narrative (Claude Haiku — fast, cheap) ────────────────────────
         llm_explanation: str = ""
-        if settings.anthropic_api_key:
+        if settings.minimax_api_key or settings.anthropic_api_key:
             try:
                 llm = self._build_llm()
                 llm_explanation = await self._call_llm(llm, updated_mastery, gap_concepts)

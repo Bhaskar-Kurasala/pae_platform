@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/stores/auth-store";
@@ -12,8 +12,14 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const { register } = useAuthStore();
+  const { register, isAuthenticated, _hasHydrated } = useAuthStore();
   const router = useRouter();
+
+  useEffect(() => {
+    if (_hasHydrated && isAuthenticated) {
+      router.replace("/dashboard");
+    }
+  }, [_hasHydrated, isAuthenticated, router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -25,7 +31,7 @@ export default function RegisterPage() {
     setLoading(true);
     try {
       await register(email, fullName, password);
-      router.push("/dashboard");
+      router.replace("/dashboard");
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);

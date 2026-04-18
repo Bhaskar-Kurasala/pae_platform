@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import JSON, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -24,6 +24,12 @@ class ExerciseSubmission(Base, UUIDMixin, TimestampMixin):
     feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_feedback: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     attempt_number: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    # P2-07: opt-in gallery. Only explicitly-shared submissions surface to peers.
+    shared_with_peers: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    # P2-07: author annotation — what the student wants peers to notice.
+    share_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     student: Mapped["User"] = relationship(back_populates="submissions")
     exercise: Mapped["Exercise"] = relationship(back_populates="submissions")

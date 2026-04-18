@@ -2,17 +2,45 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
+export type CardVariant = "default" | "interactive" | "ghost" | "elevated"
+
 function Card({
   className,
   size = "default",
+  variant = "default",
+  loading = false,
   ...props
-}: React.ComponentProps<"div"> & { size?: "default" | "sm" }) {
+}: React.ComponentProps<"div"> & {
+  size?: "default" | "sm"
+  /**
+   * - default: static bordered card.
+   * - interactive: hover lift + subtle ring change — use when clickable.
+   * - ghost: borderless / shell-only — use inside already-bordered containers.
+   * - elevated: drops ring and applies elevation-3 (Stripe-style shadow).
+   */
+  variant?: CardVariant
+  /** When true, overlay is dimmed and a skeleton-style pulse animates. */
+  loading?: boolean
+}) {
+  const variantClass =
+    variant === "interactive"
+      ? "ring-1 ring-foreground/10 hover:ring-foreground/20 hover:-translate-y-0.5 hover:shadow-[var(--elevation-2)] transition-[transform,box-shadow,--tw-ring-color] duration-base ease-out-quad cursor-pointer"
+      : variant === "ghost"
+        ? ""
+        : variant === "elevated"
+          ? "shadow-[var(--elevation-3)]"
+          : "ring-1 ring-foreground/10"
   return (
     <div
       data-slot="card"
       data-size={size}
+      data-variant={variant}
+      data-loading={loading || undefined}
+      aria-busy={loading || undefined}
       className={cn(
-        "group/card flex flex-col gap-4 overflow-hidden rounded-xl bg-card py-4 text-sm text-card-foreground ring-1 ring-foreground/10 has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:gap-3 data-[size=sm]:py-3 data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl",
+        "group/card relative flex flex-col gap-4 overflow-hidden rounded-xl bg-card py-4 text-sm text-card-foreground has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:gap-3 data-[size=sm]:py-3 data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl",
+        variantClass,
+        loading && "pointer-events-none",
         className
       )}
       {...props}

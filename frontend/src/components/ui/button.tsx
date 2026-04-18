@@ -1,14 +1,17 @@
-import { Button as ButtonPrimitive } from "@base-ui/react/button"
-import { cva, type VariantProps } from "class-variance-authority"
+"use client";
 
-import { cn } from "@/lib/utils"
+import * as React from "react";
+import { Button as ButtonPrimitive } from "@base-ui/react/button";
+import { cva, type VariantProps } from "class-variance-authority";
+import { Check, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button relative inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap outline-none select-none transition-[background-color,border-color,color,box-shadow,transform] duration-fast ease-out-quad focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
+        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80 hover:bg-primary/90",
         outline:
           "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
@@ -37,22 +40,79 @@ const buttonVariants = cva(
       variant: "default",
       size: "default",
     },
-  }
-)
+  },
+);
+
+export type ButtonVariantProps = VariantProps<typeof buttonVariants>;
+
+export interface ButtonProps
+  extends Omit<ButtonPrimitive.Props, "disabled">,
+    ButtonVariantProps {
+  /** Replaces content with a spinner and disables the button while true. */
+  loading?: boolean;
+  /** One-shot success flash (~1.2s). Useful after async save/copy. */
+  success?: boolean;
+  /** Icon rendered on the leading edge. */
+  iconStart?: React.ReactNode;
+  /** Icon rendered on the trailing edge. */
+  iconEnd?: React.ReactNode;
+  disabled?: boolean;
+}
 
 function Button({
   className,
   variant = "default",
   size = "default",
+  loading = false,
+  success = false,
+  iconStart,
+  iconEnd,
+  disabled,
+  children,
   ...props
-}: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+}: ButtonProps) {
+  const isDisabled = disabled || loading;
   return (
     <ButtonPrimitive
       data-slot="button"
+      data-loading={loading || undefined}
+      data-success={success || undefined}
+      disabled={isDisabled}
+      aria-busy={loading || undefined}
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
-    />
-  )
+    >
+      {loading ? (
+        <>
+          <Loader2
+            aria-hidden="true"
+            className="animate-spin"
+            data-icon={iconStart ? "inline-start" : undefined}
+          />
+          <span className="contents opacity-70">{children}</span>
+        </>
+      ) : success ? (
+        <>
+          <Check aria-hidden="true" data-icon="inline-start" />
+          <span className="contents">{children}</span>
+        </>
+      ) : (
+        <>
+          {iconStart ? (
+            <span data-icon="inline-start" className="contents">
+              {iconStart}
+            </span>
+          ) : null}
+          {children}
+          {iconEnd ? (
+            <span data-icon="inline-end" className="contents">
+              {iconEnd}
+            </span>
+          ) : null}
+        </>
+      )}
+    </ButtonPrimitive>
+  );
 }
 
-export { Button, buttonVariants }
+export { Button, buttonVariants };

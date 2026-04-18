@@ -1,17 +1,33 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ChevronDown, Clock, PanelLeft, X } from "lucide-react";
-import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowUp, Bot, BriefcaseBusiness, Clock, Code2, GraduationCap, Plus, Sparkles, User } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { api } from "@/lib/api-client";
+import { MarkdownRenderer } from "@/components/features/markdown-renderer";
 import { useStream } from "@/hooks/use-stream";
 
-// ── Types ────────────────────────────────────────────────────────
-interface AgentListItem {
-  name: string;
-  description: string;
+// ── Mode chips ───────────────────────────────────────────────────
+const MODES = [
+  { label: "Auto",        agentName: null,               icon: Sparkles,       color: "text-primary" },
+  { label: "Tutor",       agentName: "socratic_tutor",   icon: GraduationCap,  color: "text-violet-500" },
+  { label: "Code Review", agentName: "coding_assistant", icon: Code2,          color: "text-blue-500" },
+  { label: "Career",      agentName: "career_coach",     icon: BriefcaseBusiness, color: "text-orange-500" },
+  { label: "Quiz Me",     agentName: "adaptive_quiz",    icon: Bot,            color: "text-green-500" },
+] as const;
+
+type ModeAgent = (typeof MODES)[number]["agentName"];
+
+// ── Helpers ──────────────────────────────────────────────────────
+const AGENT_GRADIENTS: Record<string, string> = {
+  socratic_tutor:   "from-violet-500 to-purple-600",
+  coding_assistant: "from-blue-500 to-cyan-600",
+  adaptive_quiz:    "from-green-500 to-emerald-600",
+  career_coach:     "from-orange-500 to-amber-600",
+};
+
+function agentGradient(name: string | undefined) {
+  if (!name) return "from-primary to-primary/70";
+  return AGENT_GRADIENTS[name] ?? "from-primary to-primary/70";
 }
 
 interface ConversationEntry {
@@ -21,199 +37,306 @@ interface ConversationEntry {
   timestamp: Date;
 }
 
-// ── Agent selector dropdown ──────────────────────────────────────
-function AgentSelector({
-  agents,
-  selected,
+// ── Sidebar ──────────────────────────────────────────────────────
+function Sidebar({
+  conversations,
+  activeId,
   onSelect,
+  onNew,
 }: {
-  agents: AgentListItem[];
-  selected: string | null;
-  onSelect: (name: string | null) => void;
+  conversations: ConversationEntry[];
+  activeId: string | null;
+  onSelect: (id: string) => void;
+  onNew: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const selectedLabel = selected
-    ? selected
-        .split("_")
-        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-        .join(" ")
-    : "Auto-route";
-
   return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        aria-label="Select agent"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-medium hover:bg-muted transition-colors"
-      >
-        <span>{selectedLabel}</span>
-        <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-      </button>
-
-      {open && (
-        <div
-          role="listbox"
-          aria-label="Agent selection"
-          className="absolute top-full mt-1 left-0 z-50 min-w-[220px] rounded-xl border bg-popover shadow-lg overflow-hidden py-1"
-        >
-          <button
-            role="option"
-            aria-selected={selected === null}
-            onClick={() => {
-              onSelect(null);
-              setOpen(false);
-            }}
-            className={cn(
-              "w-full text-left px-4 py-2.5 text-sm hover:bg-muted transition-colors",
-              selected === null && "text-primary font-medium",
-            )}
-          >
-            <span className="font-medium">Auto-route</span>
-            <p className="text-xs text-muted-foreground mt-0.5">MOA picks the best agent</p>
-          </button>
-          <div className="border-t my-1" />
-          {agents.map((agent) => (
-            <button
-              key={agent.name}
-              role="option"
-              aria-selected={selected === agent.name}
-              onClick={() => {
-                onSelect(agent.name);
-                setOpen(false);
-              }}
-              className={cn(
-                "w-full text-left px-4 py-2.5 text-sm hover:bg-muted transition-colors",
-                selected === agent.name && "text-primary font-medium",
-              )}
-            >
-              <span className="font-medium capitalize">
-                {agent.name.split("_").join(" ")}
-              </span>
-              {agent.description && (
-                <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
-                  {agent.description}
-                </p>
-              )}
-            </button>
-          ))}
+    <aside className="hidden lg:flex flex-col w-64 xl:w-72 border-r bg-card/50 shrink-0">
+      <div className="flex items-center justify-between px-4 h-16 border-b shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
+            <Bot className="h-4 w-4 text-white" aria-hidden="true" />
+          </div>
+          <span className="font-semibold text-sm">AI Tutor</span>
         </div>
-      )}
+        <button
+          onClick={onNew}
+          aria-label="New conversation"
+          className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto py-3 px-2">
+        {conversations.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 gap-3 text-center px-4">
+            <Clock className="h-8 w-8 text-muted-foreground/30" aria-hidden="true" />
+            <p className="text-xs text-muted-foreground">No conversations yet</p>
+          </div>
+        ) : (
+          <>
+            <p className="px-2 mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
+              Recent
+            </p>
+            {conversations.map((conv) => (
+              <button
+                key={conv.id}
+                onClick={() => onSelect(conv.id)}
+                aria-label={`Open conversation: ${conv.preview}`}
+                className={cn(
+                  "w-full text-left rounded-xl px-3 py-2.5 mb-0.5 transition-colors",
+                  activeId === conv.id ? "bg-primary/10 text-primary" : "hover:bg-muted/70 text-foreground",
+                )}
+              >
+                <p className="text-sm font-medium truncate leading-snug">{conv.preview}</p>
+                <div className="flex items-center gap-1.5 mt-1">
+                  {conv.agentName && (
+                    <span className={cn("text-[10px] font-medium capitalize", activeId === conv.id ? "text-primary/70" : "text-primary/60")}>
+                      {MODES.find((m) => m.agentName === conv.agentName)?.label ?? conv.agentName.split("_").join(" ")}
+                    </span>
+                  )}
+                  <span className="text-[10px] text-muted-foreground">
+                    {conv.timestamp.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+// ── Welcome screen ───────────────────────────────────────────────
+const SUGGESTED_PROMPTS = [
+  { text: "What is RAG and how does it work?",                    icon: "🔍" },
+  { text: "Review my Python code for production readiness",       icon: "🐍" },
+  { text: "Quiz me on LangGraph concepts",                        icon: "⚡" },
+  { text: "Help me build my AI engineering portfolio",            icon: "🚀" },
+  { text: "Explain the difference between ReAct and CoT",         icon: "🧠" },
+  { text: "How do I deploy a LangGraph agent to production?",     icon: "☁️" },
+];
+
+function WelcomeScreen({ mode, onPrompt }: { mode: typeof MODES[number]; onPrompt: (text: string) => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-full px-6 py-12 gap-8">
+      <div className="relative">
+        <div className={cn("h-20 w-20 rounded-3xl bg-gradient-to-br flex items-center justify-center shadow-lg", agentGradient(mode.agentName ?? undefined))}>
+          <Bot className="h-10 w-10 text-white" aria-hidden="true" />
+        </div>
+        <div className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-green-500 border-2 border-background flex items-center justify-center">
+          <Sparkles className="h-3 w-3 text-white" aria-hidden="true" />
+        </div>
+      </div>
+
+      <div className="text-center max-w-md">
+        <h2 className="text-2xl font-bold tracking-tight">
+          {mode.agentName ? `${mode.label} Mode` : "Your AI Coach"}
+        </h2>
+        <p className="text-muted-foreground text-sm mt-2 leading-relaxed">
+          {mode.agentName
+            ? `Focused on ${mode.label.toLowerCase()}. Ask me anything.`
+            : "The right agent is automatically selected based on your question."}
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 w-full max-w-4xl">
+        {SUGGESTED_PROMPTS.map((p) => (
+          <button
+            key={p.text}
+            onClick={() => onPrompt(p.text)}
+            aria-label={`Suggested prompt: ${p.text}`}
+            className="group flex items-start gap-3 rounded-2xl border border-border/60 bg-card/80 px-4 py-3.5 text-left hover:border-primary/40 hover:bg-primary/5 hover:shadow-sm transition-all duration-150"
+          >
+            <span className="text-lg leading-none mt-0.5 shrink-0">{p.icon}</span>
+            <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors line-clamp-2 leading-snug">
+              {p.text}
+            </span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
 
-// ── History Drawer ───────────────────────────────────────────────
-function HistoryDrawer({
-  open,
-  onClose,
-  conversations,
-  activeId,
-  onSelect,
-}: {
-  open: boolean;
-  onClose: () => void;
-  conversations: ConversationEntry[];
-  activeId: string | null;
-  onSelect: (id: string) => void;
-}) {
+// ── Message bubbles ──────────────────────────────────────────────
+function UserBubble({ content }: { content: string }) {
   return (
-    <>
-      {/* Backdrop */}
-      {open && (
-        <div
-          className="fixed inset-0 z-40 bg-black/40 md:bg-transparent"
-          onClick={onClose}
-          aria-hidden="true"
-        />
-      )}
-
-      {/* Drawer panel */}
-      <aside
-        aria-label="Conversation history"
-        className={cn(
-          "fixed left-0 top-0 bottom-0 z-50 w-72 bg-card border-r shadow-xl",
-          "flex flex-col transition-transform duration-300 ease-out",
-          open ? "translate-x-0" : "-translate-x-full",
-        )}
-      >
-        <div className="flex items-center justify-between h-14 px-4 border-b shrink-0">
-          <div className="flex items-center gap-2">
-            <Clock className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-            <span className="font-semibold text-sm">History</span>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Close history"
-            className="rounded p-1 hover:bg-muted transition-colors"
-          >
-            <X className="h-4 w-4" />
-          </button>
+    <div className="flex justify-end gap-3">
+      <div className="max-w-[60%]">
+        <div className="rounded-3xl rounded-tr-lg bg-primary px-5 py-3.5 text-sm text-primary-foreground leading-relaxed shadow-sm">
+          {content}
         </div>
-
-        <div className="flex-1 overflow-y-auto py-2">
-          {conversations.length === 0 ? (
-            <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-              No conversations yet. Start chatting!
-            </div>
-          ) : (
-            conversations.map((conv) => (
-              <button
-                key={conv.id}
-                onClick={() => {
-                  onSelect(conv.id);
-                  onClose();
-                }}
-                aria-label={`Open conversation: ${conv.preview}`}
-                className={cn(
-                  "w-full text-left px-4 py-3 hover:bg-muted transition-colors",
-                  activeId === conv.id && "bg-primary/10",
-                )}
-              >
-                <p className="text-sm font-medium truncate">{conv.preview}</p>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  {conv.agentName && (
-                    <span className="text-xs text-primary capitalize">
-                      {conv.agentName.split("_").join(" ")}
-                    </span>
-                  )}
-                  <span className="text-xs text-muted-foreground">
-                    {conv.timestamp.toLocaleDateString()}
-                  </span>
-                </div>
-              </button>
-            ))
-          )}
-        </div>
-      </aside>
-    </>
+      </div>
+      <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0 mt-1 border border-border/50">
+        <User className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+      </div>
+    </div>
   );
 }
 
-// ── Chat wrapper that captures history entries ────────────────────
-function ChatWithHistory({
-  agentName,
-  onNewMessage,
-}: {
-  agentName: string | undefined;
-  onNewMessage: (preview: string, agent: string | undefined) => void;
+function ThinkingDots() {
+  return (
+    <div className="flex items-center gap-1 py-1" aria-label="Thinking">
+      {[0, 150, 300].map((delay) => (
+        <span
+          key={delay}
+          className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-bounce"
+          style={{ animationDelay: `${delay}ms` }}
+          aria-hidden="true"
+        />
+      ))}
+    </div>
+  );
+}
+
+function AssistantBubble({ content, agentName, isStreaming, isLast, isThinking }: {
+  content: string; agentName?: string; isStreaming: boolean; isLast: boolean; isThinking?: boolean;
 }) {
-  const { messages, isStreaming, sendMessage } = useStream({ agentName });
-  const [input, setInput] = useState("");
+  const modeLabel = MODES.find((m) => m.agentName === agentName)?.label;
+
+  return (
+    <div className="flex gap-3">
+      <div className={cn(
+        "h-8 w-8 rounded-full bg-gradient-to-br flex items-center justify-center shrink-0 mt-1 shadow-sm",
+        isThinking ? "animate-pulse" : "",
+        agentGradient(agentName),
+      )}>
+        <Bot className="h-4 w-4 text-white" aria-hidden="true" />
+      </div>
+      <div className="flex-1 min-w-0">
+        {agentName && agentName !== "system" && (
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/60 mb-1.5 ml-1">
+            {modeLabel ?? agentName.split("_").join(" ")}
+          </p>
+        )}
+        <div className="rounded-3xl rounded-tl-lg bg-card border border-border/50 px-5 py-4 shadow-sm">
+          {isThinking ? (
+            <ThinkingDots />
+          ) : (
+            <MarkdownRenderer content={content} isStreaming={isStreaming && isLast} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Mode chip row ────────────────────────────────────────────────
+function ModeChips({ active, onChange }: { active: ModeAgent; onChange: (m: ModeAgent) => void }) {
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {MODES.map((mode) => {
+        const Icon = mode.icon;
+        const isActive = active === mode.agentName;
+        return (
+          <button
+            key={mode.label}
+            onClick={() => onChange(mode.agentName)}
+            aria-pressed={isActive}
+            aria-label={`Switch to ${mode.label} mode`}
+            className={cn(
+              "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all",
+              isActive
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "border border-border/60 text-muted-foreground hover:border-primary/40 hover:text-foreground hover:bg-primary/5",
+            )}
+          >
+            <Icon className={cn("h-3.5 w-3.5", isActive ? "text-primary-foreground" : mode.color)} aria-hidden="true" />
+            {mode.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Input bar ────────────────────────────────────────────────────
+function InputBar({ value, onChange, onSend, isStreaming, activeMode, onModeChange }: {
+  value: string;
+  onChange: (v: string) => void;
+  onSend: () => void;
+  isStreaming: boolean;
+  activeMode: ModeAgent;
+  onModeChange: (m: ModeAgent) => void;
+}) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+  }, [value]);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); onSend(); }
+  };
+
+  return (
+    <div className="shrink-0 px-4 pb-4 pt-2">
+      <div className={cn(
+        "max-w-5xl mx-auto rounded-3xl border bg-card shadow-lg transition-shadow",
+        "focus-within:shadow-xl focus-within:border-primary/40",
+        isStreaming ? "border-primary/30" : "border-border/60",
+      )}>
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Ask your AI coach anything…"
+          rows={1}
+          disabled={isStreaming}
+          aria-label="Message input"
+          className="w-full resize-none bg-transparent px-5 pt-4 pb-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground/50 disabled:opacity-60 max-h-[160px] overflow-y-auto"
+        />
+        <div className="flex items-center justify-between px-4 pb-3 gap-3">
+          <ModeChips active={activeMode} onChange={onModeChange} />
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="hidden sm:block text-[11px] text-muted-foreground/50">
+              {isStreaming ? "Generating…" : "⌘ Enter"}
+            </span>
+            <button
+              onClick={onSend}
+              disabled={isStreaming || !value.trim()}
+              aria-label={isStreaming ? "Generating response" : "Send message"}
+              className={cn(
+                "h-9 w-9 rounded-2xl flex items-center justify-center transition-all",
+                "bg-primary text-primary-foreground shadow-sm",
+                "hover:bg-primary/90 hover:shadow-md active:scale-95",
+                "disabled:opacity-30 disabled:cursor-not-allowed",
+              )}
+            >
+              {isStreaming ? (
+                <span className="flex gap-0.5" aria-hidden="true">
+                  <span className="h-1 w-1 rounded-full bg-current animate-bounce [animation-delay:0ms]" />
+                  <span className="h-1 w-1 rounded-full bg-current animate-bounce [animation-delay:120ms]" />
+                  <span className="h-1 w-1 rounded-full bg-current animate-bounce [animation-delay:240ms]" />
+                </span>
+              ) : (
+                <ArrowUp className="h-4 w-4" aria-hidden="true" />
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+      <p className="text-center text-[11px] text-muted-foreground/40 mt-2">
+        Powered by Claude · Responses may be inaccurate
+      </p>
+    </div>
+  );
+}
+
+// ── Chat area ────────────────────────────────────────────────────
+function ChatArea({ mode, onNewMessage, onModeChange }: {
+  mode: typeof MODES[number];
+  onNewMessage: (preview: string, agent: string | undefined) => void;
+  onModeChange: (m: ModeAgent) => void;
+}) {
+  const { messages, isStreaming, sendMessage } = useStream({ agentName: mode.agentName ?? undefined });
+  const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastReportedLength = useRef(0);
 
@@ -221,243 +344,111 @@ function ChatWithHistory({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Auto-resize textarea
-  useEffect(() => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
-  }, [input]);
-
-  // Report new assistant messages for history
   useEffect(() => {
     if (messages.length > lastReportedLength.current) {
       const last = messages[messages.length - 1];
       if (last?.role === "user" && messages.length === 1) {
-        onNewMessage(last.content.slice(0, 60), agentName);
+        onNewMessage(last.content.slice(0, 60), mode.agentName ?? undefined);
       }
       lastReportedLength.current = messages.length;
     }
-  }, [messages, agentName, onNewMessage]);
+  }, [messages, mode.agentName, onNewMessage]);
 
-  const handleSend = async () => {
+  const handleSend = useCallback(async () => {
     const text = input.trim();
     if (!text || isStreaming) return;
     setInput("");
     await sendMessage(text);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-      e.preventDefault();
-      void handleSend();
-    }
-  };
-
-  const SUGGESTED_PROMPTS = [
-    "What is RAG and how does it work?",
-    "Review my Python code for production readiness",
-    "Quiz me on LangGraph concepts",
-    "Help me build my AI engineering portfolio",
-  ];
-
-  const isEmpty = messages.length === 0;
+  }, [input, isStreaming, sendMessage]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Messages area */}
-      <div className="flex-1 overflow-y-auto px-6 py-6" aria-live="polite">
-        {isEmpty ? (
-          <div className="flex flex-col items-center justify-center h-full text-center gap-6 py-16">
-            <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center">
-              <span className="text-2xl font-bold text-primary">AI</span>
-            </div>
-            <div className="max-w-sm">
-              <h2 className="font-semibold text-xl">Ask your AI Coach</h2>
-              <p className="text-muted-foreground text-sm mt-2">
-                {agentName
-                  ? `${agentName.split("_").join(" ")} — powered by Claude`
-                  : "The right agent is automatically selected for your question."}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2 justify-center max-w-lg">
-              {SUGGESTED_PROMPTS.map((prompt) => (
-                <button
-                  key={prompt}
-                  onClick={() => setInput(prompt)}
-                  aria-label={`Suggested prompt: ${prompt}`}
-                  className="rounded-full border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
-          </div>
+      <div className="flex-1 overflow-y-auto" aria-live="polite">
+        {messages.length === 0 ? (
+          <WelcomeScreen mode={mode} onPrompt={setInput} />
         ) : (
-          <>
+          <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
             {messages.map((msg, i) => {
               const isLast = i === messages.length - 1;
-              if (msg.role === "user") {
-                return (
-                  <div key={msg.id} className="flex justify-end mb-4">
-                    <div className="max-w-[70%] rounded-2xl rounded-tr-sm bg-primary px-4 py-3 text-sm text-primary-foreground leading-relaxed">
-                      {msg.content}
-                    </div>
-                  </div>
-                );
-              }
-              return (
-                <div key={msg.id} className="mb-6 max-w-3xl">
-                  {msg.agentName && msg.agentName !== "system" && (
-                    <p className="text-xs font-medium text-muted-foreground mb-1.5 capitalize">
-                      {msg.agentName.split("_").join(" ")}
-                    </p>
-                  )}
-                  <div className="prose prose-sm dark:prose-invert max-w-none text-foreground leading-relaxed whitespace-pre-wrap">
-                    {msg.content}
-                    {isStreaming && isLast && (
-                      <span
-                        className="inline-block w-0.5 h-4 bg-primary animate-pulse rounded-full ml-0.5 align-middle"
-                        aria-hidden="true"
-                      />
-                    )}
-                  </div>
-                </div>
-              );
+              return msg.role === "user"
+                ? <UserBubble key={msg.id} content={msg.content} />
+                : <AssistantBubble key={msg.id} content={msg.content} agentName={msg.agentName} isStreaming={isStreaming} isLast={isLast} isThinking={msg.isThinking} />;
             })}
-          </>
+            <div ref={messagesEndRef} className="h-4" />
+          </div>
         )}
-        <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
-      <div className="shrink-0 border-t bg-card px-6 py-4">
-        <div className="flex gap-3 max-w-3xl mx-auto items-end">
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask your AI coach anything..."
-            rows={1}
-            disabled={isStreaming}
-            aria-label="Message input"
-            className={cn(
-              "flex-1 resize-none rounded-xl border border-input bg-background px-4 py-3 text-sm leading-relaxed outline-none",
-              "focus:ring-2 focus:ring-primary/30 focus:border-primary transition",
-              "max-h-[120px] overflow-y-auto disabled:opacity-60",
-            )}
-          />
-          <button
-            onClick={() => void handleSend()}
-            disabled={isStreaming || !input.trim()}
-            aria-label={isStreaming ? "Generating response" : "Send message"}
-            className={cn(
-              "shrink-0 h-11 w-11 rounded-xl flex items-center justify-center transition-colors",
-              "bg-primary text-primary-foreground hover:bg-primary/90",
-              "disabled:opacity-40 disabled:cursor-not-allowed",
-            )}
-          >
-            {isStreaming ? (
-              <span className="flex gap-0.5" aria-hidden="true">
-                <span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:0ms]" />
-                <span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:150ms]" />
-                <span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:300ms]" />
-              </span>
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5" aria-hidden="true">
-                <path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" />
-              </svg>
-            )}
-          </button>
-        </div>
-        <p className="text-center text-xs text-muted-foreground mt-2">
-          {isStreaming ? "Generating…" : "Cmd+Enter to send · Powered by Claude"}
-        </p>
-      </div>
+      <InputBar
+        value={input}
+        onChange={setInput}
+        onSend={() => void handleSend()}
+        isStreaming={isStreaming}
+        activeMode={mode.agentName}
+        onModeChange={onModeChange}
+      />
     </div>
   );
 }
 
 // ── Page ─────────────────────────────────────────────────────────
 export default function ChatPage() {
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [activeMode, setActiveMode] = useState<ModeAgent>(null);
   const [conversations, setConversations] = useState<ConversationEntry[]>([]);
-  const [activeConvId] = useState<string | null>(null);
-  // Key to force remount ChatWithHistory when agent changes
+  const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [chatKey, setChatKey] = useState(0);
 
-  const { data: agents = [] } = useQuery<AgentListItem[]>({
-    queryKey: ["agents", "list"],
-    queryFn: () => api.get<AgentListItem[]>("/api/v1/agents/list"),
-    staleTime: 60_000,
-  });
+  const currentMode = MODES.find((m) => m.agentName === activeMode) ?? MODES[0];
 
-  const handleAgentSelect = (name: string | null) => {
-    setSelectedAgent(name);
-    setChatKey((k) => k + 1); // Reset chat when agent changes
+  const handleModeChange = (m: ModeAgent) => {
+    setActiveMode(m);
+    setChatKey((k) => k + 1);
   };
 
-  const handleNewMessage = (preview: string, agent: string | undefined) => {
+  const handleNew = () => {
+    setActiveMode(null);
+    setChatKey((k) => k + 1);
+    setActiveConvId(null);
+  };
+
+  const handleNewMessage = useCallback((preview: string, agent: string | undefined) => {
+    const id = crypto.randomUUID();
+    setActiveConvId(id);
     setConversations((prev) => [
-      {
-        id: crypto.randomUUID(),
-        preview,
-        agentName: agent,
-        timestamp: new Date(),
-      },
-      ...prev.slice(0, 19), // Keep last 20
+      { id, preview, agentName: agent, timestamp: new Date() },
+      ...prev.slice(0, 19),
     ]);
-  };
+  }, []);
 
   return (
     <div className="flex h-full overflow-hidden bg-background">
-      {/* History drawer */}
-      <HistoryDrawer
-        open={historyOpen}
-        onClose={() => setHistoryOpen(false)}
+      <Sidebar
         conversations={conversations}
         activeId={activeConvId}
-        onSelect={() => setHistoryOpen(false)}
+        onSelect={setActiveConvId}
+        onNew={handleNew}
       />
 
-      {/* Main chat column */}
       <div className="flex flex-col flex-1 overflow-hidden min-w-0">
-        {/* Top bar */}
-        <header className="flex items-center gap-3 h-14 px-4 border-b bg-card shrink-0">
-          <Link
-            href="/dashboard"
-            aria-label="Back to dashboard"
-            className="rounded p-1.5 hover:bg-muted transition-colors"
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-
-          <div className="flex-1 min-w-0 flex items-center gap-3">
-            <AgentSelector
-              agents={agents}
-              selected={selectedAgent}
-              onSelect={handleAgentSelect}
-            />
+        {/* Mobile top bar */}
+        <header className="lg:hidden flex items-center justify-between h-14 px-4 border-b bg-card/80 backdrop-blur shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
+              <Bot className="h-4 w-4 text-white" aria-hidden="true" />
+            </div>
+            <span className="font-semibold text-sm">AI Tutor</span>
           </div>
-
-          <button
-            onClick={() => setHistoryOpen(true)}
-            aria-label="Open conversation history"
-            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-muted transition-colors"
-          >
-            <PanelLeft className="h-4 w-4" aria-hidden="true" />
-            <span className="hidden sm:inline">History</span>
+          <button onClick={handleNew} aria-label="New conversation" className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground">
+            <Plus className="h-4 w-4" aria-hidden="true" />
           </button>
         </header>
 
-        {/* Chat area */}
         <div className="flex-1 overflow-hidden">
-          <ChatWithHistory
+          <ChatArea
             key={chatKey}
-            agentName={selectedAgent ?? undefined}
+            mode={currentMode}
             onNewMessage={handleNewMessage}
+            onModeChange={handleModeChange}
           />
         </div>
       </div>

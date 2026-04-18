@@ -3,9 +3,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import SecretStr
 
 from app.agents.base_agent import AgentState, BaseAgent
 from app.agents.registry import register
@@ -30,12 +28,9 @@ class DisruptPreventionAgent(BaseAgent):
     ]
     model = "claude-sonnet-4-6"
 
-    def _build_llm(self) -> ChatAnthropic:
-        return ChatAnthropic(  # type: ignore[call-arg]
-            model=self.model,
-            anthropic_api_key=SecretStr(settings.anthropic_api_key) if settings.anthropic_api_key else None,
-            max_tokens=1024,
-        )
+    def _build_llm(self, max_tokens: int = 1024):
+        from app.agents.llm_factory import build_llm
+        return build_llm(max_tokens=max_tokens)
 
     async def execute(self, state: AgentState) -> AgentState:
         days_inactive: int = int(state.context.get("days_inactive", 0))
@@ -55,7 +50,7 @@ class DisruptPreventionAgent(BaseAgent):
             )
 
         last_lesson = state.context.get("last_lesson", "an earlier lesson")
-        streak_before = state.context.get("streak_before", 0)
+        streak_before = int(state.context.get("streak_before", 0))
         student_name = state.context.get("student_name", "there")
 
         llm = self._build_llm()
@@ -65,9 +60,12 @@ class DisruptPreventionAgent(BaseAgent):
                 content=(
                     f"Student {student_name} has been inactive for {days_inactive} days.\n"
                     f"Last lesson completed: {last_lesson}\n"
-                    f"Previous streak: {streak_before} days\n\n"
+                    f"Consistency before the gap: {streak_before} days in a row\n\n"
                     "Write a personalized, warm re-engagement message. "
                     "Reference their specific progress. Be encouraging, not guilt-tripping. "
+                    "Do NOT say things like 'your streak is waiting' or 'don't break it' — "
+                    "that's loss-aversion framing. Acknowledge the prior consistency as "
+                    "real behavior they already have in them. "
                     "Include one concrete next step they can take in under 10 minutes."
                 )
             ),
