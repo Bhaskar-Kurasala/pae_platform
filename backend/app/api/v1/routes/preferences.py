@@ -35,6 +35,7 @@ async def update_my_preferences(
     prefs = await PreferencesService(db).update(
         current_user.id,
         tutor_mode=payload.tutor_mode,
+        socratic_level=payload.socratic_level,
         ugly_draft_mode=payload.ugly_draft_mode,
     )
     return UserPreferencesResponse.model_validate(prefs)

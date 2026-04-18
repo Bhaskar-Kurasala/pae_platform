@@ -6,7 +6,7 @@
 
 **Parallel work:** If you're the teammate shipping 3B in parallel, read [`CONTRIBUTING-P3.md`](CONTRIBUTING-P3.md) first. Your scope = Skill Map + Studio + Receipts + Admin + Infra + Meta + Career (39 tickets). My scope = all of 3A + remaining 3B areas. File ownership, claim protocol, migration numbering, and browser-verification protocol are all in that doc.
 
-**Next migration number to reserve:** `0011` (current head: `0009_submission_sharing`; `0010_conversation_memory` reserved by 3A-2 — always verify with `ls backend/alembic/versions/ | sort | tail -1` before claiming, since Phase 3A is also adding migrations).
+**Next migration number to reserve:** `0012` (current head: `0009_submission_sharing`; `0010_conversation_memory` (3A-2) + `0011_socratic_level` (3A-3) reserved — always verify with `ls backend/alembic/versions/ | sort | tail -1` before claiming, since Phase 3A is also adding migrations).
 
 ---
 
@@ -53,7 +53,7 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `tutor.memory_loaded { skill_id, memory_age_hours }`.
 
 ### 3A-3: Socratic intensity slider (#68)
-- [ ] not started
+- [~] in progress — migration 0011 reserved
 - **Why:** Binary "strict socratic" toggle is too blunt. Level 0-3 lets students self-select push intensity per session.
 - **Touches:** `user_preferences.socratic_level` column (migrate existing boolean: `true`→2, `false`→0), `components/features/socratic-slider.tsx` (replaces existing toggle), `stream.py` reads new column.
 - **Acceptance:** existing users keep working via migration; new slider in preferences.

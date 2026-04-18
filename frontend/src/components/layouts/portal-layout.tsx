@@ -26,7 +26,7 @@ import { UserAvatar } from "@/components/features/user-avatar";
 import { Separator } from "@/components/ui/separator";
 import { Kbd } from "@/components/ui/kbd";
 import { useMyNotifications } from "@/lib/hooks/use-notifications";
-import { TutorModeToggle } from "@/components/features/tutor-mode-toggle";
+import { SocraticSlider } from "@/components/features/socratic-slider";
 
 function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
@@ -139,7 +139,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
           <p className="text-sm font-medium truncate">{user?.full_name ?? "User"}</p>
           <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
         </div>
-        <TutorModeToggle />
+        <SocraticSlider />
         <ThemeToggle />
         <button
           onClick={handleLogout}

@@ -193,14 +193,18 @@ def _reflection_age_days(
 
 
 def _derive_socratic_level(prefs: UserPreferences | None) -> int:
-    """Map the current boolean/string state into the 0-3 scale.
+    """Return the stored 0-3 intensity.
 
-    3A-3 will add a proper column; until then derive from tutor_mode:
-      - socratic_strict → 3
-      - standard        → 0
+    Falls back to deriving from `tutor_mode` only if the column is somehow
+    missing — protects against rows written before the 0011 migration was
+    applied in a given environment. Post-migration this should always read
+    straight off `prefs.socratic_level`.
     """
     if prefs is None:
         return 0
+    level = getattr(prefs, "socratic_level", None)
+    if isinstance(level, int):
+        return max(0, min(3, level))
     if prefs.tutor_mode == "socratic_strict":
         return 3
     return 0

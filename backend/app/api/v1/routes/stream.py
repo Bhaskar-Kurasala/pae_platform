@@ -46,6 +46,33 @@ _SOCRATIC_STRICT_OVERLAY = (
     "Rule of thumb: every response ends with a '?'. No exceptions."
 )
 
+# Graded socratic overlays (3A-3). Intensity is chosen by the student in the
+# preferences slider; the strict overlay above remains for level 3 so the
+# existing test coverage still passes.
+_SOCRATIC_GENTLE_OVERLAY = (
+    "\n\n---\nUser prefers GENTLE socratic nudging. Prefer one short guiding "
+    "question at the top of your reply, then give a direct answer if appropriate. "
+    "Aim for about one question for every two direct statements."
+)
+
+_SOCRATIC_STANDARD_OVERLAY = (
+    "\n\n---\nUser prefers STANDARD socratic coaching. Lead with a question that "
+    "surfaces the student's current understanding, then help them work toward the "
+    "answer with hints — give direct answers only after they've attempted reasoning, "
+    "or when the question is purely factual."
+)
+
+
+def _socratic_overlay_for(level: int) -> str | None:
+    """Map 0-3 to the right overlay string (or `None` for off)."""
+    if level <= 0:
+        return None
+    if level == 1:
+        return _SOCRATIC_GENTLE_OVERLAY
+    if level == 2:
+        return _SOCRATIC_STANDARD_OVERLAY
+    return _SOCRATIC_STRICT_OVERLAY
+
 log = structlog.get_logger()
 
 router = APIRouter(prefix="/agents", tags=["agents-stream"])
@@ -132,6 +159,7 @@ async def _token_generator(
     scaffolding: ScaffoldingLevel | None = None,
     tutor_mode: str = "standard",
     student_context_block: str | None = None,
+    socratic_level: int = 0,
 ) -> AsyncGenerator[str, None]:
     """Yield SSE-formatted token chunks from Claude's stream."""
     try:
@@ -146,8 +174,14 @@ async def _token_generator(
         if student_context_block:
             system_prompt += "\n\n" + student_context_block
 
-        if tutor_mode == "socratic_strict":
-            system_prompt += _SOCRATIC_STRICT_OVERLAY
+        # Graded intensity takes precedence over the legacy strict toggle.
+        # tutor_mode is still honored at level 0 so a user on an old client
+        # that only writes tutor_mode="socratic_strict" still gets strict.
+        overlay = _socratic_overlay_for(socratic_level)
+        if overlay is None and tutor_mode == "socratic_strict":
+            overlay = _SOCRATIC_STRICT_OVERLAY
+        if overlay:
+            system_prompt += overlay
 
         if scaffolding is not None:
             system_prompt += (
@@ -258,10 +292,12 @@ async def stream_chat(
 
     scaffolding: ScaffoldingLevel | None = None
     tutor_mode = "standard"
+    socratic_level = 0
     student_context_block: str | None = None
     async with AsyncSessionLocal() as session:
         prefs = await PreferencesService(session).get_or_create(current_user.id)
         tutor_mode = prefs.tutor_mode
+        socratic_level = getattr(prefs, "socratic_level", 0) or 0
         if skill_id_raw:
             try:
                 skill_uuid = uuid.UUID(skill_id_raw)
@@ -297,6 +333,7 @@ async def stream_chat(
             scaffolding,
             tutor_mode,
             student_context_block,
+            socratic_level,
         ),
         media_type="text/event-stream",
         headers={
@@ -305,5 +342,6 @@ async def stream_chat(
             "X-Agent-Name": agent_name,
             "X-Scaffolding-Level": scaffolding.label if scaffolding else "none",
             "X-Tutor-Mode": tutor_mode,
+            "X-Socratic-Level": str(socratic_level),
         },
     )

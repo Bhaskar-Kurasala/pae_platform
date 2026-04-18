@@ -638,8 +638,18 @@ export const seniorReviewApi = {
 
 export type TutorMode = "standard" | "socratic_strict";
 
+export type SocraticLevel = 0 | 1 | 2 | 3;
+
+export const SOCRATIC_LEVEL_LABELS: Record<SocraticLevel, string> = {
+  0: "off",
+  1: "gentle",
+  2: "standard",
+  3: "strict",
+};
+
 export interface UserPreferences {
   tutor_mode: TutorMode;
+  socratic_level: SocraticLevel;
   ugly_draft_mode: boolean;
 }
 
