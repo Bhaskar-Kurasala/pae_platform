@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTheme } from "next-themes";
+import { MobileBottomNav } from "@/components/layouts/mobile-bottom-nav";
 import {
   BookOpen,
   Briefcase,
@@ -157,9 +158,78 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
 
 export function PortalLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [dragX, setDragX] = useState<number | null>(null);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const mainRef = useRef<HTMLElement | null>(null);
+
+  // P3 #131 — edge-swipe to open drawer + swipe-to-close inside drawer.
+  function handleEdgeTouchStart(e: React.TouchEvent) {
+    const t = e.touches[0];
+    if (t.clientX < 24 && !sidebarOpen) {
+      touchStartRef.current = { x: t.clientX, y: t.clientY };
+    }
+  }
+  function handleEdgeTouchMove(e: React.TouchEvent) {
+    const start = touchStartRef.current;
+    if (!start) return;
+    const t = e.touches[0];
+    const dx = t.clientX - start.x;
+    const dy = Math.abs(t.clientY - start.y);
+    if (dy < 60 && dx > 40) {
+      setSidebarOpen(true);
+      touchStartRef.current = null;
+    }
+  }
+  function handleEdgeTouchEnd() {
+    touchStartRef.current = null;
+  }
+
+  function handleDrawerTouchStart(e: React.TouchEvent) {
+    const t = e.touches[0];
+    touchStartRef.current = { x: t.clientX, y: t.clientY };
+    setDragX(0);
+  }
+  function handleDrawerTouchMove(e: React.TouchEvent) {
+    const start = touchStartRef.current;
+    if (!start) return;
+    const t = e.touches[0];
+    const dx = Math.min(0, t.clientX - start.x);
+    setDragX(dx);
+  }
+  function handleDrawerTouchEnd() {
+    if (dragX !== null && dragX < -60) setSidebarOpen(false);
+    setDragX(null);
+    touchStartRef.current = null;
+  }
+
+  // P3 #136 — when a textarea/input on mobile gains focus, scroll it into view
+  // above the on-screen keyboard.
+  useEffect(() => {
+    const mq = window.matchMedia("(pointer: coarse)");
+    if (!mq.matches) return;
+    function onFocusIn(e: FocusEvent) {
+      const el = e.target as HTMLElement | null;
+      if (!el) return;
+      if (
+        el.tagName === "TEXTAREA" ||
+        (el.tagName === "INPUT" && (el as HTMLInputElement).type !== "checkbox")
+      ) {
+        setTimeout(() => {
+          el.scrollIntoView({ block: "center", behavior: "smooth" });
+        }, 180);
+      }
+    }
+    document.addEventListener("focusin", onFocusIn);
+    return () => document.removeEventListener("focusin", onFocusIn);
+  }, []);
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden">
+    <div
+      className="flex h-screen bg-background overflow-hidden"
+      onTouchStart={handleEdgeTouchStart}
+      onTouchMove={handleEdgeTouchMove}
+      onTouchEnd={handleEdgeTouchEnd}
+    >
       {/* Desktop sidebar */}
       <aside className="hidden md:flex w-64 flex-col border-r bg-card shrink-0">
         <SidebarContent />
@@ -173,7 +243,17 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
             onClick={() => setSidebarOpen(false)}
             aria-hidden="true"
           />
-          <aside className="absolute left-0 top-0 bottom-0 w-72 bg-card border-r shadow-xl">
+          <aside
+            className="absolute left-0 top-0 bottom-0 w-72 bg-card border-r shadow-xl transition-transform"
+            style={
+              dragX !== null
+                ? { transform: `translateX(${dragX}px)`, transitionDuration: "0ms" }
+                : undefined
+            }
+            onTouchStart={handleDrawerTouchStart}
+            onTouchMove={handleDrawerTouchMove}
+            onTouchEnd={handleDrawerTouchEnd}
+          >
             <SidebarContent onClose={() => setSidebarOpen(false)} />
           </aside>
         </div>
@@ -195,7 +275,14 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
           </span>
         </header>
 
-        <main className="flex-1 overflow-auto">{children}</main>
+        <main
+          ref={mainRef}
+          className="flex-1 overflow-auto pb-[calc(env(safe-area-inset-bottom)+64px)] md:pb-0"
+        >
+          {children}
+        </main>
+
+        <MobileBottomNav />
       </div>
     </div>
   );

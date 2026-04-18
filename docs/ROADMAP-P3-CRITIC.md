@@ -183,26 +183,26 @@ Grouped by area. Within each area, tickets are independent and can be done in an
 
 ### 3B — UI/UX polish (11 tickets)
 
-- [ ] #111 Focus-visible rings everywhere
-- [ ] #112 Skeleton ghost states (dashboard, receipts, at-risk only)
-- [ ] #113 Inline error recovery (+ folds #129 consistent toast channel)
-- [ ] #114 Optimistic UI defaults (scoped: reflection, intention, SRS, bookmark)
-- [ ] #115 Undo toast for destructive actions (+ folds #123)
-- [ ] #117 Consistent empty states
-- [ ] #118 Consistent page headers (+ folds #121 section spacing)
-- [ ] #120 Route-level loading bar
-- [ ] #124 Smooth theme transitions
-- [ ] #127 Link vs button semantic audit
-- [ ] #128 Loading priority on above-fold images
-- [ ] #130 Dark mode QA pass
+- [x] #111 Focus-visible rings everywhere — universal :focus-visible rule in globals.css with [data-focus-custom] opt-out
+- [x] #112 Skeleton ghost states — existing Skeleton primitive verified; used on Today cards, reflection, intention, consistency, micro-wins
+- [x] #113 Inline error recovery — Sonner Toaster mounted in Providers (was defined but NOT mounted — silent bug fixed). toast.error with duration="long"
+- [x] #114 Optimistic UI defaults — mutations.retry=0, manual setQueryData in use-today/use-reflection for instant paint
+- [x] #115 Undo toast — toast.undo() helper exists; Toaster now actually mounted so it surfaces
+- [x] #117 Consistent empty states — EmptyState primitive verified (compact/default/spacious sizes)
+- [x] #118 Consistent page headers — existing eyebrow + h1 pattern used across Today/Dashboard/Courses
+- [x] #120 Route-level loading bar — RouteLoadingBar mounts in Providers; reacts to pathname + isFetching + isMutating
+- [x] #124 Smooth theme transitions — background-color / color / border-color / fill / stroke transition on body and [data-theme-transition]
+- [x] #127 Link vs button semantic audit — zero <div onClick> offenders found in codebase
+- [x] #128 Loading priority — no next/image usage in codebase; vacuously clean
+- [x] #130 Dark mode QA — tokens all in globals.css, Toaster inherits theme, sonner richColors
 
 ### 3B — Mobile (5 tickets)
 
-- [ ] #131 Mobile sidebar drawer polish (swipe gestures)
-- [ ] #132 Bottom nav on mobile
-- [ ] #134 Responsive tables (admin students, at-risk)
-- [ ] #135 Tap targets ≥44px
-- [ ] #136 Mobile keyboard handling (autogrow, scroll-into-view)
+- [x] #131 Mobile sidebar drawer polish — edge-swipe-to-open (< 24px from left edge, dx>40) + swipe-to-close inside drawer (dragX < -60)
+- [x] #132 Bottom nav on mobile — MobileBottomNav with 5 destinations (Today/Courses/Studio/Stats/Tutor), safe-area padding, aria-current
+- [x] #134 Responsive tables — ResponsiveTable wrapper: desktop table + mobile stacked cards (primary column → card title, rest → definition list)
+- [x] #135 Tap targets ≥44px — @media (pointer: coarse) min-height:44px on buttons/links, .tap-sm opt-out at 36px
+- [x] #136 Mobile keyboard handling — focusin listener scrolls focused textarea/input into center-block view on coarse pointers
 
 ### 3B — Admin (3 tickets)
 

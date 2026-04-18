@@ -190,6 +190,46 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+
+  /* P3 #124 — Smooth theme transitions on color-affecting properties.
+     Scoped so it doesn't grief layout/transform perf. */
+  body,
+  [data-theme-transition="true"] {
+    transition:
+      background-color var(--motion-base) var(--ease-out-quad),
+      color var(--motion-base) var(--ease-out-quad),
+      border-color var(--motion-base) var(--ease-out-quad),
+      fill var(--motion-base) var(--ease-out-quad),
+      stroke var(--motion-base) var(--ease-out-quad);
+  }
+
+  /* P3 #111 — Universal focus-visible ring. Respects existing custom rings
+     via [data-focus-custom] opt-out on components that paint their own. */
+  :where(button, a, [role="button"], [role="link"], [role="tab"], [role="option"], [role="menuitem"], [tabindex]:not([tabindex="-1"]), input, textarea, select):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: calc(var(--radius) * 0.8);
+  }
+  [data-focus-custom]:focus-visible {
+    outline: none;
+  }
+
+  /* P3 #135 — Mobile tap-target floor. Applies only on coarse pointers
+     (touch) so desktop density stays compact. */
+  @media (pointer: coarse) {
+    button,
+    [role="button"],
+    a[href],
+    [role="link"],
+    input[type="checkbox"],
+    input[type="radio"] {
+      min-height: 44px;
+    }
+    button.tap-sm,
+    [role="button"].tap-sm {
+      min-height: 36px;
+    }
+  }
 }
 
 /* ─── Motion keyframes ─── */
