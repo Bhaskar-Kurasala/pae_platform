@@ -576,9 +576,52 @@ export interface GrowthSnapshot {
   updated_at: string;
 }
 
+// P3B enriched receipt types
+export interface WowData {
+  lessons_delta: number | null;
+  lessons_trend: "up" | "down" | "flat" | "first_week";
+}
+
+export interface SkillCoverageItem {
+  id: string;
+  name: string;
+  mastery: number;
+}
+
+export interface PortfolioItem {
+  id: string;
+  exercise_title: string;
+  submitted_at: string;
+}
+
+export interface ReflectionSummary {
+  mood_counts: Record<string, number>;
+  dominant_mood: string;
+}
+
+export interface DayActivity {
+  day: string;
+  minutes: number;
+}
+
+export interface NextWeekSuggestion {
+  skill_name: string;
+  current_mastery: number;
+}
+
+export interface WeekReceipt {
+  week_over_week: WowData;
+  skills_touched_detail: SkillCoverageItem[];
+  portfolio_items: PortfolioItem[];
+  reflection_summary: ReflectionSummary;
+  daily_activity: DayActivity[];
+  next_week_suggestion: NextWeekSuggestion | null;
+}
+
 export const receiptsApi = {
   listMine: (limit = 12) =>
     api.get<GrowthSnapshot[]>(`/api/v1/receipts/me?limit=${limit}`),
+  getCurrentWeek: () => api.get<WeekReceipt>("/api/v1/receipts/me/week"),
 };
 
 export interface AppNotification {
