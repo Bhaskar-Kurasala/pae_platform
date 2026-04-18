@@ -200,9 +200,9 @@ Grouped by area. Within each area, tickets are independent and can be done in an
 
 ### 3B — Admin (3 tickets)
 
-- [x] #142 Audit log viewer (minimal) DONE (feat/p3b-admin)
-- [x] #148 Content performance (per-lesson confusion/question stats) DONE (feat/p3b-admin)
-- [x] Course+rubric editor (folds #144 + #145, JSON textarea form) DONE (feat/p3b-admin)
+- [x] #142 Audit log viewer (minimal) DONE (121a883, feat/p3b-admin)
+- [x] #148 Content performance (per-lesson confusion/question stats) DONE (121a883, feat/p3b-admin)
+- [x] Course+rubric editor (folds #144 + #145, JSON textarea form) DONE (121a883, feat/p3b-admin)
 
 ### 3B — Engagement (4 tickets)
 
