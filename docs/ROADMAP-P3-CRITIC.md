@@ -147,7 +147,7 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Shipped:** `GET /today/consistency` returns `{days_this_week, window_days}` — distinct UTC-date count over rolling 7-day window; emits `today.consistency_shown`. Pure helpers `window_bounds` + `count_active_days` tested (7/7 pass, see `run_3a14_tests.py`). Frontend widget pending.
 
 ### 3A-15: Stuck-for-10-min intervention (NEW)
-- [ ] not started
+- [x] DONE — stuck-banner.tsx mounted above Studio; resets on code change / run; shows after 10min idle with "Ask the tutor" (emits `studio.stuck_ask_tutor`) + dismiss (`studio.stuck_dismissed`); 3 Vitest tests
 - **Why:** Students stuck silently = worst failure mode. Proactive "want a hint?" without forcing interruption.
 - **Touches:** Studio page tracks time since last code change. At 10 min with no submission, non-blocking banner: "Stuck? Ask the tutor what to try." Clicking opens a pre-filled tutor prompt with current code.
 - **Acceptance:** simulate 10-min inactivity; banner appears; dismissal + "ask tutor" path both work.

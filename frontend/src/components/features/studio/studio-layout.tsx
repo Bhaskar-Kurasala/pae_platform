@@ -30,6 +30,7 @@ import { SnippetToolbar } from "./snippet-toolbar";
 import { StudioProvider, useStudio } from "./studio-context";
 import { UglyDraftToggle } from "./ugly-draft-toggle";
 import { SeniorReviewPanel } from "./senior-review-panel";
+import { StuckBanner } from "./stuck-banner";
 import { useSeniorReview } from "@/lib/hooks/use-senior-review";
 
 function PromptPreviewPanelWrapper() {
@@ -342,6 +343,7 @@ function StudioLayoutInner() {
     return (
       <>
         <div className="flex h-full flex-col overflow-hidden" data-slot="studio">
+          <StuckBanner />
           <div className="flex-1 overflow-hidden">{topRow}</div>
           <div className="h-10 shrink-0 border-t border-border">
             <StudioPane
@@ -369,16 +371,19 @@ function StudioLayoutInner() {
 
   return (
     <>
-      <div className="h-full overflow-hidden" data-slot="studio">
-        <ResizableSplit
-          direction="vertical"
-          initial={72}
-          min={50}
-          max={90}
-          storageKey="studio.split.v"
-          first={topRow}
-          second={bottomRow}
-        />
+      <div className="flex h-full flex-col overflow-hidden" data-slot="studio">
+        <StuckBanner />
+        <div className="flex-1 overflow-hidden">
+          <ResizableSplit
+            direction="vertical"
+            initial={72}
+            min={50}
+            max={90}
+            storageKey="studio.split.v"
+            first={topRow}
+            second={bottomRow}
+          />
+        </div>
       </div>
       {reviewPanel}
     </>
