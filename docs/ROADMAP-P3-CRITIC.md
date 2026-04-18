@@ -219,7 +219,7 @@ Grouped by area. Within each area, tickets are independent and can be done in an
 - [x] #163 Redis key namespacing DONE
 - [x] #164 Backup runbook (docs/ops/backup-restore.md) DONE
 - [x] #165 Cost monitoring (token usage to agent_actions.metadata) DONE
-- [ ] #167 CI gates audit
+- [~] #167 CI gates audit (p3b, feat/p3b-infra)
 
 ### 3B — Meta (2 tickets)
 
