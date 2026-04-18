@@ -149,7 +149,7 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `studio.stuck_intervention_shown`, `studio.stuck_intervention_ignored | accepted`.
 
 ### 3A-16: Gap analysis on Receipts (#78)
-- [ ] not started
+- [x] DONE (4092934)
 - **Why:** Honest "you've avoided X for 3 weeks" card. Students need to see what they're not doing, not just what they are.
 - **Touches:** `receipts` page; backend computes skills with last_touched >21 days and mastery <0.5. Returns top 3.
 - **Acceptance:** with test data, card shows 3 skills with "last touched" dates.
