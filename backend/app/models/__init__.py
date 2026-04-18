@@ -18,6 +18,7 @@ from app.models.srs_card import SRSCard
 from app.models.student_progress import StudentProgress
 from app.models.user import User
 from app.models.user_preferences import UserPreferences
+from app.models.saved_skill_path import SavedSkillPath
 from app.models.user_skill_state import UserSkillState
 
 __all__ = [
@@ -42,4 +43,5 @@ __all__ = [
     "SRSCard",
     "UserPreferences",
     "UserSkillState",
+    "SavedSkillPath",
 ]
