@@ -215,7 +215,7 @@ Grouped by area. Within each area, tickets are independent and can be done in an
 - [x] #158 Structured logging audit DONE
 - [x] #159 Request ID propagation DONE
 - [x] #160 Deep health checks (/health/live, /health/ready) DONE
-- [ ] #162 DB pool tuning (config line)
+- [~] #162 DB pool tuning (config line) (p3b, feat/p3b-infra)
 - [ ] #163 Redis key namespacing
 - [ ] #164 Backup runbook (docs/ops/backup-restore.md)
 - [ ] #165 Cost monitoring (token usage to agent_actions.metadata)
