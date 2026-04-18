@@ -321,6 +321,17 @@ Covered in 3A. No additional 3B tutor tickets.
 
 ---
 
+## Migration number reservations (3B)
+
+| Number | Area | Ticket | Purpose |
+|---|---|---|---|
+| 0010 | meta | #177 | feedback table |
+| 0011 | career | #168/#169 | resumes + interview_questions tables |
+
+Next available: 0012
+
+---
+
 ## Cross-cutting new tables introduced in 3A/3B
 
 | Table | Ticket | Added |
