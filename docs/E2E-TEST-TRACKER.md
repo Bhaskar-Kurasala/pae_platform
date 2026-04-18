@@ -24,8 +24,8 @@ This file is the single source of truth for E2E execution progress. Every test i
 | Admin console | 8 | 0 | 0 | 2 | 6 | 0 |
 | Mobile & gestures | 7 | 0 | 0 | 7 | 0 | 0 |
 | Accessibility | 6 | 0 | 0 | 2 | 4 | 0 |
-| Dark-mode & theme | 4 | 4 | 0 | 0 | 0 | 0 |
-| **Total** | **105** | **4** | **0** | **11** | **56** | **34** |
+| Dark-mode & theme | 4 | 0 | 0 | 4 | 0 | 0 |
+| **Total** | **105** | **0** | **0** | **15** | **56** | **34** |
 
 **Legend**
 - `pending` — not yet started
@@ -215,10 +215,10 @@ Keep each bullet ≤ 1 line. If there's more to say, file a ticket and link it.
 
 | # | Test | Category | Status | Outcome (3 bullets) |
 |---|---|---|---|---|
-| TH1 | toggling theme persists via `next-themes` across refresh | Feature | pending | — |
-| TH2 | theme toggle transitions colors smoothly (no flash of wrong theme on load) | Feature | pending | — |
-| TH3 | dark mode contrast on `/today` cards meets WCAG AA 4.5:1 | A11y | pending | — |
-| TH4 | code editor in Studio respects theme (dark editor on dark mode) | Feature | pending | — |
+| TH1 | toggling theme persists via `next-themes` across refresh | Feature | **passing** | • Clicked `aria-label="Switch to dark mode"` on `/today`; `<html>` class flipped `light` → `dark`, `localStorage.theme="dark"`, button label inverted to "Switch to light mode"<br>• Full navigation to `/today` (fresh page load) preserved the dark class, color-scheme `dark`, and localStorage value<br>• Wired via [providers.tsx:27-39](../frontend/src/lib/providers.tsx#L27-L39) `<ThemeProvider attribute="class" defaultTheme="system" enableSystem>` — idiomatic next-themes setup |
+| TH2 | theme toggle transitions colors smoothly (no flash of wrong theme on load) | Feature | **passing (with caveat)** | • Inline `next-themes` script is injected into `<head>` and runs before hydration — script excerpt: `((a,b,c,d,e,f,g,h)=>{let i=document.documentElement,j=["light","dark"]…}` sets the class before first paint<br>• Fresh navigation with `localStorage.theme=dark` renders dark background from the very first frame — no FOUC observed<br>• Caveat: `<html>` in [layout.tsx:23](../frontend/src/app/layout.tsx#L23) lacks `suppressHydrationWarning` — next-themes docs recommend it to silence React's hydration-mismatch warning. No warnings fired in this build but it's best practice; flag as a 1-line polish (no separate DISC). |
+| TH3 | dark mode contrast on `/today` cards meets WCAG AA 4.5:1 | A11y | **passing** | • axe v4.10.2 `color-contrast` scan on dark `/today`: **0 violations** of any severity<br>• Dark theme uses deeper backgrounds where the teal primary actually achieves passing ratios, unlike on white (AC1). Dark mode is effectively the a11y-safe path today<br>• Implication: DISC-59 (teal token shift) will improve both modes; dark mode is not blocked on it |
+| TH4 | code editor in Studio respects theme (dark editor on dark mode) | Feature | **passing** | • On dark theme `/studio`: Monaco `getEditors()[0]` className contains `vs-dark`, domNode bg `rgb(30,30,30)` — the canonical vs-dark editor background<br>• Toggling to light: Monaco className flips to `vs`, bg `rgb(255,255,254)` — live update, no remount, cursor/selection preserved<br>• Confirms Studio's code-editor component subscribes to `next-themes`'s `useTheme()` and calls Monaco's `setTheme()` on change |
 
 ---
 
