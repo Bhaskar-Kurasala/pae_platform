@@ -232,7 +232,12 @@ export const exercisesApi = {
   get: (id: string) => api.get<ExerciseResponse>(`/api/v1/exercises/${id}`),
   submit: (
     id: string,
-    payload: { code: string; shared_with_peers?: boolean; share_note?: string },
+    payload: {
+      code: string;
+      shared_with_peers?: boolean;
+      share_note?: string;
+      self_explanation?: string;
+    },
   ) => api.post<SubmissionResponse>(`/api/v1/exercises/${id}/submit`, payload),
   peerGallery: (id: string, limit = 20) =>
     api.get<PeerSubmissionItem[]>(

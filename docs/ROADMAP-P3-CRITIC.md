@@ -100,7 +100,8 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `tutor.honesty_hedge_triggered`.
 
 ### 3A-9: Self-explanation before grade (#87 + #88)
-- [~] backend DONE (b693d0a); frontend modal blocked by Turbopack CSS
+- [x] DONE — FE wired post-3B-integration.
+- **Frontend:** `components/features/self-explanation-modal.tsx` intercepts the exercise submit flow on `/exercises/[id]`. Modal asks "why does your approach work?" with a 10-char-min textarea (1000 max). Two actions: `Submit with explanation` (posts with `self_explanation`) or `Skip & submit` (posts without). Grade is only revealed after the modal closes, preserving the metacognition gate. 4/4 Vitest tests + tsc clean.
 - **Why:** Seeing pass/fail short-circuits metacognition. "Why does this work?" before grade forces thinking.
 - **Touches:** exercise submit flow — on submit, intercept with modal asking "in one sentence, why does your approach work?" Store in `reflections` with `kind='self_explanation'`. Show grade after.
 - **Trigger points:** also after lesson completion (optional prompt).

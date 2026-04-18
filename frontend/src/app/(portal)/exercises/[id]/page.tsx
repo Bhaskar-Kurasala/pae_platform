@@ -6,6 +6,7 @@ import { ArrowLeft, Loader2, Send, Star } from "lucide-react";
 import { exercisesApi } from "@/lib/api-client";
 import { ApiError } from "@/lib/api-client";
 import { PeerGallery } from "@/components/features/peer-gallery";
+import { SelfExplanationModal } from "@/components/features/self-explanation-modal";
 
 export default function ExerciseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -17,24 +18,34 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
   const [error, setError] = useState("");
   const [share, setShare] = useState(false);
   const [shareNote, setShareNote] = useState("");
+  const [explainOpen, setExplainOpen] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    setResult(null);
+    // Intercept: ask the student to reflect BEFORE they see the grade.
+    setExplainOpen(true);
+  }
+
+  async function performSubmit(selfExplanation: string) {
     setSubmitting(true);
     try {
       const sub = await exercisesApi.submit(id, {
         code,
         shared_with_peers: share,
         share_note: share ? shareNote.trim() || undefined : undefined,
+        self_explanation: selfExplanation || undefined,
       });
       setResult({ score: sub.score ?? undefined, feedback: sub.feedback ?? undefined });
+      setExplainOpen(false);
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
       } else {
         setError("Submission failed. Please try again.");
       }
+      setExplainOpen(false);
     } finally {
       setSubmitting(false);
     }
@@ -161,6 +172,13 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
       )}
 
       <PeerGallery exerciseId={id} />
+
+      <SelfExplanationModal
+        open={explainOpen}
+        submitting={submitting}
+        onConfirm={(explanation) => void performSubmit(explanation)}
+        onCancel={() => setExplainOpen(false)}
+      />
     </div>
   );
 }
