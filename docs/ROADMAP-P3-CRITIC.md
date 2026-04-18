@@ -53,7 +53,7 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `tutor.memory_loaded { skill_id, memory_age_hours }`.
 
 ### 3A-3: Socratic intensity slider (#68)
-- [~] in progress — migration 0011 reserved
+- [x] DONE (5c62a27)
 - **Why:** Binary "strict socratic" toggle is too blunt. Level 0-3 lets students self-select push intensity per session.
 - **Touches:** `user_preferences.socratic_level` column (migrate existing boolean: `true`→2, `false`→0), `components/features/socratic-slider.tsx` (replaces existing toggle), `stream.py` reads new column.
 - **Acceptance:** existing users keep working via migration; new slider in preferences.
