@@ -6,6 +6,7 @@ import {
   type SkillGraph,
   type SkillPath,
   type UserSkillState,
+  api,
 } from "@/lib/api-client";
 
 export function useSkillGraph() {
@@ -37,6 +38,33 @@ export function useTouchSkill() {
     mutationFn: (skillId: string) => skillsApi.touch(skillId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["skills", "mine"] });
+    },
+  });
+}
+
+// #24 — Path saving
+
+export interface SavedPathResponse {
+  user_id: string;
+  skill_ids: string[];
+}
+
+export function useSavedSkillPath() {
+  return useQuery<SavedPathResponse | null>({
+    queryKey: ["skill-path", "saved"],
+    queryFn: () =>
+      api.get<SavedPathResponse | null>("/api/v1/skills/me/path").catch(() => null),
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useSaveSkillPath() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (skillIds: string[]) =>
+      api.post<void>("/api/v1/skills/me/path", { skill_ids: skillIds }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["skill-path", "saved"] });
     },
   });
 }

@@ -32,7 +32,7 @@ async def test_get_preferences_returns_defaults(client: AsyncClient) -> None:
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body == {"tutor_mode": "standard", "ugly_draft_mode": False}
+    assert body == {"tutor_mode": "standard", "ugly_draft_mode": False, "socratic_level": 0}
 
 
 @pytest.mark.asyncio
