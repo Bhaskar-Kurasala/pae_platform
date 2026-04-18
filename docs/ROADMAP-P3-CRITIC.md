@@ -118,7 +118,7 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `lesson.retrieval_quiz_shown`, `lesson.retrieval_quiz_graded { correct, total }`.
 
 ### 3A-11: Daily intention (#11)
-- [~] backend DONE (131a209); frontend component blocked by Turbopack CSS
+- [x] DONE — today-intention.tsx wired into Today page with read/edit + optimistic save; test green
 - **Why:** 1-line "what do you want to do today" sets the session frame.
 - **Touches:** table `daily_intentions (user_id, date, text)` unique on (user_id, date), route `POST /today/intention`, `today-intention.tsx` component on Today page.
 - **Acceptance:** set intention; reload; it persists. Next day: fresh prompt.

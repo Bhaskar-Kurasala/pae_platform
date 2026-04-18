@@ -727,6 +727,40 @@ export const srsApi = {
     api.post<SRSCard>(`/api/v1/srs/cards/${cardId}/review`, { quality }),
 };
 
+// ── Today surface (3A-11, 3A-14, 3A-17) ──────────────────────────
+export interface DailyIntention {
+  id: string;
+  user_id: string;
+  intention_date: string;
+  text: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConsistencyResponse {
+  days_this_week: number;
+  window_days: number;
+}
+
+export interface MicroWinItem {
+  kind: string;
+  label: string;
+  occurred_at: string;
+}
+
+export interface MicroWinsResponse {
+  wins: MicroWinItem[];
+}
+
+export const todayApi = {
+  getIntention: () => api.get<DailyIntention | null>("/api/v1/today/intention"),
+  setIntention: (text: string) =>
+    api.post<DailyIntention>("/api/v1/today/intention", { text }),
+  consistency: () =>
+    api.get<ConsistencyResponse>("/api/v1/today/consistency"),
+  microWins: () => api.get<MicroWinsResponse>("/api/v1/today/micro-wins"),
+};
+
 // ── Retrieval quiz (3A-10) ───────────────────────────────────────
 export interface RetrievalQuestion {
   id: string;

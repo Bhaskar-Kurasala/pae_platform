@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { MotionFade } from "@/components/ui/motion-fade";
 import { TodayGoalBanner } from "@/components/features/today-goal-banner";
+import { TodayIntention } from "@/components/features/today-intention";
 import { TodayNextAction } from "@/components/features/today-next-action";
 import { TodayReflection } from "@/components/features/today-reflection";
 import { TodayReview } from "@/components/features/today-review";
@@ -71,6 +72,15 @@ export default function TodayPage() {
             data-slot="goal-banner"
           >
             <TodayGoalBanner goal={goal} />
+          </section>
+        </MotionFade>
+        <MotionFade delay={0.08}>
+          <section
+            id="today-intention"
+            aria-label="Today's intention"
+            data-slot="intention"
+          >
+            <TodayIntention />
           </section>
         </MotionFade>
         <MotionFade delay={0.1}>
