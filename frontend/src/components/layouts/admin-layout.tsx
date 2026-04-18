@@ -6,8 +6,10 @@ import {
   AlertTriangle,
   BarChart3,
   BookOpen,
+  ClipboardList,
   Flame,
   LayoutDashboard,
+  LineChart,
   Settings,
   Users,
   Zap,
@@ -24,6 +26,8 @@ const adminNavItems = [
   { href: "/admin/courses", label: "Courses", icon: BookOpen },
   { href: "/admin/agents", label: "Agents", icon: Zap },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
+  { href: "/admin/audit-log", label: "Audit Log", icon: ClipboardList },
+  { href: "/admin/content-performance", label: "Content Perf", icon: LineChart },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
 
