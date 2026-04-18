@@ -24,6 +24,21 @@ def _peer_handle(student_id: uuid.UUID | str) -> str:
     return f"peer_{s.replace('-', '')[:6]}"
 
 
+# P3 3A-9: the UI may submit an empty string when the student skips the
+# metacognition modal; treat that as "no explanation" so the column stays
+# NULL and telemetry only fires for real answers.
+_MIN_SELF_EXPLANATION_CHARS = 3
+
+
+def _normalize_self_explanation(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    stripped = raw.strip()
+    if len(stripped) < _MIN_SELF_EXPLANATION_CHARS:
+        return None
+    return stripped
+
+
 class ExerciseService:
     def __init__(self, db: AsyncSession) -> None:
         self.exercise_repo = ExerciseRepository(db)
@@ -43,6 +58,7 @@ class ExerciseService:
     ) -> ExerciseSubmission:
         exercise = await self.get_exercise(exercise_id)
         attempt = await self.submission_repo.count_attempts(student.id, exercise.id) + 1
+        self_explanation = _normalize_self_explanation(payload.self_explanation)
         submission = await self.submission_repo.create(
             {
                 "student_id": student.id,
@@ -53,6 +69,7 @@ class ExerciseService:
                 "attempt_number": attempt,
                 "shared_with_peers": payload.shared_with_peers,
                 "share_note": payload.share_note,
+                "self_explanation": self_explanation,
             }
         )
         log.info(
@@ -62,6 +79,14 @@ class ExerciseService:
             attempt=attempt,
             shared=payload.shared_with_peers,
         )
+        if self_explanation is not None:
+            log.info(
+                "exercise.self_explanation_submitted",
+                exercise_id=str(exercise.id),
+                submission_id=str(submission.id),
+                student_id=str(student.id),
+                length=len(self_explanation),
+            )
         return submission
 
     async def list_peer_gallery(

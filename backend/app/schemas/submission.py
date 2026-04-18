@@ -13,6 +13,10 @@ class SubmissionCreate(BaseModel):
     # explicitly chooses to share.
     shared_with_peers: bool = False
     share_note: str | None = Field(default=None, max_length=500)
+    # P3 3A-9: metacognitive prompt — "in one sentence, why does your
+    # approach work?" Captured before the grade is shown. Capped at 1000
+    # chars so the UI can't stuff an essay into the field.
+    self_explanation: str | None = Field(default=None, max_length=1000)
 
 
 class SubmissionResponse(BaseModel):
@@ -28,6 +32,7 @@ class SubmissionResponse(BaseModel):
     attempt_number: int
     shared_with_peers: bool = False
     share_note: str | None = None
+    self_explanation: str | None = None
     created_at: datetime
     updated_at: datetime
 

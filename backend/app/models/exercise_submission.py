@@ -30,6 +30,10 @@ class ExerciseSubmission(Base, UUIDMixin, TimestampMixin):
     )
     # P2-07: author annotation — what the student wants peers to notice.
     share_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # P3 3A-9: "why does your approach work?" captured pre-grade to force
+    # metacognition. Nullable so legacy rows and UI-less API callers still
+    # flow through.
+    self_explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     student: Mapped["User"] = relationship(back_populates="submissions")
     exercise: Mapped["Exercise"] = relationship(back_populates="submissions")
