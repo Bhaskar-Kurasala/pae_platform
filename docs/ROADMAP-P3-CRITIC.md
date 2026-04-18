@@ -106,7 +106,7 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `exercise.self_explanation_submitted { exercise_id, length }`.
 
 ### 3A-10: Post-lesson retrieval quiz (#95)
-- [ ] not started
+- [~] backend DONE (3da768c); frontend inline quiz blocked by Turbopack CSS
 - **Why:** Testing effect — students remember 2x more with immediate recall.
 - **Touches:** `POST /students/me/lessons/{id}/complete` now returns 3 MCQs from `mcq_bank` filtered to the lesson's skill. Frontend shows inline quiz. Answers update `user_skill_states.confidence`.
 - **Edge cases:** no MCQs in bank for that skill → skip gracefully with a reflection prompt instead.
