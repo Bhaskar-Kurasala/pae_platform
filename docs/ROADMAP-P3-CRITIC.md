@@ -271,11 +271,11 @@ Covered in 3A. No additional 3B tutor tickets.
 ### 3B — Receipts (7 tickets)
 
 - [~] #75 Week-on-week diff (p3b, feat/p3b-receipts)
-- [ ] #76 Concept coverage miniature skill map
-- [ ] #79 Portfolio items this week
-- [ ] #81 Reflection aggregation
-- [ ] #82 Time investment chart
-- [ ] #83 Next-week suggestion
+- [~] #76 Concept coverage miniature skill map (p3b, feat/p3b-receipts)
+- [~] #79 Portfolio items this week (p3b, feat/p3b-receipts)
+- [~] #81 Reflection aggregation (p3b, feat/p3b-receipts)
+- [~] #82 Time investment chart (p3b, feat/p3b-receipts)
+- [~] #83 Next-week suggestion (p3b, feat/p3b-receipts)
 - [ ] #78 Gap analysis → in 3A-16 already
 
 ### 3B — Community (2 tickets)
