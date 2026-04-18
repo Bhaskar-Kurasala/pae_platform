@@ -217,7 +217,7 @@ Grouped by area. Within each area, tickets are independent and can be done in an
 - [x] #160 Deep health checks (/health/live, /health/ready) DONE
 - [x] #162 DB pool tuning (config line) DONE
 - [x] #163 Redis key namespacing DONE
-- [ ] #164 Backup runbook (docs/ops/backup-restore.md)
+- [~] #164 Backup runbook (docs/ops/backup-restore.md) (p3b, feat/p3b-infra)
 - [ ] #165 Cost monitoring (token usage to agent_actions.metadata)
 - [ ] #167 CI gates audit
 
