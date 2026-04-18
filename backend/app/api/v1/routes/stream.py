@@ -29,6 +29,10 @@ from app.core.rate_limit import limiter
 from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.agent import ChatRequest
+from app.services.intent_before_debug_service import (
+    INTENT_BEFORE_DEBUG_OVERLAY,
+    should_apply_intent_overlay,
+)
 from app.services.misconception_service import (
     detect_misconceptions,
     format_overlay as format_misconception_overlay,
@@ -190,6 +194,18 @@ async def _token_generator(
                 f"effective_confidence={scaffolding.effective_confidence:.2f}"
                 + (" (decayed — skill has faded from lack of practice)" if scaffolding.decayed else "")
                 + f".\n{scaffolding.prompt_fragment}"
+            )
+
+        # Intent-before-debug (P3 3A-5): if the student pasted an error and
+        # we routed to a coding agent, force the tutor to ask about intent
+        # before diving in. The overlay is additive to the socratic one so
+        # both rules can compose.
+        if should_apply_intent_overlay(agent_name, message):
+            system_prompt += INTENT_BEFORE_DEBUG_OVERLAY
+            log.info(
+                "tutor.intent_before_debug_triggered",
+                agent=agent_name,
+                message_preview=message[:80],
             )
 
         if code_context:
