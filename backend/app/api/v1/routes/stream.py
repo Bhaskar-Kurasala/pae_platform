@@ -12,6 +12,7 @@ SSE format:
   data: {"chunk": "", "done": true}
 """
 
+import contextlib
 import json
 import uuid
 from collections.abc import AsyncGenerator
@@ -29,6 +30,10 @@ from app.core.rate_limit import limiter
 from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.agent import ChatRequest
+from app.services.disagreement_service import (
+    DISAGREEMENT_OVERLAY,
+    maybe_log_disagreement,
+)
 from app.services.intent_before_debug_service import (
     INTENT_BEFORE_DEBUG_OVERLAY,
     should_apply_intent_overlay,
@@ -164,6 +169,7 @@ async def _token_generator(
     tutor_mode: str = "standard",
     student_context_block: str | None = None,
     socratic_level: int = 0,
+    user_id: uuid.UUID | None = None,
 ) -> AsyncGenerator[str, None]:
     """Yield SSE-formatted token chunks from Claude's stream."""
     try:
@@ -225,6 +231,10 @@ async def _token_generator(
             except Exception as exc:  # detector must never break the stream
                 log.warning("stream.misconception_overlay_failed", error=str(exc))
 
+        # Disagreement rule (P3 3A-6): always on for every tutor turn. The
+        # rule is cheap to state and the cost of a yes-machine is high.
+        system_prompt += DISAGREEMENT_OVERLAY
+
         messages: list[Any] = [SystemMessage(content=system_prompt)]
 
         for turn in conversation_history[-6:]:
@@ -236,6 +246,14 @@ async def _token_generator(
                 messages.append(AIMessage(content=content))
 
         messages.append(HumanMessage(content=message))
+
+        # Buffer the full reply so we can scan for disagreement markers after
+        # streaming completes (P3 3A-6). Cap the buffer defensively — only the
+        # beginning matters for the scan, and unbounded concatenation on a
+        # long reply wastes memory.
+        reply_chunks: list[str] = []
+        reply_total = 0
+        _REPLY_SCAN_CAP = 4000
 
         async for chunk in llm.astream(messages):
             content = getattr(chunk, "content", "")
@@ -249,11 +267,31 @@ async def _token_generator(
             else:
                 token = str(content)
             if token:
+                if reply_total < _REPLY_SCAN_CAP:
+                    reply_chunks.append(token)
+                    reply_total += len(token)
                 payload = json.dumps({"chunk": token, "done": False})
                 yield f"data: {payload}\n\n"
 
         # Signal completion
         yield f"data: {json.dumps({'chunk': '', 'done': True})}\n\n"
+
+        # Post-stream: scan for a disagreement marker and persist a
+        # misconception row when the student made a factual claim. Best
+        # effort — a failure here must never surface to the client because
+        # the `done: true` event already shipped.
+        if user_id is not None and reply_chunks:
+            full_reply = "".join(reply_chunks)
+            with contextlib.suppress(Exception):
+                async with AsyncSessionLocal() as log_session:
+                    logged = await maybe_log_disagreement(
+                        log_session,
+                        user_id=user_id,
+                        student_message=message,
+                        tutor_reply=full_reply,
+                    )
+                    if logged is not None:
+                        await log_session.commit()
 
     except Exception as exc:
         log.warning("stream.token_generator_error", error=str(exc))
@@ -350,6 +388,7 @@ async def stream_chat(
             tutor_mode,
             student_context_block,
             socratic_level,
+            current_user.id,
         ),
         media_type="text/event-stream",
         headers={
