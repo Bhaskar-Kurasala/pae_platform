@@ -2,6 +2,7 @@ from app.models.agent_action import AgentAction
 from app.models.confidence_report import ConfidenceReport
 from app.models.conversation_memory import ConversationMemory
 from app.models.course import Course
+from app.models.daily_intention import DailyIntention
 from app.models.enrollment import Enrollment
 from app.models.exercise import Exercise
 from app.models.exercise_submission import ExerciseSubmission
@@ -36,6 +37,7 @@ __all__ = [
     "AgentAction",
     "ConfidenceReport",
     "ConversationMemory",
+    "DailyIntention",
     "Payment",
     "Notification",
     "GoalContract",
