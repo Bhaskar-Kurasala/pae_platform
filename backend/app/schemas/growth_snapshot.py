@@ -1,11 +1,12 @@
-"""Schema for weekly growth snapshots / receipts (P1-C-2, P1-C-3).
+"""Schema for weekly growth snapshots / receipts (P1-C-2, P1-C-3, P3B).
 
 Adds `SkillGapEntry` (P3 3A-16) for the Receipts gap-analysis card.
+P3B adds enriched weekly receipt schemas (WeekReceiptResponse and sub-schemas).
 """
 
 import uuid
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -37,3 +38,49 @@ class SkillGapEntry(BaseModel):
     # Pre-rendered phrase like "3 weeks ago" / "never touched" so the
     # frontend doesn't duplicate the formatting rules.
     last_touched_label: str
+
+
+# ---------------------------------------------------------------------------
+# P3B enriched receipt schemas
+# ---------------------------------------------------------------------------
+
+
+class WowData(BaseModel):
+    lessons_delta: int | None
+    lessons_trend: Literal["up", "down", "flat", "first_week"]
+
+
+class SkillCoverageItem(BaseModel):
+    id: str
+    name: str
+    mastery: float
+
+
+class PortfolioItem(BaseModel):
+    id: str
+    exercise_title: str
+    submitted_at: str
+
+
+class ReflectionSummary(BaseModel):
+    mood_counts: dict[str, int]
+    dominant_mood: str
+
+
+class DayActivity(BaseModel):
+    day: str
+    minutes: int
+
+
+class NextWeekSuggestion(BaseModel):
+    skill_name: str
+    current_mastery: float
+
+
+class WeekReceiptResponse(BaseModel):
+    week_over_week: WowData
+    skills_touched_detail: list[SkillCoverageItem]
+    portfolio_items: list[PortfolioItem]
+    reflection_summary: ReflectionSummary
+    daily_activity: list[DayActivity]
+    next_week_suggestion: NextWeekSuggestion | None

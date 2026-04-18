@@ -10,12 +10,15 @@ import {
   Mail,
   Sparkles,
 } from "lucide-react";
-import { useMyReceipts } from "@/lib/hooks/use-receipts";
+import { useMyReceipts, useCurrentWeekReceipt } from "@/lib/hooks/use-receipts";
 import {
   useMarkNotificationRead,
   useMyNotifications,
 } from "@/lib/hooks/use-notifications";
 import { PortfolioAutopsyWidget } from "@/components/features/portfolio-autopsy-widget";
+import { ReceiptsWowCard } from "@/components/features/receipts-wow-card";
+import { ReceiptsSkillCoverage } from "@/components/features/receipts-skill-coverage";
+import { ReceiptsTimeChart } from "@/components/features/receipts-time-chart";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { AppNotification, GrowthSnapshot } from "@/lib/api-client";
@@ -299,6 +302,7 @@ function EmptyState() {
 
 export default function ReceiptsPage() {
   const { data: receipts, isLoading, isError } = useMyReceipts(12);
+  const { data: weekReceipt } = useCurrentWeekReceipt();
   const { data: notifications } = useMyNotifications({ limit: 50 });
   const markRead = useMarkNotificationRead();
 
@@ -336,6 +340,75 @@ export default function ReceiptsPage() {
       </header>
 
       <PortfolioAutopsyWidget />
+
+      {/* ── P3B: This-week enriched view ── */}
+      {weekReceipt && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold text-foreground">This week</h2>
+
+          {/* #75 Week-on-week diff */}
+          <ReceiptsWowCard wow={weekReceipt.week_over_week} />
+
+          {/* #76 Concept coverage */}
+          <ReceiptsSkillCoverage skills={weekReceipt.skills_touched_detail} />
+
+          {/* #79 Portfolio items */}
+          {weekReceipt.portfolio_items.length > 0 && (
+            <section>
+              <h2 className="mb-2 text-sm font-semibold">Completed this week</h2>
+              <ul className="space-y-1">
+                {weekReceipt.portfolio_items.map((item) => (
+                  <li key={item.id} className="flex items-center gap-2 text-sm">
+                    <CheckCircle2
+                      className="h-3.5 w-3.5 text-primary"
+                      aria-hidden="true"
+                    />
+                    {item.exercise_title}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {/* #81 Reflection aggregation */}
+          {weekReceipt.reflection_summary.dominant_mood !== "none" && (
+            <div className="rounded-md bg-muted/50 px-4 py-3 text-sm">
+              <span className="font-medium">This week&apos;s mood: </span>
+              <span className="capitalize">
+                {weekReceipt.reflection_summary.dominant_mood}
+              </span>
+              {" · "}
+              <span className="text-muted-foreground">
+                {Object.entries(weekReceipt.reflection_summary.mood_counts)
+                  .map(([mood, count]) => `${mood}: ${count}`)
+                  .join(", ")}
+              </span>
+            </div>
+          )}
+
+          {/* #82 Time investment chart */}
+          <ReceiptsTimeChart data={weekReceipt.daily_activity} />
+
+          {/* #83 Next-week suggestion */}
+          {weekReceipt.next_week_suggestion && (
+            <div className="rounded-md border border-primary/30 bg-primary/5 p-4">
+              <p className="text-sm font-medium text-primary">
+                Next week: focus on
+              </p>
+              <p className="mt-1 text-base font-semibold">
+                {weekReceipt.next_week_suggestion.skill_name}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Current mastery:{" "}
+                {Math.round(
+                  weekReceipt.next_week_suggestion.current_mastery * 100,
+                )}
+                %
+              </p>
+            </div>
+          )}
+        </section>
+      )}
 
       {isLoading && (
         <div className="space-y-4">
