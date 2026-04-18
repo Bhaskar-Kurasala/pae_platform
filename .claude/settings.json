@@ -25,17 +25,36 @@
       "Edit",
       "Bash(cd backend*)",
       "Bash(cd frontend*)",
+      "Bash(cd /mnt/*)",
       "Bash(docker compose*)",
       "Bash(make *)",
       "Bash(git *)",
       "Bash(curl *)",
       "Bash(uv *)",
       "Bash(pnpm *)",
-      "Bash(npx *)"
+      "Bash(npx *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(grep *)",
+      "Bash(find *)",
+      "Bash(cp *)",
+      "Bash(mv *)",
+      "Bash(mkdir *)",
+      "Bash(python *)",
+      "Bash(python3 *)"
     ],
     "deny": [
       "Bash(rm -rf /)",
       "Bash(sudo *)"
+    ],
+    "additionalDirectories": [
+      "/mnt/e/Apps/pae_platform/wt/skillmap",
+      "/mnt/e/Apps/pae_platform/wt/studio",
+      "/mnt/e/Apps/pae_platform/wt/receipts",
+      "/mnt/e/Apps/pae_platform/wt/admin",
+      "/mnt/e/Apps/pae_platform/wt/infra",
+      "/mnt/e/Apps/pae_platform/wt/meta",
+      "/mnt/e/Apps/pae_platform/wt/career"
     ]
   }
 }

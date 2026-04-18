@@ -9,8 +9,11 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.core.config import settings
+from app.core.logging import configure_logging
 from app.core.rate_limit import limiter
 from app.core.request_id import RequestIDMiddleware
+
+configure_logging(level="DEBUG" if settings.debug else "INFO")
 
 log = structlog.get_logger()
 

@@ -5,12 +5,16 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 Motivation = Literal["career_switch", "skill_up", "curiosity", "interview"]
+# P3 3B #5: fixed buckets so we can drive realistic plan density without
+# pretending to distinguish "7 vs 9 hrs/wk".
+WeeklyHours = Literal["3-5", "6-10", "11+"]
 
 
 class GoalContractBase(BaseModel):
     motivation: Motivation
     deadline_months: int = Field(ge=1, le=60)
     success_statement: str = Field(min_length=10, max_length=500)
+    weekly_hours: WeeklyHours | None = None
 
 
 class GoalContractCreate(GoalContractBase):
@@ -21,6 +25,7 @@ class GoalContractUpdate(BaseModel):
     motivation: Motivation | None = None
     deadline_months: int | None = Field(default=None, ge=1, le=60)
     success_statement: str | None = Field(default=None, min_length=10, max_length=500)
+    weekly_hours: WeeklyHours | None = None
 
 
 class GoalContractResponse(GoalContractBase):

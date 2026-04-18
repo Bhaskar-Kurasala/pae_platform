@@ -21,3 +21,6 @@ class GoalContract(Base, UUIDMixin, TimestampMixin):
     motivation: Mapped[str] = mapped_column(String(32), nullable=False)
     deadline_months: Mapped[int] = mapped_column(Integer, nullable=False)
     success_statement: Mapped[str] = mapped_column(Text, nullable=False)
+    weekly_hours: Mapped[str | None] = mapped_column(
+        String(16), nullable=True
+    )

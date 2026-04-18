@@ -135,11 +135,12 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `today.variant_shown { variant: "morning"|"evening" }`.
 
 ### 3A-14: Consistency surfacing, no points (#150 reframed)
-- [ ] not started
+- [~] backend shipped — widget wiring Turbopack-blocked
 - **Why:** Replace the current streak number with honest data: "You showed up 4 of 7 days last week." No points, no loss aversion.
 - **Touches:** existing streak widget on Today replaced; pure count from `agent_actions` (any activity = show-up).
 - **Acceptance:** widget renders; reads right.
 - **Telemetry:** `today.consistency_shown { days_this_week }`.
+- **Shipped:** `GET /today/consistency` returns `{days_this_week, window_days}` — distinct UTC-date count over rolling 7-day window; emits `today.consistency_shown`. Pure helpers `window_bounds` + `count_active_days` tested (7/7 pass, see `run_3a14_tests.py`). Frontend widget pending.
 
 ### 3A-15: Stuck-for-10-min intervention (NEW)
 - [ ] not started
@@ -156,11 +157,12 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `receipts.gap_analysis_shown { gap_count }`.
 
 ### 3A-17: Micro-wins tied to disagreement log (#154 + depends on 3A-6)
-- [ ] not started
+- [~] backend shipped — Today page wiring Turbopack-blocked
 - **Why:** "You unblocked X yesterday" — specific, verifiable, not a badge.
 - **Touches:** Today page shows micro-wins from last 48h: misconceptions resolved (tutor disagreed, student acknowledged), lesson completions, exercise passes on hard problems.
 - **Acceptance:** trigger a disagreement, resolve it, see the micro-win on Today.
 - **Telemetry:** `today.micro_win_shown { kind }`.
+- **Shipped:** `GET /today/micro-wins` returns last 48h of `misconception_resolved` / `lesson_completed` / `hard_exercise_passed` items, newest-first, capped at 5. Emits `today.micro_win_shown` per item. Pure helpers (`rank_wins`, label formatters, `window_start`) tested (11/11 pass, see `run_3a17_tests.py`). No migration — reads existing tables.
 
 ### 3A-18: Admin student intervention notes (#146)
 - [x] DONE (99255f1)
@@ -206,8 +208,8 @@ Grouped by area. Within each area, tickets are independent and can be done in an
 
 ### 3B — Engagement (4 tickets)
 
-- [ ] #151 Weekly cadence prompts (+ folds #153 email digest opt-in)
-- [ ] #152 Inactivity re-engagement (wire existing disrupt_prevention to cron)
+- [x] #151 Weekly cadence prompts — DONE. `weekly_intention_service` (pure `week_starting`/`current_week_starting`/`normalize_focus_items` with case-insensitive dedup, cap-3, 280-char truncate; async `upsert_weekly_intentions` atomically replaces the week). New `weekly_intentions` table (migration 0019) with `(user_id, week_starting, slot)` unique + indexes on user_id / week_starting. Endpoints `POST/GET /today/weekly-intentions` emit `today.weekly_intentions_set`. 9 pure tests green via `run_3b151_tests.py`. #153 email digest opt-in deferred.
+- [x] #152 Inactivity re-engagement — DONE. `inactivity_service.is_inactive` + `filter_inactive` + async `load_inactive_students` (≥7d since last `agent_actions`, never-active users included). Celery task `app.tasks.inactivity_sweep.sweep_inactive_students` runs Monday 09:00 UTC via beat; emits `re_engagement.flagged` per user. Existing `disrupt_prevention` agent consumes via chat/agents surface. 9 pure tests green via `run_3b152_tests.py`.
 - [ ] #154 Micro-wins surface (now in 3A-17, skip here)
 
 ### 3B — Infrastructure (8 tickets)
@@ -232,18 +234,18 @@ Covered in 3A. No additional 3B tutor tickets.
 
 ### 3B — Learning mechanics (6 tickets, beyond 3A)
 
-- [ ] #85 Interleaving prompts
-- [ ] #90 Desirable difficulty
-- [ ] #91 Worked examples
-- [ ] #92 Fading scaffolds (extends P2-01 scaffolding decay)
-- [ ] #93 Testing effect / weekly review quiz (Celery cron)
+- [x] #85 Interleaving prompts — DONE. `interleaving_service.should_interleave` + `pick_adjacent_skill` (pure) + async `compute_suggestion` (3-in-a-row → adjacent `related` skill, excludes recent set). Endpoint `GET /exercises/interleaving/suggestion` emits `lesson.interleaving_suggested`. 12 pure tests green via `run_3b85_tests.py`.
+- [x] #90 Desirable difficulty — DONE. `difficulty_service.recommend_difficulty` (pure) walks an `easy/medium/hard` ladder: bumps up on 3-first-try in a row, eases down on ≥2 non-first-try in last window, clamps at ends. Endpoint `GET /exercises/{id}/difficulty-recommendation` emits `lesson.difficulty_adjusted`. 13 pure tests green via `run_3b90_tests.py`.
+- [x] #91 Worked examples — DONE. `worked_example_service` picks a similar-skill submission (own or peer-shared, score ≥70), ranks own-first then score-desc, trims code to 2KB. Endpoint `GET /exercises/{id}/worked-example` emits `lesson.worked_example_shown`. 10 pure tests green via `run_3b91_tests.py`.
+- [x] #92 Fading scaffolds — DONE. `fading_scaffolds_service.fade_scaffolds(attempt)` returns a `FadedScaffold` envelope capping hint levels `(gentle_nudge, worked_sub_step, near_solution)` — attempt 1→3 levels, 2→2, 3→1, 4+→0. Endpoint `GET /exercises/{id}/scaffold-envelope` emits `lesson.scaffolds_faded`. Composes with P2-01 confidence-based scaffolding. 11 pure tests green via `run_3b92_tests.py`.
+- [x] #93 Testing effect / weekly review quiz — DONE. `weekly_review_service` (pure `compute_days_overdue` + `rank_due_cards` + `assemble_quiz`, async `build_weekly_review`) assembles ≤10-card review from overdue SRS cards, most-overdue first. Celery task `app.tasks.weekly_review.assemble_weekly_reviews` runs Sunday 02:00 UTC via beat; endpoint `GET /srs/review/weekly` for on-demand. Emits `review.weekly_assembled` / `review.weekly_requested`. 10 pure tests green via `run_3b93_tests.py`.
 - [ ] NEW Stuck-for-10-min → in 3A-15 already
 
 ### 3B — Onboarding (3 tickets)
 
-- [ ] #4 Diagnostic opt-in CTA
-- [ ] #5 Time-per-week commitment
-- [ ] #7 First-day plan (3-day starter from goal + skill graph)
+- [x] #4 Diagnostic opt-in CTA — DONE (backend). `diagnostic_cta_service.normalize_decision` accepts `opted_in/dismissed/snoozed` with whitespace/case/hyphen tolerance. Endpoint `POST /diagnostic/cta-decision` persists to `agent_actions` and emits `onboarding.diagnostic_cta_decision`. 8 pure tests green via `run_3b4_tests.py`. FE CTA rendering deferred (Turbopack-blocked).
+- [x] #5 Time-per-week commitment — DONE. Added `goal_contracts.weekly_hours` (nullable `String(16)`, migration 0018), Literal `"3-5"|"6-10"|"11+"` in schema, pure `daily_minutes_target(bucket)` helper maps buckets to 35/70/110 min/day (conservative midpoints for planning). Upsert + patch flow persists it; telemetry includes `weekly_hours`. 6 pure tests green via `run_3b5_tests.py`.
+- [x] #7 First-day plan — DONE. `first_day_plan_service` picks DAG-root starter skills (no incoming prereq edges), builds 3-day plan of lesson/exercise/review activities sized to `daily_minutes_target(weekly_hours)`. Endpoint `GET /today/first-day-plan` emits `onboarding.first_day_plan_generated`. 11 pure tests green via `run_3b7_tests.py`.
 
 ### 3B — Today (covered in 3A)
 
@@ -280,8 +282,8 @@ Covered in 3A. No additional 3B tutor tickets.
 
 ### 3B — Community (2 tickets)
 
-- [ ] #101 Peer review exchange (assignment logic on existing peer-gallery)
-- [ ] #102 Question wall (+ folds #103 upvote, #108 flag)
+- [x] #101 Peer review exchange — DONE. New `peer_review_assignments` table (migration 0020) with `(submission_id, reviewer_id)` unique. `peer_review_service`: pure `pick_reviewers` (excludes author + existing picks, caps at 2, shuffled) + `validate_review` (1-5 rating, 2000-char comment trim, blank→None). Async `assign_reviewers` fires on share-toggle in PATCH `/exercises/submissions/{id}/share`; endpoints `GET /exercises/peer-reviews/pending`, `POST /exercises/peer-reviews/{id}`, `GET /exercises/submissions/{id}/peer-reviews`. Telemetry: `community.peer_reviews_assigned`, `community.peer_review_submitted`. 12 pure tests green via `run_3b101_tests.py`.
+- [x] #102 Question wall — DONE (folds #103 upvote, #108 flag). New `question_posts` + `question_votes` tables (migration 0021) with soft-delete, denormalized `upvote_count`/`flag_count`, and `(post, voter, kind)` unique for dedup. `question_wall_service`: pure `normalize_body` (trim, cap 4000, reject blank), `normalize_vote_kind`, `should_hide` (≥3 flags), `rank_posts` (upvotes desc, earliest first), `filter_visible`. Async `create_post` (supports parent_id for threaded replies), `list_for_lesson`, `list_replies`, `record_vote` (idempotent, blocks self-voting), `soft_delete_post`. Endpoints on `/lessons/{id}/questions` (GET/POST), `/lessons/questions/{id}/replies`, `/lessons/questions/{id}/vote`, `DELETE /lessons/questions/{id}`. Telemetry: `community.question_posted`, `community.question_voted`. 11 pure tests green via `run_3b102_tests.py`.
 
 ### 3B — Career (5 tickets)
 

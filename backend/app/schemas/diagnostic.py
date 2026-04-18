@@ -1,4 +1,18 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+DiagnosticCTADecision = Literal["opted_in", "dismissed", "snoozed"]
+
+
+class DiagnosticCTARequest(BaseModel):
+    decision: DiagnosticCTADecision
+    note: str | None = Field(default=None, max_length=200)
+
+
+class DiagnosticCTAResponse(BaseModel):
+    decision: DiagnosticCTADecision
+    recorded: bool
 
 
 class DiagnosticScaleItem(BaseModel):

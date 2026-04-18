@@ -30,10 +30,9 @@ async def _get_redis() -> Any:
 
 
 def _conv_key(conversation_id: str) -> str:
-    """Return namespaced Redis key for a conversation."""
-    from app.core.redis import redis_key
+    from app.core.redis import namespaced_key
 
-    return redis_key(f"conv:{conversation_id}")
+    return namespaced_key("conv", conversation_id)
 
 
 async def _load_history(

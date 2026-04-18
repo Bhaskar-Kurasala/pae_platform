@@ -4,6 +4,36 @@ from app.core.config import settings
 
 _pool: ConnectionPool | None = None
 
+# P3 3B #163: every key written by the app goes through `namespaced_key`
+# so a single Redis instance can safely host dev, staging, and prod
+# without cross-talk. Categories are enumerated (not free-form strings)
+# so `redis-cli --scan --pattern 'pae:prod:conv:*'` is a reliable tool.
+_NAMESPACE_PREFIX = "pae"
+_KEY_CATEGORIES = frozenset(
+    {
+        "conv",  # MOA conversation history (1h TTL)
+        "courses",  # published course list cache
+        "interview",  # mock-interview session store
+    }
+)
+
+
+def namespaced_key(category: str, *parts: str) -> str:
+    """Return a fully-qualified Redis key.
+
+    Format: ``pae:{environment}:{category}[:{part}[:{part}...]]``
+
+    Raises ValueError for unknown categories — forcing new callers to
+    register their key space here rather than scattering raw strings.
+    """
+    if category not in _KEY_CATEGORIES:
+        raise ValueError(
+            f"Unknown redis key category '{category}'. "
+            f"Add it to _KEY_CATEGORIES in app/core/redis.py."
+        )
+    segments = [_NAMESPACE_PREFIX, settings.environment, category, *parts]
+    return ":".join(segments)
+
 
 def get_redis_pool() -> ConnectionPool:
     global _pool

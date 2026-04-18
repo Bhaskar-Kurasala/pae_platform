@@ -14,8 +14,13 @@ from app.schemas.course import CourseCreate, CourseUpdate
 
 log = structlog.get_logger()
 
-_COURSES_CACHE_KEY = "courses:published"
 _COURSES_TTL = 300  # 5 minutes
+
+
+def _courses_cache_key() -> str:
+    from app.core.redis import namespaced_key
+
+    return namespaced_key("courses", "published")
 
 
 async def _get_redis_optional() -> Any:
@@ -30,7 +35,7 @@ async def _invalidate_courses_cache() -> None:
     redis = await _get_redis_optional()
     if redis:
         with contextlib.suppress(Exception):
-            await redis.delete(_COURSES_CACHE_KEY)  # type: ignore[union-attr]
+            await redis.delete(_courses_cache_key())  # type: ignore[union-attr]
 
 
 class CourseService:
@@ -52,7 +57,7 @@ class CourseService:
         redis = await _get_redis_optional()
         if redis:
             with contextlib.suppress(Exception):
-                cached = await redis.get(_COURSES_CACHE_KEY)  # type: ignore[union-attr]
+                cached = await redis.get(_courses_cache_key())  # type: ignore[union-attr]
                 if cached:
                     log.debug("courses.cache.hit")
                     # Cache is populated; still return fresh ORM objects for type safety
@@ -67,7 +72,7 @@ class CourseService:
                     {"id": str(c.id), "title": c.title, "slug": c.slug, "difficulty": c.difficulty}
                     for c in courses
                 ]
-                await redis.setex(_COURSES_CACHE_KEY, _COURSES_TTL, json.dumps(serializable))  # type: ignore[union-attr]
+                await redis.setex(_courses_cache_key(), _COURSES_TTL, json.dumps(serializable))  # type: ignore[union-attr]
                 log.debug("courses.cache.populated", count=len(courses))
 
         return courses

@@ -28,7 +28,6 @@ from typing import Any
 
 from redis.asyncio import Redis
 
-_SESSION_PREFIX = "interview:session:"
 _SESSION_TTL_SECONDS = 60 * 60 * 2  # 2h
 
 
@@ -196,9 +195,9 @@ class InterviewSessionStore:
 
     @staticmethod
     def _key(session_id: str) -> str:
-        from app.core.redis import redis_key
+        from app.core.redis import namespaced_key
 
-        return redis_key(f"{_SESSION_PREFIX}{session_id}")
+        return namespaced_key("interview", "session", session_id)
 
     async def create(self, user_id: uuid.UUID, problem: InterviewProblem) -> InterviewSession:
         session = InterviewSession(

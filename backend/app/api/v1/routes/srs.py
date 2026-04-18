@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,7 +12,11 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.srs import SRSCardResponse, SRSReviewRequest, SRSUpsertRequest
+from app.schemas.weekly_review import ReviewCardItem, WeeklyReviewResponse
 from app.services.srs_service import SRSService
+from app.services.weekly_review_service import build_weekly_review
+
+log = structlog.get_logger()
 
 router = APIRouter(prefix="/srs", tags=["srs"])
 
@@ -38,6 +43,32 @@ async def create_card(
         prompt=payload.prompt,
     )
     return SRSCardResponse.model_validate(card)
+
+
+@router.get("/review/weekly", response_model=WeeklyReviewResponse)
+async def get_weekly_review(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> WeeklyReviewResponse:
+    """Assemble a ≤10-card review quiz from due SRS cards (P3 3B #93)."""
+    quiz = await build_weekly_review(db, user_id=current_user.id)
+    log.info(
+        "review.weekly_requested",
+        user_id=str(current_user.id),
+        cards=len(quiz.cards),
+    )
+    return WeeklyReviewResponse(
+        generated_at=quiz.generated_at,
+        cards=[
+            ReviewCardItem(
+                card_id=c.card_id,
+                concept_key=c.concept_key,
+                prompt=c.prompt,
+                days_overdue=c.days_overdue,
+            )
+            for c in quiz.cards
+        ],
+    )
 
 
 @router.post("/cards/{card_id}/review", response_model=SRSCardResponse)

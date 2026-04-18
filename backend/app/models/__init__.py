@@ -15,6 +15,8 @@ from app.models.lesson import Lesson
 from app.models.mcq_bank import MCQBank
 from app.models.notification import Notification
 from app.models.payment import Payment
+from app.models.peer_review import PeerReviewAssignment
+from app.models.question_post import QuestionPost, QuestionVote
 from app.models.quiz_result import QuizResult
 from app.models.reflection import Reflection
 from app.models.skill import Skill
@@ -27,6 +29,7 @@ from app.models.user import User
 from app.models.user_preferences import UserPreferences
 from app.models.saved_skill_path import SavedSkillPath
 from app.models.user_skill_state import UserSkillState
+from app.models.weekly_intention import WeeklyIntention
 
 __all__ = [
     "User",
@@ -44,6 +47,9 @@ __all__ = [
     "DailyIntention",
     "Payment",
     "Notification",
+    "PeerReviewAssignment",
+    "QuestionPost",
+    "QuestionVote",
     "GoalContract",
     "GrowthSnapshot",
     "Reflection",
@@ -58,4 +64,5 @@ __all__ = [
     "Feedback",
     "Resume",
     "InterviewQuestion",
+    "WeeklyIntention",
 ]
