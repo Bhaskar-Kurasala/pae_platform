@@ -17,7 +17,7 @@ export default function RegisterPage() {
 
   useEffect(() => {
     if (_hasHydrated && isAuthenticated) {
-      router.replace("/dashboard");
+      router.replace("/today");
     }
   }, [_hasHydrated, isAuthenticated, router]);
 
@@ -31,7 +31,7 @@ export default function RegisterPage() {
     setLoading(true);
     try {
       await register(email, fullName, password);
-      router.replace("/dashboard");
+      router.replace("/onboarding");
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);

@@ -13,11 +13,17 @@ export default function OnboardingPage() {
   const { data: existingGoal, isLoading } = useMyGoal();
   const upsert = useUpsertGoal();
 
-  // If user already has a goal, this page becomes an "edit" surface.
-  // If they submit, we send them onward to /today (falls back to dashboard for now).
+  // If the user already has a goal, this is not onboarding — it's edit.
+  // Re-routing back to /today makes the flow idempotent: landing here via
+  // /register?next=/onboarding is safe for returning users.
   useEffect(() => {
-    // No-op — we let the form handle the submit redirect.
-  }, []);
+    if (!isLoading && existingGoal && typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("edit") !== "1") {
+        router.replace("/today");
+      }
+    }
+  }, [isLoading, existingGoal, router]);
 
   if (isLoading) {
     return (

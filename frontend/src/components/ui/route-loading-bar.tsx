@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useIsFetching, useIsMutating } from "@tanstack/react-query";
 
-export function RouteLoadingBar() {
+function RouteLoadingBarInner() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const fetching = useIsFetching();
@@ -52,5 +52,15 @@ export function RouteLoadingBar() {
         style={{ width: `${progress}%`, opacity: progress === 100 ? 0 : 1 }}
       />
     </div>
+  );
+}
+
+// Next 15 forces any component that calls useSearchParams() to be wrapped in a
+// Suspense boundary so pages using the App Router can statically prerender.
+export function RouteLoadingBar() {
+  return (
+    <Suspense fallback={null}>
+      <RouteLoadingBarInner />
+    </Suspense>
   );
 }
