@@ -1,8 +1,14 @@
+from __future__ import annotations
+
 import uuid
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from app.services.retrieval_quiz_service import QuizQuestion
 
 from app.models.student_progress import StudentProgress
 from app.models.user import User
@@ -138,6 +144,28 @@ class ProgressService:
         # lesson doesn't clobber prior SM-2 state.
         await self._seed_retrieval_card(student.id, lesson_id)
         return progress
+
+    async def build_retrieval_quiz(
+        self, lesson_id: str | uuid.UUID
+    ) -> list[QuizQuestion]:
+        """P3 3A-10: returns up to 3 MCQs for the completed lesson.
+
+        Thin pass-through so the route layer can tack a quiz onto the
+        completion response without bleeding MCQ imports upward.
+        """
+        from app.services.retrieval_quiz_service import build_quiz
+
+        lesson_uuid = (
+            lesson_id if isinstance(lesson_id, uuid.UUID) else uuid.UUID(str(lesson_id))
+        )
+        questions = await build_quiz(self.db, lesson_id=lesson_uuid)
+        if questions:
+            log.info(
+                "lesson.retrieval_quiz_shown",
+                lesson_id=str(lesson_uuid),
+                question_count=len(questions),
+            )
+        return questions
 
     async def _seed_retrieval_card(
         self, student_id: uuid.UUID, lesson_id: str | uuid.UUID
