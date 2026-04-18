@@ -270,7 +270,7 @@ Covered in 3A. No additional 3B tutor tickets.
 
 ### 3B — Receipts (7 tickets)
 
-- [ ] #75 Week-on-week diff
+- [~] #75 Week-on-week diff (p3b, feat/p3b-receipts)
 - [ ] #76 Concept coverage miniature skill map
 - [ ] #79 Portfolio items this week
 - [ ] #81 Reflection aggregation
