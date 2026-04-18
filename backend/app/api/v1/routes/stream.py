@@ -30,6 +30,7 @@ from app.core.rate_limit import limiter
 from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.agent import ChatRequest
+from app.services.confidence_service import CONFIDENCE_CALIBRATION_OVERLAY
 from app.services.disagreement_service import (
     DISAGREEMENT_OVERLAY,
     maybe_log_disagreement,
@@ -234,6 +235,10 @@ async def _token_generator(
         # Disagreement rule (P3 3A-6): always on for every tutor turn. The
         # rule is cheap to state and the cost of a yes-machine is high.
         system_prompt += DISAGREEMENT_OVERLAY
+
+        # Confidence calibration (P3 3A-7): tutor decides when to ask,
+        # based on conversation-history awareness from the directive.
+        system_prompt += CONFIDENCE_CALIBRATION_OVERLAY
 
         messages: list[Any] = [SystemMessage(content=system_prompt)]
 

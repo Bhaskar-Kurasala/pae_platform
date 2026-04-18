@@ -65,6 +65,7 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.oauth import router as oauth_router
     from app.api.v1.routes.notifications import router as notifications_router
     from app.api.v1.routes.portfolio_autopsy import router as portfolio_autopsy_router
+    from app.api.v1.routes.confidence import router as confidence_router
     from app.api.v1.routes.preferences import router as preferences_router
     from app.api.v1.routes.receipts import router as receipts_router
     from app.api.v1.routes.reflections import router as reflections_router
@@ -93,6 +94,7 @@ def create_app() -> FastAPI:
         goals_router,
         notifications_router,
         preferences_router,
+        confidence_router,
         receipts_router,
         portfolio_autopsy_router,
         reflections_router,

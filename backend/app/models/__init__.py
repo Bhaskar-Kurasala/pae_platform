@@ -1,4 +1,5 @@
 from app.models.agent_action import AgentAction
+from app.models.confidence_report import ConfidenceReport
 from app.models.conversation_memory import ConversationMemory
 from app.models.course import Course
 from app.models.enrollment import Enrollment
@@ -32,6 +33,7 @@ __all__ = [
     "QuizResult",
     "MCQBank",
     "AgentAction",
+    "ConfidenceReport",
     "ConversationMemory",
     "Payment",
     "Notification",
