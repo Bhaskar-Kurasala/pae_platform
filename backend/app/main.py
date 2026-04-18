@@ -10,6 +10,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from app.core.config import settings
 from app.core.rate_limit import limiter
+from app.core.request_id import RequestIDMiddleware
 
 log = structlog.get_logger()
 
@@ -28,6 +29,9 @@ def create_app() -> FastAPI:
         debug=settings.debug,
         lifespan=lifespan,
     )
+
+    # Request ID — must be outermost so every log line gets the correlation ID
+    app.add_middleware(RequestIDMiddleware)
 
     # Rate limiting
     app.state.limiter = limiter
@@ -62,8 +66,8 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.interview import router as interview_router
     from app.api.v1.routes.lessons import router as lessons_router
     from app.api.v1.routes.misconceptions import router as misconceptions_router
-    from app.api.v1.routes.oauth import router as oauth_router
     from app.api.v1.routes.notifications import router as notifications_router
+    from app.api.v1.routes.oauth import router as oauth_router
     from app.api.v1.routes.portfolio_autopsy import router as portfolio_autopsy_router
     from app.api.v1.routes.confidence import router as confidence_router
     from app.api.v1.routes.preferences import router as preferences_router
@@ -74,8 +78,8 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.skills import router as skills_router
     from app.api.v1.routes.srs import router as srs_router
     from app.api.v1.routes.stream import router as stream_router
-    from app.api.v1.routes.teach_back import router as teach_back_router
     from app.api.v1.routes.students import router as students_router
+    from app.api.v1.routes.teach_back import router as teach_back_router
     from app.api.v1.routes.today import router as today_router
     from app.api.v1.routes.webhooks import router as webhooks_router
 

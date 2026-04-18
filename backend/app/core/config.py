@@ -38,10 +38,17 @@ class Settings(BaseSettings):
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
 
+    # DB connection pool
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+    db_pool_timeout: int = 30
+    db_pool_recycle: int = 1800  # recycle connections after 30 min
+
     # Redis
     redis_host: str = "localhost"
     redis_port: int = 6379
     redis_password: str = ""
+    redis_key_prefix: str = "pae"  # namespace prefix — prevents key collisions across envs
 
     @property
     def redis_url(self) -> str:

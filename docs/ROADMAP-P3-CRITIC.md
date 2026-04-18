@@ -212,14 +212,14 @@ Grouped by area. Within each area, tickets are independent and can be done in an
 
 ### 3B — Infrastructure (8 tickets)
 
-- [ ] #158 Structured logging audit
-- [ ] #159 Request ID propagation
-- [ ] #160 Deep health checks (/health/live, /health/ready)
-- [ ] #162 DB pool tuning (config line)
-- [ ] #163 Redis key namespacing
-- [ ] #164 Backup runbook (docs/ops/backup-restore.md)
-- [ ] #165 Cost monitoring (token usage to agent_actions.metadata)
-- [ ] #167 CI gates audit
+- [x] #158 Structured logging audit DONE
+- [x] #159 Request ID propagation DONE
+- [x] #160 Deep health checks (/health/live, /health/ready) DONE
+- [x] #162 DB pool tuning (config line) DONE
+- [x] #163 Redis key namespacing DONE
+- [x] #164 Backup runbook (docs/ops/backup-restore.md) DONE
+- [x] #165 Cost monitoring (token usage to agent_actions.metadata) DONE
+- [x] #167 CI gates audit DONE
 
 ### 3B — Meta (2 tickets)
 
