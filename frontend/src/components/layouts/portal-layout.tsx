@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useTheme } from "next-themes";
 import {
   BookOpen,
+  Briefcase,
   ChevronRight,
   Code2,
   Dumbbell,
@@ -56,6 +57,7 @@ const navItems = [
   { href: "/interview", label: "Interview", icon: Target },
   { href: "/progress", label: "Progress", icon: TrendingUp },
   { href: "/receipts", label: "Receipts", icon: ScrollText },
+  { href: "/career", label: "Career", icon: Briefcase },
   { href: "/chat", label: "AI Tutor", icon: MessageSquare },
 ];
 

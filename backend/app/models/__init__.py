@@ -2,6 +2,8 @@ from app.models.agent_action import AgentAction
 from app.models.confidence_report import ConfidenceReport
 from app.models.feedback import Feedback  # noqa: F401
 from app.models.conversation_memory import ConversationMemory
+from app.models.interview_question import InterviewQuestion  # noqa: F401
+from app.models.resume import Resume  # noqa: F401
 from app.models.course import Course
 from app.models.daily_intention import DailyIntention
 from app.models.enrollment import Enrollment
@@ -52,7 +54,8 @@ __all__ = [
     "StudentNote",
     "UserPreferences",
     "UserSkillState",
-<<<<<<< HEAD
     "SavedSkillPath",
     "Feedback",
+    "Resume",
+    "InterviewQuestion",
 ]
