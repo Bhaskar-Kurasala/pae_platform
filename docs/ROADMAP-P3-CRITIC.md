@@ -45,7 +45,7 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `tutor.context_injected { context_lines, missing_fields[] }`.
 
 ### 3A-2: Per-skill conversation memory (#51)
-- [x] DONE (pending-sha)
+- [x] DONE (92f4f42)
 - **Why:** Tutor forgets what you covered last time. Continuity = less wasted intro.
 - **Touches:** new table `conversation_memory (user_id, skill_id, summary_text, last_updated)`, Alembic migration, `student_context_service` (load top 5 per session).
 - **Edge cases:** no skill detected yet, first conversation ever.
