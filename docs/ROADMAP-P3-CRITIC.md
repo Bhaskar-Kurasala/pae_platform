@@ -258,15 +258,15 @@ Covered in 3A. No additional 3B tutor tickets.
 
 ### 3B — Studio (9 tickets)
 
-- [ ] #39 Diff view (Monaco DiffEditor)
-- [ ] #40 Inline tutor pins (gutter icons)
-- [ ] #41 Run history (last 20, localStorage)
-- [ ] #42 Local persistence / autosave
-- [ ] #43 Format on save (ruff via backend)
-- [ ] #44 Lint as you type (Monaco markers)
-- [ ] #45 Live preview for prompts
-- [ ] #48 Snippet insertion (5-10 canonical)
-- [ ] #50 Per-exercise tutor auto-context
+- [~] #39 Diff view (Monaco DiffEditor) (p3b, feat/p3b-studio)
+- [~] #40 Inline tutor pins (gutter icons) (p3b, feat/p3b-studio)
+- [~] #41 Run history (last 20, localStorage) (p3b, feat/p3b-studio)
+- [~] #42 Local persistence / autosave (p3b, feat/p3b-studio)
+- [~] #43 Format on save (ruff via backend) (p3b, feat/p3b-studio)
+- [~] #44 Lint as you type (Monaco markers) (p3b, feat/p3b-studio)
+- [~] #45 Live preview for prompts (p3b, feat/p3b-studio)
+- [~] #48 Snippet insertion (5-10 canonical) (p3b, feat/p3b-studio)
+- [~] #50 Per-exercise tutor auto-context (p3b, feat/p3b-studio)
 
 ### 3B — Receipts (7 tickets)
 
