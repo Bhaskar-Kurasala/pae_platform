@@ -69,7 +69,7 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `tutor.clarification_shown`, `tutor.followup_clicked { pill_index }`.
 
 ### 3A-5: Intent-before-debug (NEW)
-- [ ] not started
+- [x] DONE (5cb2755)
 - **Why:** Students paste errors and expect a fix. Tutor must ask "what were you trying to do?" first. Teaches debugging, not dependency.
 - **Touches:** prompt instruction in `agents/prompts/coding_assistant.md` and `moa.py` routing rule (error-paste detection). Optional: a pre-response detector in `stream.py` that intercepts if student message contains `Traceback` or `error:` and appends the ask.
 - **Acceptance:** paste a Python traceback; tutor first response asks intent.
