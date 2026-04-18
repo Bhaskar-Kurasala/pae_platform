@@ -58,12 +58,13 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.diagnostic import router as diagnostic_router
     from app.api.v1.routes.execute import router as execute_router
     from app.api.v1.routes.exercises import router as exercises_router
+    from app.api.v1.routes.format import router as format_router
     from app.api.v1.routes.goals import router as goals_router
     from app.api.v1.routes.interview import router as interview_router
     from app.api.v1.routes.lessons import router as lessons_router
     from app.api.v1.routes.misconceptions import router as misconceptions_router
-    from app.api.v1.routes.oauth import router as oauth_router
     from app.api.v1.routes.notifications import router as notifications_router
+    from app.api.v1.routes.oauth import router as oauth_router
     from app.api.v1.routes.portfolio_autopsy import router as portfolio_autopsy_router
     from app.api.v1.routes.preferences import router as preferences_router
     from app.api.v1.routes.receipts import router as receipts_router
@@ -73,9 +74,8 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.skills import router as skills_router
     from app.api.v1.routes.srs import router as srs_router
     from app.api.v1.routes.stream import router as stream_router
-    from app.api.v1.routes.format import router as format_router
-    from app.api.v1.routes.teach_back import router as teach_back_router
     from app.api.v1.routes.students import router as students_router
+    from app.api.v1.routes.teach_back import router as teach_back_router
     from app.api.v1.routes.webhooks import router as webhooks_router
 
     api_routers = [
