@@ -6,7 +6,7 @@
 
 **Parallel work:** If you're the teammate shipping 3B in parallel, read [`CONTRIBUTING-P3.md`](CONTRIBUTING-P3.md) first. Your scope = Skill Map + Studio + Receipts + Admin + Infra + Meta + Career (39 tickets). My scope = all of 3A + remaining 3B areas. File ownership, claim protocol, migration numbering, and browser-verification protocol are all in that doc.
 
-**Next migration number to reserve:** `0016` (current head: `0009_submission_sharing`; `0010_conversation_memory` (3A-2) + `0011_socratic_level` (3A-3) + `0012_student_misconceptions` (3A-6) + `0013_confidence_reports` (3A-7) + `0014_student_notes` (3A-18) + `0015_submission_self_explanation` (3A-9) reserved — always verify with `ls backend/alembic/versions/ | sort | tail -1` before claiming, since Phase 3A is also adding migrations).
+**Next migration number to reserve:** `0017` (current head: `0009_submission_sharing`; `0010_conversation_memory` (3A-2) + `0011_socratic_level` (3A-3) + `0012_student_misconceptions` (3A-6) + `0013_confidence_reports` (3A-7) + `0014_student_notes` (3A-18) + `0015_submission_self_explanation` (3A-9) + `0016_daily_intentions` (3A-11) reserved — always verify with `ls backend/alembic/versions/ | sort | tail -1` before claiming, since Phase 3A is also adding migrations).
 
 ---
 
@@ -114,7 +114,7 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `lesson.retrieval_quiz_shown`, `lesson.retrieval_quiz_graded { correct, total }`.
 
 ### 3A-11: Daily intention (#11)
-- [ ] not started
+- [~] backend DONE (131a209); frontend component blocked by Turbopack CSS
 - **Why:** 1-line "what do you want to do today" sets the session frame.
 - **Touches:** table `daily_intentions (user_id, date, text)` unique on (user_id, date), route `POST /today/intention`, `today-intention.tsx` component on Today page.
 - **Acceptance:** set intention; reload; it persists. Next day: fresh prompt.
