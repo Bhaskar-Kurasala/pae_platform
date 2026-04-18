@@ -60,7 +60,8 @@ Dependency gate: 3A-1 blocks 3A-2 through 3A-8.
 - **Telemetry:** `preference.socratic_level_changed { from, to }`.
 
 ### 3A-4: Intent clarification + follow-up suggestions (#54 + #69)
-- [ ] not started
+- [~] backend DONE; frontend pill component deferred (Turbopack-blocked)
+- **Backend:** `clarification_service` pure helpers — `should_clarify(message, socratic_level)` gates pills off at level 0 / short messages / explicit direct-or-practice asks; triggers on ambiguity-words (`how`/`why`/`stuck`/`help`/etc.). Returns 3 pills `(direct, hint, challenge)`. `generate_followups(reply)` returns context-aware follow-up pill triples — code family (`refactor/edge_cases/production`), concept family (`contrast/example/quiz`), or generic (`example/practice/deeper`); empty tuple on short replies. New routes: `POST /clarify/check` (reads `user_preferences.socratic_level`), `POST /clarify/followups`. Emits `tutor.clarification_shown`. 11 pure tests green via `run_3a4_tests.py`.
 - **Why:** Tutor gives answers when student wanted practice. Biggest single lever in the roadmap.
 - **Touches:** MOA classifier returns confidence; if <0.7, stream emits a "clarify" event first with 3 pill options (direct answer / hint / challenge). At end of every substantive reply, emit 3 follow-up pills based on context.
 - **Edge cases:** clarification disabled at socratic level 0; pills shouldn't appear for short/trivial messages.
