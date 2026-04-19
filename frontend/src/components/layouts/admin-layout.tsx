@@ -19,6 +19,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { Kbd } from "@/components/ui/kbd";
+import { SkipToContent } from "@/components/layouts/skip-to-content";
 
 const adminNavItems = [
   { href: "/admin", label: "Overview", icon: LayoutDashboard },
@@ -44,6 +45,7 @@ export function AdminLayout({ children }: AdminLayoutProps) {
 
   return (
     <div className="flex h-screen bg-background">
+      <SkipToContent />
       <aside className="flex w-64 flex-col border-r bg-card">
         <div className="flex h-16 items-center px-6">
           <span className="text-xl font-bold">
@@ -76,7 +78,9 @@ export function AdminLayout({ children }: AdminLayoutProps) {
           ))}
         </nav>
       </aside>
-      <main className="flex-1 overflow-auto">{children}</main>
+      <main id="main-content" tabIndex={-1} className="flex-1 overflow-auto focus:outline-none">
+        {children}
+      </main>
     </div>
   );
 }

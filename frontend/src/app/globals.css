@@ -79,8 +79,10 @@
 }
 
 :root {
-  /* Brand: teal #1D9E75 ≈ oklch(0.63 0.13 164) */
-  --primary: oklch(0.63 0.13 164);
+  /* Brand: teal shifted darker to pass WCAG AA body-text contrast (~5.0:1 vs white).
+     Previous oklch(0.63 0.13 164) landed at ~3.15:1 on white-on-teal surfaces
+     (active nav pill, avatar fallback, Explore CTA) — DISC-59. */
+  --primary: oklch(0.52 0.12 164);
   --primary-foreground: oklch(0.985 0 0);
   /* Brand: purple #7C3AED ≈ oklch(0.52 0.25 283) */
   --secondary: oklch(0.97 0 0);
@@ -98,7 +100,7 @@
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.90 0 0);
   --input: oklch(0.90 0 0);
-  --ring: oklch(0.63 0.13 164);
+  --ring: oklch(0.52 0.12 164);
   --chart-1: oklch(0.63 0.13 164);
   --chart-2: oklch(0.52 0.25 283);
   --chart-3: oklch(0.65 0.15 200);
@@ -107,12 +109,12 @@
   --radius: 0.5rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.63 0.13 164);
+  --sidebar-primary: oklch(0.52 0.12 164);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.96 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.90 0 0);
-  --sidebar-ring: oklch(0.63 0.13 164);
+  --sidebar-ring: oklch(0.52 0.12 164);
 
   /* ── Elevation (Public/Stripe zone — shadow-as-border) ─── */
   --elevation-1: 0 1px 2px 0 rgb(0 0 0 / 0.04);

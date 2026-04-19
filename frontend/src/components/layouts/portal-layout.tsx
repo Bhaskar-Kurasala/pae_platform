@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 import { MobileBottomNav } from "@/components/layouts/mobile-bottom-nav";
+import { SkipToContent } from "@/components/layouts/skip-to-content";
 import {
   BookOpen,
   Briefcase,
@@ -202,6 +203,18 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
     touchStartRef.current = null;
   }
 
+  // DISC-61 — ESC closes the mobile drawer. Radix dialogs inside content have
+  // their own ESC handlers and call stopPropagation, so nested modals stay
+  // isolated from this listener.
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setSidebarOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sidebarOpen]);
+
   // P3 #136 — when a textarea/input on mobile gains focus, scroll it into view
   // above the on-screen keyboard.
   useEffect(() => {
@@ -230,6 +243,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
       onTouchMove={handleEdgeTouchMove}
       onTouchEnd={handleEdgeTouchEnd}
     >
+      <SkipToContent />
       {/* Desktop sidebar */}
       <aside className="hidden md:flex w-64 flex-col border-r bg-card shrink-0">
         <SidebarContent />
@@ -277,7 +291,9 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
 
         <main
           ref={mainRef}
-          className="flex-1 overflow-auto pb-[calc(env(safe-area-inset-bottom)+64px)] md:pb-0"
+          id="main-content"
+          tabIndex={-1}
+          className="flex-1 overflow-auto pb-[calc(env(safe-area-inset-bottom)+64px)] md:pb-0 focus:outline-none"
         >
           {children}
         </main>
