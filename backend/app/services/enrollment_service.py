@@ -26,6 +26,15 @@ class EnrollmentService:
         if not course.is_published:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
 
+        # DISC-21 — paid courses must go through Stripe (/billing/checkout).
+        # The webhook creates the enrollment on checkout.session.completed.
+        # Blocking here prevents the frontend (or a curl) from skipping payment.
+        if (course.price_cents or 0) > 0:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="This course requires payment. Use /billing/checkout.",
+            )
+
         existing = await self.enrollment_repo.get_by_student_and_course(
             current_user.id, course_id
         )

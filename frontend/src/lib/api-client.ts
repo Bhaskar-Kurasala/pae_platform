@@ -332,6 +332,25 @@ export const lessonsApi = {
   get: (id: string) => api.get<LessonResponse>(`/api/v1/lessons/${id}`),
 };
 
+// DISC-21 — Stripe checkout for paid courses
+export interface CheckoutResponse {
+  checkout_url: string;
+  session_id: string;
+}
+
+export const billingApi = {
+  createCheckout: (body: {
+    course_id: string;
+    tier?: string;
+    success_url: string;
+    cancel_url: string;
+  }) =>
+    api.post<CheckoutResponse>("/api/v1/billing/checkout", {
+      tier: "pro",
+      ...body,
+    }),
+};
+
 export const progressApi = {
   mine: () => api.get<ProgressResponse>("/api/v1/students/me/progress"),
   complete: (lessonId: string) =>

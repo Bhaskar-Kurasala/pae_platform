@@ -1,7 +1,8 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { ArrowLeft, ArrowRight, BookOpen, Clock, Loader2 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCourse, useCourseLessons } from "@/lib/hooks/use-courses";
@@ -11,6 +12,7 @@ import { ProgressBar } from "@/components/features/progress-bar";
 import { Badge } from "@/components/ui/badge";
 import {
   ApiError,
+  billingApi,
   coursesApi,
   type EnrollmentResponse,
   type ProgressResponse,
@@ -42,6 +44,31 @@ export default function CourseDetailPage({ params }: { params: Promise<{ id: str
   const [enrolling, setEnrolling] = useState(false);
   const [enrollError, setEnrollError] = useState("");
 
+  // DISC-21 — when Stripe redirects back with ?checkout=success, poll the
+  // enrollment endpoint a few times: the webhook may land slightly after the
+  // user is redirected, so first read can miss it.
+  const searchParams = useSearchParams();
+  const checkoutStatus = searchParams?.get("checkout") ?? null;
+  useEffect(() => {
+    if (checkoutStatus !== "success") return;
+    let cancelled = false;
+    let attempts = 0;
+    const tick = async () => {
+      if (cancelled || attempts >= 6) return;
+      attempts += 1;
+      const res = await refetchEnrollment();
+      if (!cancelled && !res.data) {
+        setTimeout(tick, 1000);
+      } else if (!cancelled && res.data) {
+        void queryClient.invalidateQueries({ queryKey: ["progress", "mine"] });
+      }
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+    };
+  }, [checkoutStatus, refetchEnrollment, queryClient]);
+
   const done = completedSet(progress, id);
   const completedCount = lessons.filter((l) => done.has(l.id)).length;
   const progressPct = lessons.length > 0 ? (completedCount / lessons.length) * 100 : 0;
@@ -56,6 +83,19 @@ export default function CourseDetailPage({ params }: { params: Promise<{ id: str
     setEnrolling(true);
     setEnrollError("");
     try {
+      // DISC-21 — paid courses go to Stripe; free courses use the direct
+      // /courses/{id}/enroll path. The backend now 402s if you try to direct-
+      // enroll a paid course, so this branch is defensive as well as correct.
+      if (isPaid) {
+        const origin = typeof window !== "undefined" ? window.location.origin : "";
+        const { checkout_url } = await billingApi.createCheckout({
+          course_id: id,
+          success_url: `${origin}/courses/${id}?checkout=success`,
+          cancel_url: `${origin}/courses/${id}?checkout=cancelled`,
+        });
+        window.location.href = checkout_url;
+        return;
+      }
       await coursesApi.enroll(id);
       await refetchEnrollment();
       await queryClient.invalidateQueries({ queryKey: ["progress", "mine"] });
@@ -131,6 +171,24 @@ export default function CourseDetailPage({ params }: { params: Promise<{ id: str
             </span>
           </div>
         </div>
+
+        {checkoutStatus === "cancelled" && !isEnrolled && (
+          <div
+            role="status"
+            className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+          >
+            Checkout cancelled — you can try again when you're ready.
+          </div>
+        )}
+        {checkoutStatus === "success" && !isEnrolled && (
+          <div
+            role="status"
+            className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-primary-foreground/90"
+          >
+            <span className="text-primary font-medium">Payment received.</span>{" "}
+            Finishing enrollment…
+          </div>
+        )}
 
         {/* CTA: Enroll (not yet enrolled) OR Continue learning (enrolled) */}
         {!isEnrolled ? (
