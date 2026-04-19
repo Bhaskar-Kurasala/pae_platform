@@ -102,6 +102,10 @@ _KEYWORD_MAP: list[tuple[list[str], str]] = [
     (["ingest", "youtube.com", "github.com/", "new video", "process content"], "content_ingestion"),
     (["generate question", "create mcq", "make quiz", "question bank"], "mcq_factory"),
     (["capstone", "grade my project", "evaluate project"], "project_evaluator"),
+    # DISC-57 — previously this sat below socratic_tutor's broad patterns and
+    # "re-engage inactive student" routed to socratic_tutor. The disrupt_prevention
+    # agent is the correct target for churn-risk nudges.
+    (["re-engage", "reengage", "inactive student", "churn risk", "win back", "nudge student"], "disrupt_prevention"),
     # WS4 new agent keyword patterns
     (["career plan", "career roadmap", "become ai engineer", "what skills do i need", "career transition", "career coaching"], "career_coach"),
     (["review my resume", "resume feedback", "improve cv", "resume critique", "check my resume"], "resume_reviewer"),

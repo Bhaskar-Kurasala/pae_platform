@@ -1,4 +1,5 @@
 import time
+import uuid
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -89,6 +90,12 @@ class BaseAgent(ABC):
 
         Token usage (input_tokens, output_tokens) stored in state.metadata is
         written to the AgentAction.metadata column for cost visibility.
+
+        DISC-57 — actor identity is read from ``state.context`` on these keys
+        (populated by the caller, not the agent itself):
+          - ``actor_id``     — UUID string of the human/service initiator
+          - ``actor_role``   — "admin" | "student" | "system" | "service"
+          - ``on_behalf_of`` — UUID when an admin runs an agent against a student
         """
         try:
             from app.core.database import AsyncSessionLocal
@@ -106,8 +113,6 @@ class BaseAgent(ABC):
                 )
 
             async with AsyncSessionLocal() as session:
-                # Build output_data — include token counts if available so they're
-                # queryable without a schema migration.
                 output_data: dict[str, Any] = {
                     "response_length": len(state.response or ""),
                     "tools_used": state.tools_used,
@@ -118,12 +123,32 @@ class BaseAgent(ABC):
                 if output_tokens is not None:
                     output_data["output_tokens"] = output_tokens
 
-                # total_tokens_used for the legacy integer column (input + output)
                 total_tokens = (
                     (input_tokens or 0) + (output_tokens or 0)
                     if (input_tokens is not None or output_tokens is not None)
                     else None
                 )
+
+                actor_id_raw = state.context.get("actor_id")
+                actor_role = state.context.get("actor_role")
+                on_behalf_raw = state.context.get("on_behalf_of")
+
+                def _as_uuid(val: Any) -> Any:
+                    if val is None:
+                        return None
+                    if isinstance(val, uuid.UUID):
+                        return val
+                    try:
+                        return uuid.UUID(str(val))
+                    except (ValueError, AttributeError):
+                        return None
+
+                # Default actor to the student when the caller didn't name one —
+                # preserves pre-DISC-57 behavior for chat traffic while still
+                # populating the new columns.
+                actor_id = _as_uuid(actor_id_raw) or _as_uuid(state.student_id)
+                if actor_role is None and actor_id_raw is None and state.student_id:
+                    actor_role = "student"
 
                 action = AgentAction(
                     agent_name=self.name,
@@ -135,6 +160,9 @@ class BaseAgent(ABC):
                     status=status,
                     error_message=state.error,
                     duration_ms=duration_ms,
+                    actor_id=actor_id,
+                    actor_role=actor_role,
+                    on_behalf_of=_as_uuid(on_behalf_raw),
                 )
                 session.add(action)
                 await session.commit()

@@ -71,7 +71,7 @@ export default function AgentMonitorPage() {
                   </p>
                 </CardHeader>
                 <CardContent className="px-5 pb-4">
-                  <div className="flex items-center gap-5 text-xs text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-muted-foreground">
                     <span className="flex items-center gap-1">
                       <Activity className="h-3 w-3" aria-hidden="true" />
                       {agent.total_actions} actions
@@ -79,6 +79,18 @@ export default function AgentMonitorPage() {
                     <span className="flex items-center gap-1">
                       <Clock className="h-3 w-3" aria-hidden="true" />
                       {agent.avg_duration_ms}ms avg
+                    </span>
+                    {/* DISC-54 — surface success_rate + last_called_at */}
+                    {agent.success_rate != null && (
+                      <span className="flex items-center gap-1">
+                        <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+                        {Math.round(agent.success_rate * 100)}% success
+                      </span>
+                    )}
+                    <span className="text-muted-foreground/80">
+                      Last: {agent.last_called_at
+                        ? new Date(agent.last_called_at).toLocaleDateString()
+                        : "never"}
                     </span>
                     {agent.error_count > 0 && (
                       <span className="flex items-center gap-1 text-destructive">

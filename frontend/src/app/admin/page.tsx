@@ -15,11 +15,14 @@ import {
   Bot,
   CheckCircle2,
   Clock,
+  DollarSign,
+  GraduationCap,
   RefreshCw,
   Users,
   XCircle,
   AlertCircle,
 } from "lucide-react";
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useAdminStats, useAgentsHealth, useAdminStudents } from "@/lib/hooks/use-admin";
 import { api } from "@/lib/api-client";
@@ -232,7 +235,7 @@ export default function AdminOverviewPage() {
           ))}
         </div>
       ) : stats ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           <KpiCard
             label="Total Students"
             value={stats.total_students.toLocaleString()}
@@ -245,6 +248,22 @@ export default function AdminOverviewPage() {
             sub={`of ${stats.total_students} total`}
             icon={Activity}
             accent="bg-[#7C3AED]/10 text-[#7C3AED]"
+          />
+          {/* DISC-53 — Enrollments + MRR tiles: the backend has been returning
+              `total_enrollments` and `mrr_usd` for weeks; AD2 failed only because
+              the UI wasn't consuming them. */}
+          <KpiCard
+            label="Enrollments"
+            value={stats.total_enrollments.toLocaleString()}
+            icon={GraduationCap}
+            accent="bg-emerald-500/10 text-emerald-600"
+          />
+          <KpiCard
+            label="MRR"
+            value={`$${stats.mrr_usd.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+            sub={`${(stats.mrr_cents / 100).toFixed(2)} lifetime`}
+            icon={DollarSign}
+            accent="bg-green-500/10 text-green-600"
           />
           <KpiCard
             label="Total Agent Calls"
@@ -346,60 +365,128 @@ export default function AdminOverviewPage() {
               No agent health data available.
             </p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm" aria-label="Agent health table">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Agent</th>
-                    <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">Total Calls</th>
-                    <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">Avg Score</th>
-                    <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">Latency</th>
-                    <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {agentsHealth.map((agent) => (
-                    <tr key={agent.name} className="hover:bg-muted/30 transition-colors">
-                      <td className="px-4 py-3 font-medium capitalize">
+            <>
+              {/* DISC-58 — mobile stacked cards; the 6-column table can't shrink below ~720px
+                  without horizontal scroll on phones. */}
+              <div className="md:hidden px-4 space-y-2">
+                {agentsHealth.map((agent) => (
+                  <div key={agent.name} className="rounded-lg border p-3 flex flex-col gap-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium capitalize text-sm">
                         {agent.name.split("_").join(" ")}
-                      </td>
-                      <td className="px-4 py-3 text-right text-muted-foreground">
-                        {agent.total_actions.toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="text-primary font-medium">—</span>
-                      </td>
-                      <td className="px-4 py-3 text-right text-muted-foreground">
-                        {agent.avg_duration_ms > 0 ? `${agent.avg_duration_ms}ms` : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {agent.status === "healthy" ? (
-                            <CheckCircle2 className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-                          ) : agent.status === "degraded" ? (
-                            <AlertCircle className="h-3.5 w-3.5 text-amber-500" aria-hidden="true" />
-                          ) : (
-                            <XCircle className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-                          )}
-                          <span
-                            className={cn(
-                              "text-xs font-medium capitalize",
-                              agent.status === "healthy"
-                                ? "text-primary"
-                                : agent.status === "degraded"
-                                ? "text-amber-600"
-                                : "text-muted-foreground",
-                            )}
-                          >
-                            {agent.status}
-                          </span>
-                        </div>
-                      </td>
+                      </span>
+                      <span
+                        className={cn(
+                          "text-xs font-medium capitalize",
+                          agent.status === "healthy" ? "text-primary" : "text-amber-600",
+                        )}
+                      >
+                        {agent.status}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                      <span>Calls: <span className="text-foreground">{agent.total_actions}</span></span>
+                      <span>
+                        Success:{" "}
+                        <span className="text-foreground">
+                          {agent.success_rate != null
+                            ? `${Math.round(agent.success_rate * 100)}%`
+                            : "—"}
+                        </span>
+                      </span>
+                      <span>Latency: <span className="text-foreground">{agent.avg_duration_ms > 0 ? `${agent.avg_duration_ms}ms` : "—"}</span></span>
+                      <span className="truncate">
+                        Last:{" "}
+                        <span className="text-foreground">
+                          {agent.last_called_at
+                            ? new Date(agent.last_called_at).toLocaleDateString()
+                            : "never"}
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-sm" aria-label="Agent health table">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Agent</th>
+                      <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">Total Calls</th>
+                      <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">Success Rate</th>
+                      <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">Latency</th>
+                      <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">Last Call</th>
+                      <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y">
+                    {agentsHealth.map((agent) => (
+                      <tr key={agent.name} className="hover:bg-muted/30 transition-colors">
+                        <td className="px-4 py-3 font-medium capitalize">
+                          {agent.name.split("_").join(" ")}
+                        </td>
+                        <td className="px-4 py-3 text-right text-muted-foreground">
+                          {agent.total_actions.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {agent.success_rate != null ? (
+                            <span
+                              className={cn(
+                                "font-medium",
+                                agent.success_rate >= 0.95
+                                  ? "text-primary"
+                                  : agent.success_rate >= 0.8
+                                  ? "text-amber-600"
+                                  : "text-destructive",
+                              )}
+                            >
+                              {Math.round(agent.success_rate * 100)}%
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right text-muted-foreground">
+                          {agent.avg_duration_ms > 0 ? `${agent.avg_duration_ms}ms` : "—"}
+                        </td>
+                        <td className="px-4 py-3 text-right text-muted-foreground">
+                          {agent.last_called_at ? (
+                            <span title={new Date(agent.last_called_at).toLocaleString()}>
+                              {new Date(agent.last_called_at).toLocaleDateString()}
+                            </span>
+                          ) : (
+                            "never"
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {agent.status === "healthy" ? (
+                              <CheckCircle2 className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+                            ) : agent.status === "degraded" ? (
+                              <AlertCircle className="h-3.5 w-3.5 text-amber-500" aria-hidden="true" />
+                            ) : (
+                              <XCircle className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+                            )}
+                            <span
+                              className={cn(
+                                "text-xs font-medium capitalize",
+                                agent.status === "healthy"
+                                  ? "text-primary"
+                                  : agent.status === "degraded"
+                                  ? "text-amber-600"
+                                  : "text-muted-foreground",
+                              )}
+                            >
+                              {agent.status}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
@@ -439,10 +526,13 @@ export default function AdminOverviewPage() {
                     .map((student) => (
                       <tr key={student.id} className="hover:bg-muted/30 transition-colors">
                         <td className="px-4 py-3">
-                          <div>
+                          <Link
+                            href={`/admin/students/${student.id}`}
+                            className="block hover:underline underline-offset-2"
+                          >
                             <p className="font-medium">{student.full_name}</p>
                             <p className="text-xs text-muted-foreground">{student.email}</p>
-                          </div>
+                          </Link>
                         </td>
                         <td className="px-4 py-3 text-right text-muted-foreground">
                           {student.lessons_completed}

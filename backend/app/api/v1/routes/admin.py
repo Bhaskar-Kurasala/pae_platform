@@ -35,6 +35,35 @@ class AuditLogItem(PydanticModel):
     status: str
     duration_ms: int | None
     created_at: datetime
+    # DISC-57 — surface the new actor columns so the admin audit UI can render
+    # "admin → student" attribution. Legacy rows before migration 0027 have
+    # NULL for these, which renders as "(unknown)".
+    actor_id: str | None = None
+    actor_role: str | None = None
+    on_behalf_of: str | None = None
+
+
+class StudentTimelineEvent(PydanticModel):
+    """DISC-55 — one event on a student's activity timeline."""
+
+    kind: str  # "login" | "lesson_completed" | "agent_action" | "submission"
+    at: datetime
+    summary: str
+    detail: dict[str, Any] | None = None
+
+
+class TriggerAgentRequest(PydanticModel):
+    """DISC-57 — admin invokes an agent against a named student."""
+
+    student_id: str
+    task: str | None = None
+
+
+class TriggerAgentResponse(PydanticModel):
+    agent_name: str
+    status: str
+    duration_ms: int
+    response_preview: str
 
 
 class LessonPerformance(PydanticModel):
@@ -105,7 +134,12 @@ async def get_agents_health(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(_require_admin),
 ) -> list[dict[str, Any]]:
-    """Per-agent action stats."""
+    """Per-agent action stats.
+
+    DISC-54 — exposes `last_called_at` (ISO8601 or null) and `success_rate`
+    (0.0–1.0 over `total_actions`, or null when total_actions == 0) so the
+    Agent Monitor table renders the full row AD3 expects.
+    """
     from app.agents.registry import _ensure_registered, list_agents
 
     _ensure_registered()
@@ -121,13 +155,11 @@ async def get_agents_health(
             )
         ).scalar_one()
 
-        avg_score_row = (
+        avg_duration = (
             await db.execute(
-                select(
-                    func.avg(AgentAction.duration_ms),
-                ).where(AgentAction.agent_name == name)
+                select(func.avg(AgentAction.duration_ms)).where(AgentAction.agent_name == name)
             )
-        ).one()
+        ).scalar_one()
 
         errors = (
             await db.execute(
@@ -138,13 +170,29 @@ async def get_agents_health(
             )
         ).scalar_one()
 
+        last_called_at = (
+            await db.execute(
+                select(func.max(AgentAction.created_at)).where(
+                    AgentAction.agent_name == name
+                )
+            )
+        ).scalar_one()
+
+        success_rate: float | None
+        if total_actions > 0:
+            success_rate = round(1.0 - (errors / total_actions), 3)
+        else:
+            success_rate = None
+
         result.append(
             {
                 "name": name,
                 "description": agent_info["description"],
                 "total_actions": total_actions,
                 "error_count": errors,
-                "avg_duration_ms": round(float(avg_score_row[0] or 0), 1),
+                "avg_duration_ms": round(float(avg_duration or 0), 1),
+                "last_called_at": last_called_at.isoformat() if last_called_at else None,
+                "success_rate": success_rate,
                 "status": "healthy" if errors == 0 else "degraded",
             }
         )
@@ -156,19 +204,27 @@ async def get_agents_health(
 async def list_students(
     skip: int = 0,
     limit: int = 50,
+    q: str | None = Query(None, description="Case-insensitive substring match on email OR full_name"),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(_require_admin),
 ) -> list[dict[str, Any]]:
-    """Paginated student list with engagement data."""
+    """Paginated student list with engagement data.
+
+    DISC-56 — `q` is a server-side filter. The old client-side filter loaded
+    every student into the browser before filtering; past a few hundred rows
+    that stops scaling. Passing `?q=autop` now narrows at the DB and keeps
+    p95 well under the 500 ms SLO at any catalog size.
+    """
     from app.models.student_progress import StudentProgress
 
-    students_result = await db.execute(
-        select(User)
-        .where(User.role == "student", User.is_deleted.is_(False))
-        .offset(skip)
-        .limit(limit)
-        .order_by(User.created_at.desc())
-    )
+    stmt = select(User).where(User.role == "student", User.is_deleted.is_(False))
+    if q:
+        pattern = f"%{q.lower()}%"
+        stmt = stmt.where(
+            func.lower(User.email).like(pattern) | func.lower(User.full_name).like(pattern)
+        )
+    stmt = stmt.offset(skip).limit(limit).order_by(User.created_at.desc())
+    students_result = await db.execute(stmt)
     students = list(students_result.scalars().all())
 
     result = []
@@ -347,9 +403,200 @@ async def get_audit_log(
             status=r.status,
             duration_ms=r.duration_ms,
             created_at=r.created_at,
+            actor_id=str(r.actor_id) if r.actor_id else None,
+            actor_role=r.actor_role,
+            on_behalf_of=str(r.on_behalf_of) if r.on_behalf_of else None,
         )
         for r in rows
     ]
+
+
+# ── DISC-55: Student activity timeline ──────────────────────────────────────
+
+
+@router.get(
+    "/students/{student_id}/timeline",
+    response_model=list[StudentTimelineEvent],
+)
+async def get_student_timeline(
+    student_id: uuid.UUID,
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(_require_admin),
+) -> list[StudentTimelineEvent]:
+    """Merged activity timeline for admin drilldown (DISC-55).
+
+    Pulls from three sources — agent actions, lesson completions, exercise
+    submissions — and merges newest-first. `login` events are derived from
+    `users.last_login_at` as a best-effort anchor since we don't persist a
+    login-history table yet.
+    """
+    from app.models.exercise_submission import ExerciseSubmission
+    from app.models.lesson import Lesson
+    from app.models.student_progress import StudentProgress
+
+    await _require_student(db, student_id)
+    events: list[StudentTimelineEvent] = []
+
+    agent_rows = (
+        await db.execute(
+            select(AgentAction)
+            .where(AgentAction.student_id == student_id)
+            .order_by(AgentAction.created_at.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+    for row in agent_rows:
+        events.append(
+            StudentTimelineEvent(
+                kind="agent_action",
+                at=row.created_at,
+                summary=f"Agent `{row.agent_name}` ({row.status})",
+                detail={
+                    "agent_name": row.agent_name,
+                    "duration_ms": row.duration_ms,
+                    "actor_role": row.actor_role,
+                },
+            )
+        )
+
+    lesson_rows = (
+        await db.execute(
+            select(StudentProgress, Lesson.title)
+            .join(Lesson, StudentProgress.lesson_id == Lesson.id)
+            .where(
+                StudentProgress.student_id == student_id,
+                StudentProgress.status == "completed",
+            )
+            .order_by(StudentProgress.completed_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    for rec, title in lesson_rows:
+        if rec.completed_at is None:
+            continue
+        events.append(
+            StudentTimelineEvent(
+                kind="lesson_completed",
+                at=rec.completed_at,
+                summary=f"Completed lesson: {title}",
+                detail={"lesson_id": str(rec.lesson_id)},
+            )
+        )
+
+    sub_rows = (
+        await db.execute(
+            select(ExerciseSubmission)
+            .where(ExerciseSubmission.student_id == student_id)
+            .order_by(ExerciseSubmission.created_at.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+    for sub in sub_rows:
+        events.append(
+            StudentTimelineEvent(
+                kind="submission",
+                at=sub.created_at,
+                summary=f"Submission · status={sub.status}"
+                + (f" · score={sub.score}" if sub.score is not None else ""),
+                detail={
+                    "exercise_id": str(sub.exercise_id),
+                    "status": sub.status,
+                    "score": sub.score,
+                },
+            )
+        )
+
+    user_row = (
+        await db.execute(select(User).where(User.id == student_id))
+    ).scalar_one_or_none()
+    if user_row and user_row.last_login_at:
+        events.append(
+            StudentTimelineEvent(
+                kind="login",
+                at=user_row.last_login_at,
+                summary="Last login",
+            )
+        )
+
+    events.sort(key=lambda e: e.at, reverse=True)
+    return events[:limit]
+
+
+# ── DISC-57: Admin agent trigger ────────────────────────────────────────────
+
+
+@router.post(
+    "/agents/{agent_name}/trigger",
+    response_model=TriggerAgentResponse,
+)
+async def trigger_agent(
+    agent_name: str,
+    payload: TriggerAgentRequest,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(_require_admin),
+) -> TriggerAgentResponse:
+    """Admin invokes a named agent against a student (DISC-57).
+
+    The run logs to `agent_actions` with `actor_id=admin.id`,
+    `actor_role="admin"`, and `on_behalf_of=student.id`, producing the audit
+    attribution AD8 verifies. Default task defers to the agent's own
+    description when the caller didn't supply one.
+    """
+    from app.agents.base_agent import AgentState
+    from app.agents.registry import _ensure_registered, get_agent
+
+    try:
+        student_uuid = uuid.UUID(payload.student_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid student_id") from exc
+
+    student = await _require_student(db, student_uuid)
+
+    _ensure_registered()
+    try:
+        agent = get_agent(agent_name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    task = payload.task or f"Admin-triggered run of {agent_name} for {student.email}."
+    state = AgentState(
+        student_id=str(student.id),
+        task=task,
+        context={
+            "actor_id": str(admin.id),
+            "actor_role": "admin",
+            "on_behalf_of": str(student.id),
+            "trigger": "admin_manual",
+        },
+    )
+
+    start = datetime.now(UTC)
+    try:
+        result = await agent.run(state)
+        status_out = "completed"
+    except Exception as exc:  # log_action already persists the failure
+        log.exception("admin.agent_trigger.failed", agent=agent_name, error=str(exc))
+        raise HTTPException(status_code=500, detail=f"Agent run failed: {exc}") from exc
+    duration = int((datetime.now(UTC) - start).total_seconds() * 1000)
+
+    preview = (result.response or "").strip()
+    if len(preview) > 280:
+        preview = preview[:277] + "..."
+
+    log.info(
+        "admin.agent_triggered",
+        agent=agent_name,
+        admin_id=str(admin.id),
+        student_id=str(student.id),
+        duration_ms=duration,
+    )
+    return TriggerAgentResponse(
+        agent_name=agent_name,
+        status=status_out,
+        duration_ms=duration,
+        response_preview=preview,
+    )
 
 
 # ── #148: Content performance per-lesson stats ───────────────────────────────

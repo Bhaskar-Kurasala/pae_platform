@@ -18,6 +18,8 @@ export interface AgentHealth {
   total_actions: number;
   error_count: number;
   avg_duration_ms: number;
+  last_called_at: string | null;
+  success_rate: number | null;
   status: "healthy" | "degraded";
 }
 
@@ -30,6 +32,20 @@ export interface AdminStudent {
   lessons_completed: number;
   agent_interactions: number;
   is_active: boolean;
+}
+
+export interface StudentTimelineEvent {
+  kind: "login" | "lesson_completed" | "agent_action" | "submission";
+  at: string;
+  summary: string;
+  detail: Record<string, unknown> | null;
+}
+
+export interface TriggerAgentResponse {
+  agent_name: string;
+  status: string;
+  duration_ms: number;
+  response_preview: string;
 }
 
 export function useAdminStats() {
@@ -47,10 +63,46 @@ export function useAgentsHealth() {
   });
 }
 
-export function useAdminStudents() {
+export function useAdminStudents(search: string = "") {
+  // DISC-56 — push the filter to the backend when the user types something;
+  // `q` is null-safe there, so an empty string falls back to the unfiltered
+  // list. React Query keys on `search` so each query is cached independently.
+  const params = search.trim() ? `?q=${encodeURIComponent(search.trim())}` : "";
   return useQuery<AdminStudent[]>({
-    queryKey: ["admin", "students"],
-    queryFn: () => api.get<AdminStudent[]>("/api/v1/admin/students"),
+    queryKey: ["admin", "students", search.trim()],
+    queryFn: () => api.get<AdminStudent[]>(`/api/v1/admin/students${params}`),
+  });
+}
+
+export function useStudentTimeline(studentId: string | null | undefined) {
+  return useQuery<StudentTimelineEvent[]>({
+    queryKey: ["admin", "students", studentId, "timeline"],
+    queryFn: () =>
+      api.get<StudentTimelineEvent[]>(
+        `/api/v1/admin/students/${studentId}/timeline`,
+      ),
+    enabled: !!studentId,
+  });
+}
+
+export function useTriggerAgent() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    TriggerAgentResponse,
+    Error,
+    { agentName: string; studentId: string; task?: string }
+  >({
+    mutationFn: ({ agentName, studentId, task }) =>
+      api.post<TriggerAgentResponse>(
+        `/api/v1/admin/agents/${agentName}/trigger`,
+        { student_id: studentId, task },
+      ),
+    onSuccess: (_res, vars) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["admin", "students", vars.studentId, "timeline"],
+      });
+      void queryClient.invalidateQueries({ queryKey: ["admin", "agents", "health"] });
+    },
   });
 }
 

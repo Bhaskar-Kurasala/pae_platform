@@ -23,7 +23,20 @@ class AgentAction(Base, UUIDMixin, TimestampMixin):
     duration_ms: Mapped[int | None] = mapped_column(nullable=True)
     tokens_used: Mapped[int | None] = mapped_column(nullable=True)
 
-    student: Mapped["User | None"] = relationship(lazy="select")
+    # DISC-57 — actor identity so admin-triggered runs are distinguishable.
+    # `actor_role` is denormalized on purpose: it survives a future role change
+    # on the user row, giving compliance a point-in-time attribution.
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True
+    )
+    actor_role: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    on_behalf_of: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+
+    student: Mapped["User | None"] = relationship(
+        lazy="select", foreign_keys=[student_id]
+    )
 
 
 from app.models.user import User  # noqa: E402
