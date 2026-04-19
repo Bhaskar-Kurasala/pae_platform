@@ -1,12 +1,13 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Award, CheckCircle2, Target, Brain } from "lucide-react";
 import { useMicroWins } from "@/lib/hooks/use-today";
 import type { MicroWinItem } from "@/lib/api-client";
 
-function formatWhen(iso: string): string {
+function formatWhen(iso: string, nowMs: number): string {
   const then = new Date(iso);
-  const diffMin = Math.max(0, Math.round((Date.now() - then.getTime()) / 60000));
+  const diffMin = Math.max(0, Math.round((nowMs - then.getTime()) / 60000));
   if (diffMin < 1) return "just now";
   if (diffMin < 60) return `${diffMin}m ago`;
   const diffHr = Math.round(diffMin / 60);
@@ -30,6 +31,12 @@ function iconFor(kind: string) {
 
 export function TodayMicroWins() {
   const { data, isLoading } = useMicroWins();
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   if (isLoading) {
     return (
@@ -83,7 +90,7 @@ export function TodayMicroWins() {
                     {w.label}
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground">
-                    {formatWhen(w.occurred_at)}
+                    {formatWhen(w.occurred_at, now)}
                   </span>
                 </div>
               </li>

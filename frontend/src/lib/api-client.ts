@@ -864,8 +864,11 @@ export interface MicroWinsResponse {
 
 export const todayApi = {
   getIntention: () => api.get<DailyIntention | null>("/api/v1/today/intention"),
-  setIntention: (text: string) =>
-    api.post<DailyIntention>("/api/v1/today/intention", { text }),
+  setIntention: (text: string, intentionDate?: string) =>
+    api.post<DailyIntention>("/api/v1/today/intention", {
+      text,
+      ...(intentionDate ? { intention_date: intentionDate } : {}),
+    }),
   consistency: () =>
     api.get<ConsistencyResponse>("/api/v1/today/consistency"),
   microWins: () => api.get<MicroWinsResponse>("/api/v1/today/micro-wins"),

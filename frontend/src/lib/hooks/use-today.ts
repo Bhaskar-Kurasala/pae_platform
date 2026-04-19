@@ -15,10 +15,18 @@ export function useMyIntention() {
   });
 }
 
+function localIsoDate(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export function useSetIntention() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (text: string) => todayApi.setIntention(text),
+    mutationFn: (text: string) => todayApi.setIntention(text, localIsoDate()),
     onSuccess: (data) => {
       qc.setQueryData(["today", "intention"], data);
     },

@@ -51,7 +51,12 @@ async def set_today_intention(
     current_user: User = Depends(get_current_user),
 ) -> DailyIntentionResponse:
     """Set or overwrite today's intention for the current user."""
-    row = await upsert_today(db, user_id=current_user.id, text=payload.text)
+    row = await upsert_today(
+        db,
+        user_id=current_user.id,
+        text=payload.text,
+        intention_date=payload.intention_date,
+    )
     return DailyIntentionResponse.model_validate(row)
 
 

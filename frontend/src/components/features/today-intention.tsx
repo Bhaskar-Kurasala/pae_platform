@@ -13,16 +13,23 @@ export function TodayIntention() {
   const setIntention = useSetIntention();
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState("");
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (!stored) setEditing(false);
   }, [stored]);
 
   const trimmed = text.trim();
-  const canSave = trimmed.length > 0 && !setIntention.isPending;
+  const tooLong = trimmed.length > MAX_LENGTH;
+  const canSave = trimmed.length > 0 && !tooLong && !setIntention.isPending;
 
   function handleSave() {
+    if (tooLong) {
+      setError(`Intention must be ${MAX_LENGTH} characters or fewer.`);
+      return;
+    }
     if (!canSave) return;
+    setError("");
     setIntention.mutate(trimmed, {
       onSuccess: () => {
         setEditing(false);
@@ -89,15 +96,28 @@ export function TodayIntention() {
         <div className="mt-4">
           <textarea
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              setText(e.target.value);
+              if (error) setError("");
+            }}
             rows={2}
-            maxLength={MAX_LENGTH}
             aria-label="Daily intention"
+            aria-invalid={tooLong || undefined}
             placeholder="One sentence — what does a good day look like for you?"
             className="w-full rounded-xl border border-foreground/10 bg-transparent p-3 text-sm leading-relaxed outline-none resize-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 placeholder:text-muted-foreground/70"
           />
+          {error && (
+            <p className="mt-2 text-xs text-destructive" role="alert">
+              {error}
+            </p>
+          )}
           <div className="mt-3 flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">
+            <span
+              className={cn(
+                "text-xs",
+                tooLong ? "text-destructive" : "text-muted-foreground",
+              )}
+            >
               {trimmed.length} / {MAX_LENGTH}
             </span>
             <div className="flex items-center gap-2">

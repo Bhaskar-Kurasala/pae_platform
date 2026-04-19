@@ -7,7 +7,8 @@ from pydantic import BaseModel, Field
 
 
 class DailyIntentionCreate(BaseModel):
-    text: str = Field(min_length=1, max_length=300)
+    text: str = Field(min_length=1, max_length=200)
+    intention_date: date | None = None
 
 
 class DailyIntentionResponse(BaseModel):

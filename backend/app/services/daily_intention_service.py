@@ -56,9 +56,15 @@ async def upsert_today(
     user_id: uuid.UUID,
     text: str,
     now: datetime | None = None,
+    intention_date: date | None = None,
 ) -> DailyIntention:
-    """Create or overwrite today's intention for this user."""
-    today = today_in_utc(now)
+    """Create or overwrite today's intention for this user.
+
+    DISC-17: Accept a client-supplied `intention_date` so users past the UTC
+    boundary still file the row against their *local* date. Falls back to UTC
+    when absent.
+    """
+    today = intention_date if intention_date is not None else today_in_utc(now)
     clean = normalize_text(text)
     existing = await get_for_date(db, user_id=user_id, on=today)
     if existing is None:
