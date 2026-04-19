@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer
+from sqlalchemy import DateTime, ForeignKey, Integer, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -11,6 +11,11 @@ from app.models.base import TimestampMixin, UUIDMixin
 
 class StudentProgress(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "student_progress"
+    __table_args__ = (
+        UniqueConstraint(
+            "student_id", "lesson_id", name="uq_student_progress_student_lesson"
+        ),
+    )
 
     student_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False

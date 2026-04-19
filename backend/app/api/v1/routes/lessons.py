@@ -1,13 +1,15 @@
 import uuid
 
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.lesson import Lesson
 from app.models.user import User
+from app.repositories.course_repository import CourseRepository
+from app.repositories.enrollment_repository import EnrollmentRepository
 from app.schemas.lesson import LessonCreate, LessonResponse, LessonUpdate
 from app.schemas.question_wall import (
     LessonQuestionsResponse,
@@ -45,9 +47,26 @@ async def list_lessons(
 @router.get("/lessons/{lesson_id}", response_model=LessonResponse)
 async def get_lesson(
     lesson_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
     service: LessonService = Depends(get_service),
+    current_user: User = Depends(get_current_user),
 ) -> Lesson:
-    return await service.get_lesson(lesson_id)
+    lesson = await service.get_lesson(lesson_id)
+    course = await CourseRepository(db).get_active(lesson.course_id)
+    if course is not None and course.price_cents > 0 and current_user.role != "admin":
+        enrollment = await EnrollmentRepository(db).get_by_student_and_course(
+            current_user.id, course.id
+        )
+        if enrollment is None:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "reason": "enroll_required",
+                    "course_id": str(course.id),
+                    "price_cents": course.price_cents,
+                },
+            )
+    return lesson
 
 
 @router.post("/lessons", response_model=LessonResponse, status_code=201)

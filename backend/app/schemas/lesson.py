@@ -39,6 +39,9 @@ class LessonResponse(BaseModel):
     title: str
     slug: str
     description: str | None = None
+    content: str | None = None
+    video_url: str | None = None
+    youtube_video_id: str | None = None
     duration_seconds: int
     order: int
     is_published: bool

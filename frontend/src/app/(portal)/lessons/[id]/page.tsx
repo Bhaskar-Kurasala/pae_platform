@@ -3,9 +3,9 @@
 import { use, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, CheckCircle2, Loader2 } from "lucide-react";
-import { useLesson } from "@/lib/hooks/use-courses";
+import { useLesson, useCourseLessons } from "@/lib/hooks/use-courses";
 import { useMyProgress, useCompleteLesson } from "@/lib/hooks/use-progress";
-import type { ProgressResponse } from "@/lib/api-client";
+import { ApiError, type ProgressResponse } from "@/lib/api-client";
 import { RetrievalQuizInline } from "@/components/features/retrieval-quiz-inline";
 
 function isCompleted(lessonId: string, progress: ProgressResponse | undefined): boolean {
@@ -16,12 +16,21 @@ function isCompleted(lessonId: string, progress: ProgressResponse | undefined): 
 
 export default function LessonPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { data: lesson, isLoading } = useLesson(id);
+  const { data: lesson, isLoading, error } = useLesson(id);
   const { data: progress } = useMyProgress();
   const completeLesson = useCompleteLesson();
   const [completed, setCompleted] = useState(false);
+  const { data: siblingLessons } = useCourseLessons(lesson?.course_id ?? "");
 
   const alreadyDone = isCompleted(id, progress) || completed;
+
+  const orderedSiblings = (siblingLessons ?? []).slice().sort((a, b) => a.order - b.order);
+  const currentIndex = orderedSiblings.findIndex((l) => l.id === id);
+  const prevLesson = currentIndex > 0 ? orderedSiblings[currentIndex - 1] : null;
+  const nextLesson =
+    currentIndex >= 0 && currentIndex < orderedSiblings.length - 1
+      ? orderedSiblings[currentIndex + 1]
+      : null;
 
   async function handleComplete() {
     await completeLesson.mutateAsync(id);
@@ -33,6 +42,25 @@ export default function LessonPage({ params }: { params: Promise<{ id: string }>
       <div className="p-8 max-w-3xl mx-auto space-y-4 animate-pulse">
         <div className="h-6 bg-muted rounded w-1/3" />
         <div className="aspect-video bg-muted rounded-xl" />
+      </div>
+    );
+  }
+
+  if (error instanceof ApiError && error.status === 402) {
+    const courseId =
+      (error.body as { detail?: { course_id?: string } })?.detail?.course_id ?? "";
+    return (
+      <div className="p-8 max-w-xl mx-auto text-center space-y-3">
+        <h1 className="text-xl font-semibold">Enroll to unlock this lesson</h1>
+        <p className="text-sm text-muted-foreground">
+          This lesson is part of a paid course. Enroll on the course page to continue.
+        </p>
+        <Link
+          href={courseId ? `/courses/${courseId}` : "/courses"}
+          className="inline-flex items-center gap-2 h-10 rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+        >
+          Go to course
+        </Link>
       </div>
     );
   }
@@ -133,6 +161,43 @@ print("Welcome to", "${lesson.title}")`}</code>
           </button>
         )}
       </div>
+
+      {/* Sibling-lesson navigation */}
+      {(prevLesson || nextLesson) && (
+        <nav
+          aria-label="Lesson navigation"
+          className="flex items-center justify-between border-t pt-4"
+        >
+          {prevLesson ? (
+            <Link
+              href={`/lessons/${prevLesson.id}`}
+              className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+              <span className="truncate max-w-[14rem]">{prevLesson.title}</span>
+            </Link>
+          ) : (
+            <span aria-hidden="true" />
+          )}
+          {nextLesson ? (
+            <Link
+              href={`/lessons/${nextLesson.id}`}
+              className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
+            >
+              <span className="truncate max-w-[14rem]">{nextLesson.title}</span>
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </Link>
+          ) : (
+            <span
+              aria-disabled="true"
+              className="inline-flex items-center gap-2 text-sm text-muted-foreground opacity-50"
+            >
+              Last lesson
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </span>
+          )}
+        </nav>
+      )}
     </div>
   );
 }

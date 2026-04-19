@@ -117,33 +117,78 @@ class ProgressService:
         return ProgressResponse(courses=course_progresses, overall_progress=overall)
 
     async def complete_lesson(self, lesson_id: str | uuid.UUID, student: User) -> StudentProgress:
-        existing = await self.repo.get_for_lesson(student.id, lesson_id)
+        from sqlalchemy import select
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        await self._auto_enroll_if_free(student.id, lesson_id)
         now = datetime.now(UTC)
-        if existing:
-            progress = await self.repo.update(
-                existing,
-                {"status": "completed", "completed_at": now},
+        lesson_uuid = (
+            lesson_id if isinstance(lesson_id, uuid.UUID) else uuid.UUID(str(lesson_id))
+        )
+        stmt = (
+            pg_insert(StudentProgress)
+            .values(
+                student_id=student.id,
+                lesson_id=lesson_uuid,
+                status="completed",
+                completed_at=now,
             )
-        else:
-            progress = await self.repo.create(
-                {
-                    "student_id": student.id,
-                    "lesson_id": lesson_id,
-                    "status": "completed",
-                    "completed_at": now,
-                }
+            .on_conflict_do_update(
+                constraint="uq_student_progress_student_lesson",
+                set_={"status": "completed", "completed_at": now},
             )
-            log.info(
-                "lesson.completed",
-                lesson_id=str(lesson_id),
-                student_id=str(student.id),
+        )
+        await self.db.execute(stmt)
+        await self.db.flush()
+        result = await self.db.execute(
+            select(StudentProgress).where(
+                StudentProgress.student_id == student.id,
+                StudentProgress.lesson_id == lesson_uuid,
             )
+        )
+        progress = result.scalar_one()
+        log.info(
+            "lesson.completed",
+            lesson_id=str(lesson_id),
+            student_id=str(student.id),
+        )
 
         # P2-06: every completed lesson seeds a retrieval-practice card so the
         # concept resurfaces on Today. Upsert is idempotent — re-completing a
         # lesson doesn't clobber prior SM-2 state.
         await self._seed_retrieval_card(student.id, lesson_id)
         return progress
+
+    async def _auto_enroll_if_free(
+        self, student_id: uuid.UUID, lesson_id: str | uuid.UUID
+    ) -> None:
+        """Create an active enrollment on first completion of a free-course lesson."""
+        from app.repositories.course_repository import CourseRepository
+        from app.repositories.enrollment_repository import EnrollmentRepository
+
+        lesson = await self.lesson_repo.get_active(lesson_id)
+        if lesson is None:
+            return
+        course = await CourseRepository(self.db).get_active(lesson.course_id)
+        if course is None or course.price_cents > 0:
+            return
+        enroll_repo = EnrollmentRepository(self.db)
+        existing = await enroll_repo.get_by_student_and_course(student_id, course.id)
+        if existing is not None:
+            return
+        await enroll_repo.create(
+            {
+                "student_id": student_id,
+                "course_id": course.id,
+                "status": "active",
+                "enrolled_at": datetime.now(UTC),
+            }
+        )
+        log.info(
+            "enrollment.auto_created",
+            student_id=str(student_id),
+            course_id=str(course.id),
+        )
 
     async def build_retrieval_quiz(
         self, lesson_id: str | uuid.UUID
