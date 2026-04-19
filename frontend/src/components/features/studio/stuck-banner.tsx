@@ -24,6 +24,27 @@ export function StuckBanner({ thresholdMs = DEFAULT_THRESHOLD_MS }: StuckBannerP
     setDismissed(false);
   }, [code, hasRunOnce, running]);
 
+  // DISC-40 — read-only engagement counts as activity too. Scope listeners to
+  // the studio surface (data-slot="studio") so they don't reset on unrelated
+  // portal clicks elsewhere on the page.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const root =
+      document.querySelector<HTMLElement>('[data-slot="studio"]') ?? document.body;
+    function bump() {
+      lastActivityRef.current = Date.now();
+      setShowBanner(false);
+    }
+    root.addEventListener("pointerdown", bump);
+    root.addEventListener("keydown", bump);
+    root.addEventListener("wheel", bump, { passive: true });
+    return () => {
+      root.removeEventListener("pointerdown", bump);
+      root.removeEventListener("keydown", bump);
+      root.removeEventListener("wheel", bump);
+    };
+  }, []);
+
   useEffect(() => {
     if (dismissed) return;
     const check = () => {
@@ -84,7 +105,7 @@ export function StuckBanner({ thresholdMs = DEFAULT_THRESHOLD_MS }: StuckBannerP
       <button
         type="button"
         onClick={handleAskTutor}
-        className="shrink-0 inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 h-7 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+        className="shrink-0 inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 h-7 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-3 pointer-coarse:text-sm"
       >
         <MessageSquare className="h-3 w-3" aria-hidden="true" />
         Ask the tutor
@@ -93,7 +114,7 @@ export function StuckBanner({ thresholdMs = DEFAULT_THRESHOLD_MS }: StuckBannerP
         type="button"
         onClick={handleDismiss}
         aria-label="Dismiss stuck banner"
-        className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-foreground/5 hover:text-foreground transition-colors"
+        className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-foreground/5 hover:text-foreground transition-colors pointer-coarse:h-11 pointer-coarse:w-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
       >
         <X className="h-3.5 w-3.5" aria-hidden="true" />
       </button>

@@ -1,10 +1,15 @@
 "use client";
 
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 import { AlertCircle, Clock, Loader2 } from "lucide-react";
 import { useStudio } from "./studio-context";
 
 const TENSOR_SHAPE_RE = /\b(?:shape|size)=?\s*\(([^)]+)\)|torch\.Size\(\[([^\]]+)\]\)/i;
+
+// Matches CPython-style traceback frame headers, e.g.
+//   File "<student>", line 12, in <module>
+//   File "/tmp/foo.py", line 3
+const TRACEBACK_FRAME_RE = /File "([^"]*)", line (\d+)(?:, in [^\n]*)?/g;
 
 function isTensorLike(repr: string): boolean {
   return /\b(tensor|ndarray|array|Tensor)\b/.test(repr) || TENSOR_SHAPE_RE.test(repr);
@@ -14,6 +19,45 @@ function extractShape(repr: string): string | null {
   const match = repr.match(TENSOR_SHAPE_RE);
   if (!match) return null;
   return (match[1] ?? match[2] ?? "").trim();
+}
+
+function revealLine(lineNumber: number) {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(
+      new CustomEvent("studio.reveal_line", { detail: { lineNumber } }),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+type TracebackSegment =
+  | { kind: "text"; value: string }
+  | { kind: "frame"; file: string; line: number; raw: string };
+
+function parseTraceback(input: string): TracebackSegment[] {
+  const segments: TracebackSegment[] = [];
+  let lastIndex = 0;
+  // Reset regex state — the `g` flag keeps state across calls otherwise.
+  const re = new RegExp(TRACEBACK_FRAME_RE.source, "g");
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(input)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({ kind: "text", value: input.slice(lastIndex, match.index) });
+    }
+    segments.push({
+      kind: "frame",
+      file: match[1] ?? "",
+      line: Number.parseInt(match[2] ?? "0", 10),
+      raw: match[0],
+    });
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < input.length) {
+    segments.push({ kind: "text", value: input.slice(lastIndex) });
+  }
+  return segments;
 }
 
 export function ExecutionTrace() {
@@ -27,6 +71,16 @@ export function ExecutionTrace() {
     if (!result?.stdout) return [];
     return result.stdout.split("\n");
   }, [result?.stdout]);
+
+  const errorSegments = useMemo(() => {
+    if (!result?.error) return [];
+    return parseTraceback(result.error);
+  }, [result?.error]);
+
+  const stderrSegments = useMemo(() => {
+    if (!result?.stderr) return [];
+    return parseTraceback(result.stderr);
+  }, [result?.stderr]);
 
   if (running) {
     return (
@@ -69,7 +123,25 @@ export function ExecutionTrace() {
       {result.error && (
         <div className="flex items-start gap-2 rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <pre className="whitespace-pre-wrap break-words font-mono">{result.error}</pre>
+          <pre className="whitespace-pre-wrap break-words font-mono">
+            {errorSegments.length > 0
+              ? errorSegments.map((seg, i) =>
+                  seg.kind === "text" ? (
+                    <Fragment key={i}>{seg.value}</Fragment>
+                  ) : (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => revealLine(seg.line)}
+                      title={`Jump to line ${seg.line}`}
+                      className="inline rounded px-1 text-destructive underline decoration-destructive/40 underline-offset-2 hover:bg-destructive/15 hover:decoration-destructive focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+                    >
+                      {seg.raw}
+                    </button>
+                  ),
+                )
+              : result.error}
+          </pre>
         </div>
       )}
 
@@ -148,7 +220,25 @@ export function ExecutionTrace() {
             {result.stderr && (
               <>
                 {"\n"}
-                <span className="text-destructive">{result.stderr}</span>
+                <span className="text-destructive">
+                  {stderrSegments.length > 0
+                    ? stderrSegments.map((seg, i) =>
+                        seg.kind === "text" ? (
+                          <Fragment key={i}>{seg.value}</Fragment>
+                        ) : (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => revealLine(seg.line)}
+                            title={`Jump to line ${seg.line}`}
+                            className="inline rounded px-1 underline decoration-destructive/40 underline-offset-2 hover:bg-destructive/15 hover:decoration-destructive focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+                          >
+                            {seg.raw}
+                          </button>
+                        ),
+                      )
+                    : result.stderr}
+                </span>
               </>
             )}
           </pre>

@@ -75,7 +75,7 @@ function RunButton() {
       }}
       disabled={disabled}
       aria-label="Run code"
-      className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+      className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-3 pointer-coarse:text-sm"
     >
       {running ? (
         <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -97,7 +97,7 @@ function DiffToggleButton() {
       aria-pressed={showDiff}
       aria-label={showDiff ? "Show editor" : "Show diff from last run"}
       title={showDiff ? "Back to editor" : "Compare with last run"}
-      className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium transition ${
+      className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium transition pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-3 pointer-coarse:text-sm ${
         showDiff
           ? "border-primary bg-primary/10 text-primary"
           : "border-border bg-background text-foreground hover:bg-muted"
@@ -119,7 +119,7 @@ function SeniorReviewButton({ onClick }: { onClick: () => void }) {
       disabled={disabled}
       aria-label="Request senior engineer review"
       title="Ask a simulated senior engineer to review this code (PR-style feedback)"
-      className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+      className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-3 pointer-coarse:text-sm"
     >
       <UserCheck className="h-3.5 w-3.5" aria-hidden="true" />
       <span>Senior review</span>
@@ -213,7 +213,7 @@ function StudioLayoutInner() {
         type="button"
         onClick={() => setBottomTab("trace")}
         aria-pressed={bottomTab === "trace"}
-        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition ${
+        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-3 pointer-coarse:text-sm ${
           bottomTab === "trace"
             ? "bg-muted text-foreground"
             : "text-muted-foreground hover:bg-muted/50"
@@ -226,7 +226,7 @@ function StudioLayoutInner() {
         type="button"
         onClick={() => setBottomTab("quality")}
         aria-pressed={bottomTab === "quality"}
-        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition ${
+        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-3 pointer-coarse:text-sm ${
           bottomTab === "quality"
             ? "bg-muted text-foreground"
             : "text-muted-foreground hover:bg-muted/50"
@@ -240,7 +240,7 @@ function StudioLayoutInner() {
         type="button"
         onClick={() => setBottomTab("mental-model")}
         aria-pressed={bottomTab === "mental-model"}
-        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition ${
+        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-3 pointer-coarse:text-sm ${
           bottomTab === "mental-model"
             ? "bg-muted text-foreground"
             : "text-muted-foreground hover:bg-muted/50"
@@ -253,7 +253,7 @@ function StudioLayoutInner() {
         type="button"
         onClick={() => setBottomTab("history")}
         aria-pressed={bottomTab === "history"}
-        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition ${
+        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-3 pointer-coarse:text-sm ${
           bottomTab === "history"
             ? "bg-muted text-foreground"
             : "text-muted-foreground hover:bg-muted/50"
@@ -267,7 +267,7 @@ function StudioLayoutInner() {
         type="button"
         onClick={() => setBottomTab("prompt-preview")}
         aria-pressed={bottomTab === "prompt-preview"}
-        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition ${
+        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-3 pointer-coarse:text-sm ${
           bottomTab === "prompt-preview"
             ? "bg-muted text-foreground"
             : "text-muted-foreground hover:bg-muted/50"
@@ -280,7 +280,7 @@ function StudioLayoutInner() {
         type="button"
         onClick={toggleTrace}
         aria-label={traceCollapsed ? "Expand panel" : "Collapse panel"}
-        className="ml-1 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+        className="ml-1 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground pointer-coarse:h-11 pointer-coarse:w-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
       >
         {traceCollapsed ? (
           <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
@@ -354,7 +354,7 @@ function StudioLayoutInner() {
                   type="button"
                   onClick={toggleTrace}
                   aria-label="Expand trace"
-                  className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground pointer-coarse:h-11 pointer-coarse:w-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
                 >
                   <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>

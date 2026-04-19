@@ -209,6 +209,25 @@ export function CodeEditor({ onCodeChange }: CodeEditorProps) {
     };
   }, []);
 
+  // DISC-39 — click-to-jump from traceback frames dispatched by execution-trace.
+  useEffect(() => {
+    function onRevealLine(e: Event) {
+      const detail = (e as CustomEvent<{ lineNumber?: number }>).detail;
+      const line = detail?.lineNumber;
+      const editor = editorRef.current;
+      if (!editor || typeof line !== "number" || line <= 0) return;
+      try {
+        editor.revealLineInCenter(line);
+        editor.setPosition({ lineNumber: line, column: 1 });
+        editor.focus();
+      } catch {
+        /* ignore — editor may be unmounted or line out of range */
+      }
+    }
+    window.addEventListener("studio.reveal_line", onRevealLine);
+    return () => window.removeEventListener("studio.reveal_line", onRevealLine);
+  }, []);
+
   let savedLabel = "Not saved yet";
   if (dirty) {
     savedLabel = "Saving…";
