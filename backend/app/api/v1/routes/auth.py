@@ -5,7 +5,7 @@ from app.core.database import get_db
 from app.core.rate_limit import limiter
 from app.core.security import get_current_user
 from app.models.user import User
-from app.schemas.auth import LoginRequest, TokenResponse
+from app.schemas.auth import LoginRequest, RefreshRequest, TokenResponse
 from app.schemas.user import UserCreate, UserResponse
 from app.services.auth_service import AuthService
 
@@ -34,6 +34,16 @@ async def login(
     service: AuthService = Depends(get_auth_service),
 ) -> dict[str, str]:
     return await service.login(payload.email, payload.password)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+@limiter.limit("60/minute")
+async def refresh(
+    request: Request,
+    payload: RefreshRequest,
+    service: AuthService = Depends(get_auth_service),
+) -> dict[str, str]:
+    return await service.refresh(payload.refresh_token)
 
 
 @router.get("/me", response_model=UserResponse)

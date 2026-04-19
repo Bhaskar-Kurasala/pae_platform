@@ -1,9 +1,11 @@
+import uuid
+
 import structlog
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.hashing import hash_password, verify_password
-from app.core.security import create_access_token, create_refresh_token
+from app.core.security import create_access_token, create_refresh_token, verify_token
 from app.models.user import User
 from app.repositories.user_repository import UserRepository
 from app.schemas.user import UserCreate
@@ -56,5 +58,33 @@ class AuthService:
         return {
             "access_token": access_token,
             "refresh_token": refresh_token,
+            "token_type": "bearer",
+        }
+
+    async def refresh(self, refresh_token: str) -> dict[str, str]:
+        payload = verify_token(refresh_token)
+        if payload.get("type") != "refresh":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid refresh token",
+            )
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid refresh token payload",
+            )
+        user = await self.repo.get(uuid.UUID(user_id))
+        if not user or user.is_deleted or not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found or disabled",
+            )
+        new_access = create_access_token({"sub": str(user.id), "role": user.role})
+        new_refresh = create_refresh_token({"sub": str(user.id)})
+        log.info("auth.refresh", user_id=str(user.id))
+        return {
+            "access_token": new_access,
+            "refresh_token": new_refresh,
             "token_type": "bearer",
         }

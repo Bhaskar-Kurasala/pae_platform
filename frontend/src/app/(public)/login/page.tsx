@@ -1,25 +1,27 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/stores/auth-store";
-import { ApiError } from "@/lib/api-client";
+import { ApiError, sanitizeNext } from "@/lib/api-client";
 
-export default function LoginPage() {
+function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const { login, isAuthenticated, _hasHydrated } = useAuthStore();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextParam = sanitizeNext(searchParams?.get("next") ?? null);
+  const landing = nextParam ?? "/today";
 
-  // Already logged in — redirect to dashboard without adding login to history
   useEffect(() => {
     if (_hasHydrated && isAuthenticated) {
-      router.replace("/today");
+      router.replace(landing);
     }
-  }, [_hasHydrated, isAuthenticated, router]);
+  }, [_hasHydrated, isAuthenticated, router, landing]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -27,7 +29,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email, password);
-      router.replace("/today");
+      router.replace(landing);
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -106,5 +108,13 @@ export default function LoginPage() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }

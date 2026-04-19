@@ -10,16 +10,56 @@ class ApiError extends Error {
   }
 }
 
-function getToken(): string | null {
+interface StoredAuth {
+  state?: {
+    token?: string;
+    refreshToken?: string;
+    user?: unknown;
+    isAuthenticated?: boolean;
+  };
+}
+
+function readAuthStorage(): StoredAuth | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem("auth-storage");
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { state?: { token?: string } };
-    return parsed.state?.token ?? null;
+    return JSON.parse(raw) as StoredAuth;
   } catch {
     return null;
   }
+}
+
+function writeTokensToStorage(accessToken: string, refreshToken: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const parsed = readAuthStorage() ?? { state: {} };
+    parsed.state = {
+      ...(parsed.state ?? {}),
+      token: accessToken,
+      refreshToken,
+      isAuthenticated: true,
+    };
+    localStorage.setItem("auth-storage", JSON.stringify(parsed));
+  } catch {
+    // ignore
+  }
+}
+
+function getToken(): string | null {
+  return readAuthStorage()?.state?.token ?? null;
+}
+
+function getRefreshToken(): string | null {
+  return readAuthStorage()?.state?.refreshToken ?? null;
+}
+
+function sanitizeNext(raw: string | null): string | null {
+  if (!raw) return null;
+  // Only allow absolute same-origin paths like "/studio" or "/foo?bar=1".
+  // Reject protocol-relative ("//evil.com"), cross-origin, and non-path values.
+  if (!/^\/[^/]/.test(raw)) return null;
+  return raw;
 }
 
 function clearAuthAndRedirect(): void {
@@ -29,7 +69,39 @@ function clearAuthAndRedirect(): void {
   } catch {
     // ignore
   }
-  window.location.replace("/login");
+  const current = `${window.location.pathname}${window.location.search}`;
+  const next = sanitizeNext(current);
+  const loginUrl = next ? `/login?next=${encodeURIComponent(next)}` : "/login";
+  window.location.replace(loginUrl);
+}
+
+let refreshInFlight: Promise<string | null> | null = null;
+
+async function refreshAccessToken(): Promise<string | null> {
+  if (refreshInFlight) return refreshInFlight;
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+  refreshInFlight = (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as {
+        access_token: string;
+        refresh_token: string;
+      };
+      writeTokensToStorage(data.access_token, data.refresh_token);
+      return data.access_token;
+    } catch {
+      return null;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -40,12 +112,22 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  let res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+
+  // On 401 with an existing token, attempt a single silent refresh + retry.
+  // Skip for the refresh endpoint itself to avoid infinite loops.
+  if (res.status === 401 && token && !path.endsWith("/auth/refresh")) {
+    const fresh = await refreshAccessToken();
+    if (fresh) {
+      const retryHeaders = { ...headers, Authorization: `Bearer ${fresh}` };
+      res = await fetch(`${API_BASE}${path}`, { ...init, headers: retryHeaders });
+    }
+  }
+
   if (!res.ok) {
-    // Expired or invalid session — clear auth and redirect to login
     if (res.status === 401 && token) {
       clearAuthAndRedirect();
-      return new Promise(() => {});  // never resolves; redirect is in-flight
+      return new Promise(() => {}); // never resolves; redirect is in-flight
     }
     const detail = await res.json().catch(() => ({ detail: res.statusText }));
     const raw = (detail as { detail?: unknown }).detail;
@@ -208,6 +290,8 @@ export const authApi = {
     api.post<UserResponse>("/api/v1/auth/register", body),
   login: (body: { email: string; password: string }) =>
     api.post<TokenResponse>("/api/v1/auth/login", body),
+  refresh: (body: { refresh_token: string }) =>
+    api.post<TokenResponse>("/api/v1/auth/refresh", body),
   me: () => api.get<UserResponse>("/api/v1/auth/me"),
 };
 
@@ -820,4 +904,4 @@ export const clarifyApi = {
     api.post<FollowupResponse>("/api/v1/clarify/followups", { reply }),
 };
 
-export { ApiError, API_BASE };
+export { ApiError, API_BASE, sanitizeNext };

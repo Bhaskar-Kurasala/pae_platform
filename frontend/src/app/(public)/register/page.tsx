@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/stores/auth-store";
-import { ApiError } from "@/lib/api-client";
+import { ApiError, sanitizeNext } from "@/lib/api-client";
 
-export default function RegisterPage() {
+function RegisterForm() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -14,12 +14,16 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const { register, isAuthenticated, _hasHydrated } = useAuthStore();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextParam = sanitizeNext(searchParams?.get("next") ?? null);
+  const postRegisterLanding = nextParam ?? "/onboarding";
+  const alreadyAuthedLanding = nextParam ?? "/today";
 
   useEffect(() => {
     if (_hasHydrated && isAuthenticated) {
-      router.replace("/today");
+      router.replace(alreadyAuthedLanding);
     }
-  }, [_hasHydrated, isAuthenticated, router]);
+  }, [_hasHydrated, isAuthenticated, router, alreadyAuthedLanding]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -31,7 +35,7 @@ export default function RegisterPage() {
     setLoading(true);
     try {
       await register(email, fullName, password);
-      router.replace("/onboarding");
+      router.replace(postRegisterLanding);
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -127,5 +131,13 @@ export default function RegisterPage() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={null}>
+      <RegisterForm />
+    </Suspense>
   );
 }
