@@ -371,6 +371,10 @@ export const exercisesApi = {
     api.get<SubmissionResponse[]>(
       `/api/v1/exercises/${exerciseId}/submissions/mine?limit=${limit}`,
     ),
+  getSolution: (id: string) =>
+    api.get<{ solution_code: string; reason: string }>(
+      `/api/v1/exercises/${id}/solution`,
+    ),
   submit: (
     id: string,
     payload: {

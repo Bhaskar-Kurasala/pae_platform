@@ -1,8 +1,17 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, History, Loader2, MessagesSquare, Send, Star } from "lucide-react";
+import {
+  ArrowLeft,
+  EyeOff,
+  History,
+  Key,
+  Loader2,
+  MessagesSquare,
+  Send,
+  Star,
+} from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ApiError,
@@ -47,6 +56,9 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
   const [share, setShare] = useState(false);
   const [shareNote, setShareNote] = useState("");
   const [explainOpen, setExplainOpen] = useState(false);
+  const [solution, setSolution] = useState<string | null>(null);
+  const [solutionLoading, setSolutionLoading] = useState(false);
+  const [solutionError, setSolutionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!codeInitialized && exercise) {
@@ -124,6 +136,33 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
 
   const rubricEntries = formatRubric(exercise?.rubric);
   const overLimit = code.length > CODE_MAX;
+
+  // DISC-36 — compute whether the reveal button should even appear. Backend
+  // still enforces the threshold; this only gates the UI affordance so we
+  // don't show a button that always 403s.
+  const { failedAttempts, solutionUnlocked } = useMemo(() => {
+    const history = historyQuery.data ?? [];
+    const failed = history.filter((s) => s.status === "failed").length;
+    const passed = history.some((s) => s.status === "passed");
+    return { failedAttempts: failed, solutionUnlocked: passed || failed >= 3 };
+  }, [historyQuery.data]);
+
+  async function handleRevealSolution() {
+    setSolutionError(null);
+    setSolutionLoading(true);
+    try {
+      const res = await exercisesApi.getSolution(id);
+      setSolution(res.solution_code);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setSolutionError(err.message);
+      } else {
+        setSolutionError("Could not load the solution. Try again.");
+      }
+    } finally {
+      setSolutionLoading(false);
+    }
+  }
 
   if (exerciseQuery.isLoading) {
     return (
@@ -338,6 +377,56 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {solutionUnlocked && (
+        <div className="rounded-xl border bg-card p-5 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-semibold inline-flex items-center gap-2">
+              <Key className="h-4 w-4 text-primary" aria-hidden="true" />
+              Reference solution
+            </h2>
+            {solution ? (
+              <button
+                type="button"
+                onClick={() => setSolution(null)}
+                className="inline-flex items-center gap-1.5 h-8 rounded-md border border-border/60 px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-foreground/40 transition-colors"
+              >
+                <EyeOff className="h-3.5 w-3.5" aria-hidden="true" />
+                Hide
+              </button>
+            ) : null}
+          </div>
+          {solution ? (
+            <pre className="rounded-lg bg-[#111827] text-green-300 font-mono text-sm p-4 overflow-x-auto whitespace-pre-wrap">
+              {solution}
+            </pre>
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground">
+                {failedAttempts >= 3
+                  ? "You've tried " + failedAttempts + " times — take a look at a working approach, then try to re-implement it in your own style."
+                  : "You've passed this exercise. Compare your approach with the reference solution."}
+              </p>
+              <button
+                type="button"
+                onClick={() => void handleRevealSolution()}
+                disabled={solutionLoading}
+                className="inline-flex items-center gap-2 h-9 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60 transition-colors"
+              >
+                {solutionLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Key className="h-4 w-4" aria-hidden="true" />
+                )}
+                Reveal solution
+              </button>
+              {solutionError && (
+                <p className="text-sm text-destructive">{solutionError}</p>
+              )}
+            </>
+          )}
         </div>
       )}
 

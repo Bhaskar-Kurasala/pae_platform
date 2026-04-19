@@ -44,7 +44,7 @@ Safe to leave open at launch. Most are admin-side, edge-case, or cosmetic. Estim
 | DISC-23 | Lessons missing `video_id` show empty player | Backfill once real content lands. |
 | ~~DISC-25~~ | ~~Lesson page un-complete toggle missing~~ | Closed 2026-04-19 — added `DELETE /students/me/lessons/{id}/complete` + "Mark as incomplete" button. |
 | DISC-29 | Agent health page "last call" shows UTC not local | One-line `toLocaleString()` swap. |
-| DISC-36 | Student drilldown timeline pagination after 200 events | Not hit until power-users accumulate. |
+| ~~DISC-36~~ | ~~"Reveal solution" affordance missing~~ | Closed 2026-04-19 — unlock after 3 fails OR pass; backend gate + UI. |
 | ~~DISC-38~~ | ~~"Ask the tutor" handoff on failing submission~~ | Closed 2026-04-19 — exercise card CTA + chat `?submission_id=` prefill. |
 | DISC-17 | Studio agent-builder preview drifts from prod config | Internal tool, low priority. |
 | DISC-19 | Settings page theme toggle doesn't persist across devices | Needs user-preferences table. |

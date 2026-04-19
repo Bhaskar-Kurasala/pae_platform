@@ -1,7 +1,8 @@
 import uuid
 
 import structlog
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -86,6 +87,67 @@ async def get_exercise(
     service: ExerciseService = Depends(get_service),
 ) -> Exercise:
     return await service.get_exercise(exercise_id)
+
+
+class SolutionResponse(BaseModel):
+    solution_code: str
+    reason: str
+
+
+# DISC-36 — Students unlock the reference solution once they've either
+# passed the exercise (review learning) or burned ≥3 failed attempts
+# (recovery pathway). This avoids the anti-cheat concern of revealing
+# solutions on the first attempt while still giving stuck learners a way
+# out. Admin bypass preserved for QA/content review.
+SOLUTION_FAILED_ATTEMPT_THRESHOLD = 3
+
+
+@router.get("/{exercise_id}/solution", response_model=SolutionResponse)
+async def get_exercise_solution(
+    exercise_id: uuid.UUID,
+    service: ExerciseService = Depends(get_service),
+    current_user: User = Depends(get_current_user),
+) -> SolutionResponse:
+    exercise = await service.get_exercise(exercise_id)
+    if not exercise.solution_code:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No reference solution is available for this exercise.",
+        )
+
+    if current_user.role == "admin":
+        return SolutionResponse(
+            solution_code=exercise.solution_code, reason="admin"
+        )
+
+    submissions = await service.submission_repo.get_by_student_exercise(
+        current_user.id, exercise_id
+    )
+    passed = any(s.status == "passed" for s in submissions)
+    failed_attempts = sum(1 for s in submissions if s.status == "failed")
+
+    if passed:
+        return SolutionResponse(
+            solution_code=exercise.solution_code, reason="passed"
+        )
+    if failed_attempts >= SOLUTION_FAILED_ATTEMPT_THRESHOLD:
+        return SolutionResponse(
+            solution_code=exercise.solution_code,
+            reason="failed_threshold",
+        )
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "reason": "not_unlocked",
+            "failed_attempts": failed_attempts,
+            "threshold": SOLUTION_FAILED_ATTEMPT_THRESHOLD,
+            "message": (
+                f"Solution unlocks after {SOLUTION_FAILED_ATTEMPT_THRESHOLD} "
+                "failed attempts or once you've passed."
+            ),
+        },
+    )
 
 
 @router.post("/{exercise_id}/submit", response_model=SubmissionResponse, status_code=201)
