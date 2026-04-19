@@ -9,16 +9,19 @@ describe("LandingPage", () => {
     expect(screen.getAllByText(/AI Engineering/i).length).toBeGreaterThan(0);
   });
 
-  it("renders CTA links", () => {
+  it("renders primary CTAs", () => {
     render(<LandingPage />);
-    // "Start Learning Free" is the primary CTA
-    expect(screen.getByRole("link", { name: /start learning free/i })).toBeInTheDocument();
-    // "Browse Courses" appears multiple times — just confirm at least one exists
-    expect(screen.getAllByRole("link", { name: /browse courses/i }).length).toBeGreaterThan(0);
+    // Hero CTA uses "Start Free"; bottom CTA uses "Start for free" — both should link to /register.
+    const registerLinks = screen.getAllByRole("link", { name: /start.*free/i });
+    expect(registerLinks.length).toBeGreaterThan(0);
+    expect(registerLinks[0]).toHaveAttribute("href", "/register");
   });
 
-  it("renders email capture form", () => {
+  it("surfaces the live demo anchor and platform stats", () => {
     render(<LandingPage />);
-    expect(screen.getByRole("textbox", { name: /email address/i })).toBeInTheDocument();
+    // The hero secondary action jumps to the demo section.
+    expect(screen.getByRole("link", { name: /try a live demo/i })).toBeInTheDocument();
+    // Stats strip exposes an accessible label.
+    expect(screen.getByRole("region", { name: /platform statistics/i })).toBeInTheDocument();
   });
 });
