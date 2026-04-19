@@ -45,7 +45,7 @@ Safe to leave open at launch. Most are admin-side, edge-case, or cosmetic. Estim
 | DISC-25 | Course catalog card hover state missing on Safari | CSS only. |
 | DISC-29 | Agent health page "last call" shows UTC not local | One-line `toLocaleString()` swap. |
 | DISC-36 | Student drilldown timeline pagination after 200 events | Not hit until power-users accumulate. |
-| DISC-38 | MOA fallback message says "I didn't understand" in English for non-EN users | i18n pass, low-frequency. |
+| ~~DISC-38~~ | ~~"Ask the tutor" handoff on failing submission~~ | Closed 2026-04-19 — exercise card CTA + chat `?submission_id=` prefill. |
 | DISC-17 | Studio agent-builder preview drifts from prod config | Internal tool, low priority. |
 | DISC-19 | Settings page theme toggle doesn't persist across devices | Needs user-preferences table. |
 | DISC-4 | Exercise grader penalty for whitespace-only diff | Edge case in rubric. |

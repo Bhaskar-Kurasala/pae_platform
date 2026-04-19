@@ -2,7 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, History, Loader2, Send, Star } from "lucide-react";
+import { ArrowLeft, History, Loader2, MessagesSquare, Send, Star } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ApiError,
@@ -290,6 +290,15 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
                     {result.feedback}
                   </p>
                 </div>
+              )}
+              {result.status === "failed" && (
+                <Link
+                  href={`/chat?submission_id=${result.id}&topic=exercise_help`}
+                  className="inline-flex items-center gap-2 h-9 rounded-lg border border-primary/30 bg-primary/5 px-4 text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
+                >
+                  <MessagesSquare className="h-4 w-4" aria-hidden="true" />
+                  Ask the tutor for help
+                </Link>
               )}
             </>
           )}

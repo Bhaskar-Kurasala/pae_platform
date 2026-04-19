@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { AlertTriangle, ArrowUp, Bot, BriefcaseBusiness, Clock, Code2, GraduationCap, Plus, RefreshCw, Sparkles, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MarkdownRenderer } from "@/components/features/markdown-renderer";
 import { useStream } from "@/hooks/use-stream";
+import { exercisesApi } from "@/lib/api-client";
 
 // ── Mode chips ───────────────────────────────────────────────────
 const MODES = [
@@ -371,15 +373,30 @@ function InputBar({ value, onChange, onSend, isStreaming, activeMode, onModeChan
 }
 
 // ── Chat area ────────────────────────────────────────────────────
-function ChatArea({ mode, onNewMessage, onModeChange }: {
+function ChatArea({ mode, onNewMessage, onModeChange, prefill }: {
   mode: typeof MODES[number];
   onNewMessage: (preview: string, agent: string | undefined) => void;
   onModeChange: (m: ModeAgent) => void;
+  prefill?: string;
 }) {
   const { messages, isStreaming, error, sendMessage, retry } = useStream({ agentName: mode.agentName ?? undefined });
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastReportedLength = useRef(0);
+  const prefillApplied = useRef(false);
+
+  // DISC-38 — when routed from a failing submission (?submission_id=...),
+  // seed the composer with a concrete prompt so the student can send it or
+  // edit first. Only runs once per mount — switching modes remounts this
+  // component via `key={chatKey}`, so the prefill stays available until
+  // it's been typed/sent.
+  useEffect(() => {
+    if (prefillApplied.current) return;
+    if (!prefill) return;
+    if (messages.length > 0) return;
+    setInput(prefill);
+    prefillApplied.current = true;
+  }, [prefill, messages.length]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -454,11 +471,52 @@ function ChatArea({ mode, onNewMessage, onModeChange }: {
 
 // ── Page ─────────────────────────────────────────────────────────
 export default function ChatPage() {
+  return (
+    <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading…</div>}>
+      <ChatPageInner />
+    </Suspense>
+  );
+}
+
+function ChatPageInner() {
+  const searchParams = useSearchParams();
+  const submissionId = searchParams.get("submission_id");
+  const topic = searchParams.get("topic");
+
   const [activeMode, setActiveMode] = useState<ModeAgent>(null);
   const [conversations, setConversations] = useState<ConversationEntry[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [chatKey, setChatKey] = useState(0);
+  const [prefill, setPrefill] = useState<string | undefined>(undefined);
   const conversationsHydrated = useRef(false);
+  const prefillLoadedFor = useRef<string | null>(null);
+
+  // DISC-38 — if arrived from a failing exercise submission, fetch the
+  // submission, build a tutor-ready prompt, and switch to Tutor mode.
+  useEffect(() => {
+    if (!submissionId) return;
+    if (prefillLoadedFor.current === submissionId) return;
+    prefillLoadedFor.current = submissionId;
+    let cancelled = false;
+    (async () => {
+      try {
+        const sub = await exercisesApi.getSubmission(submissionId);
+        if (cancelled) return;
+        const intro = topic === "exercise_help"
+          ? "I just submitted an exercise and it didn't pass. Can you help me understand what went wrong?"
+          : "Can you help me with this submission?";
+        const feedback = sub.feedback ? `\n\nFeedback I got:\n${sub.feedback}` : "";
+        setPrefill(`${intro}${feedback}`);
+        setActiveMode("socratic_tutor");
+      } catch {
+        setPrefill("I need help with an exercise I just submitted — it didn't pass. Can you walk me through what might have gone wrong?");
+        setActiveMode("socratic_tutor");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [submissionId, topic]);
 
   // DISC-45 — hydrate the sidebar from localStorage after mount (client-only
   // to avoid an SSR/client markup mismatch).
@@ -535,6 +593,7 @@ export default function ChatPage() {
             mode={currentMode}
             onNewMessage={handleNewMessage}
             onModeChange={handleModeChange}
+            prefill={prefill}
           />
         </div>
       </div>
