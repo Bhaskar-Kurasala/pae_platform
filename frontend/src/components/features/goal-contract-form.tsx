@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -60,6 +60,28 @@ const DEADLINE_PRESETS = [
 const STEPS = ["motivation", "deadline", "success"] as const;
 type Step = (typeof STEPS)[number];
 
+const DRAFT_KEY = "onboarding-draft-v1";
+
+type DraftShape = {
+  step?: Step;
+  motivation?: Motivation | null;
+  deadline?: number | null;
+  successStatement?: string;
+};
+
+function readDraft(): DraftShape | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as DraftShape;
+    if (typeof parsed !== "object" || parsed === null) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 export interface GoalContractFormProps {
   /** Optional pre-filled values for editing an existing goal. */
   defaultValues?: {
@@ -81,6 +103,7 @@ export function GoalContractForm({
   submitLabel = "Lock in my goal",
 }: GoalContractFormProps) {
   const prefersReducedMotion = useReducedMotion();
+
   const [step, setStep] = useState<Step>("motivation");
   const [motivation, setMotivation] = useState<Motivation | null>(
     defaultValues?.motivation ?? null,
@@ -93,8 +116,42 @@ export function GoalContractForm({
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hydrated = useRef(false);
 
   const stepIndex = STEPS.indexOf(step);
+
+  // Restore draft after mount (client-only) to avoid hydration mismatch.
+  useEffect(() => {
+    if (defaultValues) {
+      hydrated.current = true;
+      return;
+    }
+    const draft = readDraft();
+    if (draft) {
+      if (draft.step && STEPS.includes(draft.step)) setStep(draft.step);
+      if (draft.motivation !== undefined) setMotivation(draft.motivation);
+      if (draft.deadline !== undefined) setDeadline(draft.deadline);
+      if (typeof draft.successStatement === "string") {
+        setSuccessStatement(draft.successStatement);
+      }
+    }
+    hydrated.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (defaultValues) return;
+    if (!hydrated.current) return;
+    if (typeof window === "undefined") return;
+    try {
+      window.sessionStorage.setItem(
+        DRAFT_KEY,
+        JSON.stringify({ step, motivation, deadline, successStatement }),
+      );
+    } catch {
+      /* quota or disabled storage — ignore */
+    }
+  }, [defaultValues, step, motivation, deadline, successStatement]);
 
   function canAdvance(): boolean {
     if (step === "motivation") return motivation !== null;
@@ -129,6 +186,13 @@ export function GoalContractForm({
         deadline_months: deadline,
         success_statement: successStatement.trim(),
       });
+      if (typeof window !== "undefined") {
+        try {
+          window.sessionStorage.removeItem(DRAFT_KEY);
+        } catch {
+          /* ignore */
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
       setSubmitting(false);

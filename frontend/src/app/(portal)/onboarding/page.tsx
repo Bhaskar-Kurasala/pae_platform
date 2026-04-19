@@ -69,6 +69,16 @@ export default function OnboardingPage() {
             }
             onSubmit={async (values) => {
               await upsert.mutateAsync(values);
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(
+                  new CustomEvent("onboarding.complete", {
+                    detail: {
+                      motivation: values.motivation,
+                      deadline_months: values.deadline_months,
+                    },
+                  }),
+                );
+              }
               router.push("/today");
             }}
             submitLabel={existingGoal ? "Update my goal" : "Lock in my goal"}
