@@ -91,9 +91,17 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: list[str] = ["http://localhost:3000"]
 
-    # Celery
-    celery_broker_url: str = "redis://localhost:6379/1"
-    celery_result_backend: str = "redis://localhost:6379/2"
+    # Celery — default to the same Redis as the app (host-aware) so docker
+    # and local runs don't silently point the worker at localhost. Any env
+    # override of celery_broker_url / celery_result_backend still wins.
+    celery_broker_url: str = ""
+    celery_result_backend: str = ""
+
+    def model_post_init(self, __context: object) -> None:
+        if not self.celery_broker_url:
+            self.celery_broker_url = f"redis://{self.redis_host}:{self.redis_port}/1"
+        if not self.celery_result_backend:
+            self.celery_result_backend = f"redis://{self.redis_host}:{self.redis_port}/2"
 
 
 @lru_cache

@@ -1,30 +1,99 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2, Send, Star } from "lucide-react";
-import { exercisesApi } from "@/lib/api-client";
-import { ApiError } from "@/lib/api-client";
+import { ArrowLeft, History, Loader2, Send, Star } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  ApiError,
+  exercisesApi,
+  type ExerciseResponse,
+  type SubmissionResponse,
+} from "@/lib/api-client";
 import { PeerGallery } from "@/components/features/peer-gallery";
 import { SelfExplanationModal } from "@/components/features/self-explanation-modal";
 
+const CODE_MIN = 1;
+const CODE_MAX = 20000;
+
+function formatRubric(rubric: Record<string, unknown> | null | undefined) {
+  if (!rubric) return null;
+  const entries = Object.entries(rubric).filter(([, v]) => v != null);
+  if (entries.length === 0) return null;
+  return entries;
+}
+
 export default function ExerciseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const [code, setCode] = useState(
-    `# Write your solution here\n\n`,
-  );
+
+  const exerciseQuery = useQuery<ExerciseResponse>({
+    queryKey: ["exercise", id],
+    queryFn: () => exercisesApi.get(id),
+  });
+
+  const historyQuery = useQuery<SubmissionResponse[]>({
+    queryKey: ["exercise", id, "mine"],
+    queryFn: () => exercisesApi.mySubmissions(id),
+  });
+
+  const exercise = exerciseQuery.data;
+
+  const [code, setCode] = useState<string>("");
+  const [codeInitialized, setCodeInitialized] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ score?: number; feedback?: string } | null>(null);
+  const [activeSubmissionId, setActiveSubmissionId] = useState<string | null>(null);
+  const [result, setResult] = useState<SubmissionResponse | null>(null);
   const [error, setError] = useState("");
   const [share, setShare] = useState(false);
   const [shareNote, setShareNote] = useState("");
   const [explainOpen, setExplainOpen] = useState(false);
 
+  useEffect(() => {
+    if (!codeInitialized && exercise) {
+      setCode(exercise.starter_code ?? `# Write your solution here\n\n`);
+      setCodeInitialized(true);
+    }
+  }, [exercise, codeInitialized]);
+
+  // Poll the active submission every 3s while it's still pending.
+  useEffect(() => {
+    if (!activeSubmissionId) return;
+    if (result && result.status !== "pending") return;
+    const id = setInterval(async () => {
+      try {
+        const latest = await exercisesApi.getSubmission(activeSubmissionId);
+        setResult(latest);
+        if (latest.status !== "pending") {
+          clearInterval(id);
+          historyQuery.refetch();
+          if (latest.status === "passed" && typeof window !== "undefined") {
+            window.dispatchEvent(
+              new CustomEvent("exercise.passed", {
+                detail: { submission_id: latest.id, exercise_id: latest.exercise_id },
+              }),
+            );
+          }
+        }
+      } catch {
+        // ignore transient errors; keep polling
+      }
+    }, 3000);
+    return () => clearInterval(id);
+  }, [activeSubmissionId, result, historyQuery]);
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    const trimmed = code.trim();
+    if (trimmed.length < CODE_MIN) {
+      setError("Please write some code before submitting.");
+      return;
+    }
+    if (code.length > CODE_MAX) {
+      setError(`Code is too long — ${code.length}/${CODE_MAX} characters.`);
+      return;
+    }
     setResult(null);
-    // Intercept: ask the student to reflect BEFORE they see the grade.
     setExplainOpen(true);
   }
 
@@ -37,8 +106,10 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
         share_note: share ? shareNote.trim() || undefined : undefined,
         self_explanation: selfExplanation || undefined,
       });
-      setResult({ score: sub.score ?? undefined, feedback: sub.feedback ?? undefined });
+      setResult(sub);
+      setActiveSubmissionId(sub.id);
       setExplainOpen(false);
+      historyQuery.refetch();
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -51,6 +122,27 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
     }
   }
 
+  const rubricEntries = formatRubric(exercise?.rubric);
+  const overLimit = code.length > CODE_MAX;
+
+  if (exerciseQuery.isLoading) {
+    return (
+      <div className="p-6 md:p-8 max-w-3xl mx-auto">
+        <Loader2 className="h-5 w-5 animate-spin" />
+      </div>
+    );
+  }
+
+  if (exerciseQuery.error || !exercise) {
+    return (
+      <div className="p-6 md:p-8 max-w-3xl mx-auto">
+        <div className="rounded-lg bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">
+          Exercise not found.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 md:p-8 max-w-3xl mx-auto space-y-6">
       <Link
@@ -61,33 +153,60 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
       </Link>
 
       <div>
-        <h1 className="text-2xl font-bold">Exercise</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
-          Submit your solution below. The AI Code Review agent will evaluate and score it.
-        </p>
+        <h1 className="text-2xl font-bold">{exercise.title}</h1>
+        <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+          <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 font-medium">
+            {exercise.difficulty}
+          </span>
+          <span>{exercise.points} pts</span>
+        </div>
       </div>
 
-      {/* Instructions */}
-      <div className="rounded-xl border bg-card p-5">
-        <h2 className="font-semibold mb-2">Instructions</h2>
-        <p className="text-sm text-muted-foreground leading-relaxed">
-          Complete the coding task as described in your course lesson. Your submission will be
-          reviewed by our AI Code Review agent, which evaluates correctness, style, and production
-          readiness. You can submit multiple times — only the best score counts.
-        </p>
-      </div>
+      {exercise.description && (
+        <div className="rounded-xl border bg-card p-5">
+          <h2 className="font-semibold mb-2">Prompt</h2>
+          <pre className="whitespace-pre-wrap text-sm leading-relaxed font-sans">
+            {exercise.description}
+          </pre>
+        </div>
+      )}
 
-      {/* Code editor */}
+      {rubricEntries && (
+        <div className="rounded-xl border bg-card p-5">
+          <h2 className="font-semibold mb-2">Rubric</h2>
+          <ul className="text-sm space-y-1">
+            {rubricEntries.map(([k, v]) => (
+              <li key={k}>
+                <span className="font-medium">{k}:</span>{" "}
+                <span className="text-muted-foreground">
+                  {typeof v === "string" || typeof v === "number"
+                    ? String(v)
+                    : JSON.stringify(v)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label htmlFor="code-editor" className="block text-sm font-medium mb-2">
-            Your solution
-          </label>
+          <div className="flex items-center justify-between mb-2">
+            <label htmlFor="code-editor" className="block text-sm font-medium">
+              Your solution
+            </label>
+            <span
+              className={`text-xs ${overLimit ? "text-destructive" : "text-muted-foreground"}`}
+            >
+              {code.length}/{CODE_MAX}
+            </span>
+          </div>
           <textarea
             id="code-editor"
             value={code}
             onChange={(e) => setCode(e.target.value)}
             rows={18}
+            maxLength={CODE_MAX}
             spellCheck={false}
             className="w-full rounded-xl border bg-[#111827] text-green-300 font-mono text-sm p-4 outline-none focus:ring-2 focus:ring-primary/50 resize-y"
             aria-label="Code editor"
@@ -132,7 +251,7 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
 
         <button
           type="submit"
-          disabled={submitting}
+          disabled={submitting || overLimit}
           className="inline-flex items-center gap-2 h-10 rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60 transition-colors"
         >
           {submitting ? (
@@ -144,30 +263,72 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
         </button>
       </form>
 
-      {/* Graded result */}
       {result && (
         <div className="rounded-xl border bg-card p-5 space-y-3">
           <div className="flex items-center gap-2">
             <Star className="h-5 w-5 text-yellow-500" aria-hidden="true" />
-            <h2 className="font-semibold">Submission received</h2>
+            <h2 className="font-semibold">
+              {result.status === "pending" ? "Grading…" : "Graded"}
+            </h2>
           </div>
-          {result.score !== undefined && (
-            <p className="text-sm">
-              Score:{" "}
-              <span className="font-bold text-primary">{result.score} pts</span>
-            </p>
-          )}
-          {result.feedback && (
-            <div>
-              <p className="text-sm font-medium mb-1">AI Feedback</p>
-              <p className="text-sm text-muted-foreground leading-relaxed">{result.feedback}</p>
-            </div>
-          )}
-          {!result.score && !result.feedback && (
+          {result.status === "pending" ? (
             <p className="text-sm text-muted-foreground">
-              Your submission is queued for AI review. Check back shortly.
+              Your submission is queued. The grade should appear within ~10s.
             </p>
+          ) : (
+            <>
+              {result.score != null && (
+                <p className="text-sm">
+                  Score:{" "}
+                  <span className="font-bold text-primary">{result.score} pts</span>
+                </p>
+              )}
+              {result.feedback && (
+                <div>
+                  <p className="text-sm font-medium mb-1">AI Feedback</p>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    {result.feedback}
+                  </p>
+                </div>
+              )}
+            </>
           )}
+        </div>
+      )}
+
+      {historyQuery.data && historyQuery.data.length > 0 && (
+        <div className="rounded-xl border bg-card p-5">
+          <h2 className="font-semibold mb-3 inline-flex items-center gap-2">
+            <History className="h-4 w-4" /> Previous attempts
+          </h2>
+          <ul className="divide-y text-sm">
+            {historyQuery.data.map((s) => (
+              <li key={s.id} className="flex items-center justify-between py-2">
+                <div className="flex items-center gap-3">
+                  <span className="text-muted-foreground tabular-nums">
+                    #{s.attempt_number}
+                  </span>
+                  <span
+                    className={
+                      s.status === "passed"
+                        ? "text-green-600 dark:text-green-400"
+                        : s.status === "failed"
+                          ? "text-destructive"
+                          : "text-muted-foreground"
+                    }
+                  >
+                    {s.status}
+                  </span>
+                  {s.score != null && (
+                    <span className="font-medium">{s.score} pts</span>
+                  )}
+                </div>
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {new Date(s.created_at).toLocaleString()}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

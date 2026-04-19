@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 class SubmissionCreate(BaseModel):
     exercise_id: uuid.UUID | None = None
-    code: str | None = None
+    code: str | None = Field(default=None, min_length=1, max_length=20000)
     github_pr_url: str | None = None
     # P2-07: opt-in sharing. Defaults to False — private unless the student
     # explicitly chooses to share.

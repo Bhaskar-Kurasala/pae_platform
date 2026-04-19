@@ -26,6 +26,15 @@ class ExerciseRepository(BaseRepository[Exercise]):
         )
         return result.scalar_one_or_none()
 
+    async def list_active(self, limit: int = 50) -> list[Exercise]:
+        result = await self.db.execute(
+            select(Exercise)
+            .where(Exercise.is_deleted.is_(False))
+            .order_by(Exercise.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
 
 class SubmissionRepository(BaseRepository[ExerciseSubmission]):
     def __init__(self, db: AsyncSession) -> None:
@@ -79,3 +88,20 @@ class SubmissionRepository(BaseRepository[ExerciseSubmission]):
             select(ExerciseSubmission).where(ExerciseSubmission.id == submission_id)
         )
         return result.scalar_one_or_none()
+
+    async def list_mine_for_exercise(
+        self,
+        student_id: str | uuid.UUID,
+        exercise_id: str | uuid.UUID,
+        limit: int = 20,
+    ) -> list[ExerciseSubmission]:
+        result = await self.db.execute(
+            select(ExerciseSubmission)
+            .where(
+                ExerciseSubmission.student_id == student_id,
+                ExerciseSubmission.exercise_id == exercise_id,
+            )
+            .order_by(ExerciseSubmission.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())

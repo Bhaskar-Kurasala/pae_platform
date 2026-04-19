@@ -253,8 +253,11 @@ export interface ExerciseResponse {
   id: string;
   lesson_id: string;
   title: string;
+  description?: string | null;
   exercise_type: string;
   difficulty: string;
+  starter_code?: string | null;
+  rubric?: Record<string, unknown> | null;
   points: number;
   order: number;
   created_at: string;
@@ -313,7 +316,17 @@ export const progressApi = {
 };
 
 export const exercisesApi = {
+  list: (limit = 50) =>
+    api.get<ExerciseResponse[]>(`/api/v1/exercises?limit=${limit}`),
   get: (id: string) => api.get<ExerciseResponse>(`/api/v1/exercises/${id}`),
+  getSubmission: (submissionId: string) =>
+    api.get<SubmissionResponse>(
+      `/api/v1/exercises/submissions/${submissionId}`,
+    ),
+  mySubmissions: (exerciseId: string, limit = 20) =>
+    api.get<SubmissionResponse[]>(
+      `/api/v1/exercises/${exerciseId}/submissions/mine?limit=${limit}`,
+    ),
   submit: (
     id: string,
     payload: {

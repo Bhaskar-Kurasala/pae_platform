@@ -9,6 +9,7 @@ from app.models.exercise_submission import ExerciseSubmission
 from app.models.user import User
 from app.repositories.exercise_repository import ExerciseRepository, SubmissionRepository
 from app.schemas.submission import SubmissionCreate
+from app.services.grading_service import schedule_grading
 
 log = structlog.get_logger()
 
@@ -87,6 +88,7 @@ class ExerciseService:
                 student_id=str(student.id),
                 length=len(self_explanation),
             )
+        schedule_grading(submission.id)
         return submission
 
     async def list_peer_gallery(

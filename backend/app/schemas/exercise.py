@@ -35,8 +35,11 @@ class ExerciseResponse(BaseModel):
     id: uuid.UUID
     lesson_id: uuid.UUID
     title: str
+    description: str | None = None
     exercise_type: str
     difficulty: str
+    starter_code: str | None = None
+    rubric: dict[str, Any] | None = None
     points: int
     order: int
     skill_id: uuid.UUID | None = None

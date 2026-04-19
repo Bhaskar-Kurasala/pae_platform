@@ -47,6 +47,39 @@ def get_service(db: AsyncSession = Depends(get_db)) -> ExerciseService:
     return ExerciseService(db)
 
 
+@router.get("", response_model=list[ExerciseResponse])
+async def list_exercises(
+    limit: int = Query(default=50, ge=1, le=100),
+    service: ExerciseService = Depends(get_service),
+) -> list[Exercise]:
+    return await service.exercise_repo.list_active(limit=limit)
+
+
+@router.get("/submissions/{submission_id}", response_model=SubmissionResponse)
+async def get_submission(
+    submission_id: uuid.UUID,
+    service: ExerciseService = Depends(get_service),
+    current_user: User = Depends(get_current_user),
+) -> ExerciseSubmission:
+    submission = await service.submission_repo.get_by_id(submission_id)
+    from fastapi import HTTPException
+    if submission is None or submission.student_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    return submission
+
+
+@router.get("/{exercise_id}/submissions/mine", response_model=list[SubmissionResponse])
+async def list_my_submissions(
+    exercise_id: uuid.UUID,
+    limit: int = Query(default=20, ge=1, le=50),
+    service: ExerciseService = Depends(get_service),
+    current_user: User = Depends(get_current_user),
+) -> list[ExerciseSubmission]:
+    return await service.submission_repo.list_mine_for_exercise(
+        current_user.id, exercise_id, limit=limit
+    )
+
+
 @router.get("/{exercise_id}", response_model=ExerciseResponse)
 async def get_exercise(
     exercise_id: uuid.UUID,
