@@ -132,7 +132,16 @@ class AgentOrchestratorService:
             result_state = result["agent_state"]
             used_agent = result.get("routed_to", result_state.agent_name or "socratic_tutor")
 
-        response_text = result_state.response or "I couldn't generate a response. Please try again."
+        # DISC-42 — some agents hand us a str(response.content) that is a Python
+        # repr of Anthropic's list-of-dict content (thinking + text blocks).
+        # Flatten it here as a safety net so the chat surface never shows a
+        # raw repr. flatten_content is a no-op for ordinary strings.
+        from app.agents._llm_utils import flatten_content
+
+        response_text = (
+            flatten_content(result_state.response)
+            or "I couldn't generate a response. Please try again."
+        )
         eval_score = result_state.evaluation_score or 0.0
 
         # Update conversation history

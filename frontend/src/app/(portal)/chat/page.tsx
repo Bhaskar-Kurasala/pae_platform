@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, Bot, BriefcaseBusiness, Clock, Code2, GraduationCap, Plus, Sparkles, User } from "lucide-react";
+import { AlertTriangle, ArrowUp, Bot, BriefcaseBusiness, Clock, Code2, GraduationCap, Plus, RefreshCw, Sparkles, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MarkdownRenderer } from "@/components/features/markdown-renderer";
 import { useStream } from "@/hooks/use-stream";
@@ -35,6 +35,42 @@ interface ConversationEntry {
   preview: string;
   agentName?: string;
   timestamp: Date;
+}
+
+// DISC-45 — persist the sidebar's recent-conversations index to localStorage
+// so refresh + tab-reopen preserves history. Only 20 most recent are kept,
+// matching the existing cap in handleNewMessage. Each entry is tiny (id +
+// preview + agent + ts) so we stay well under localStorage quota.
+const CONVERSATIONS_KEY = "chat-conversations-v1";
+const CONVERSATIONS_CAP = 20;
+
+type StoredConversation = Omit<ConversationEntry, "timestamp"> & { timestamp: string };
+
+function readStoredConversations(): ConversationEntry[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(CONVERSATIONS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((e): ConversationEntry | null => {
+        if (!e || typeof e !== "object") return null;
+        const s = e as Partial<StoredConversation>;
+        if (typeof s.id !== "string" || typeof s.preview !== "string") return null;
+        const ts = typeof s.timestamp === "string" ? new Date(s.timestamp) : new Date();
+        return {
+          id: s.id,
+          preview: s.preview,
+          agentName: typeof s.agentName === "string" ? s.agentName : undefined,
+          timestamp: Number.isNaN(ts.getTime()) ? new Date() : ts,
+        };
+      })
+      .filter((x): x is ConversationEntry => x !== null)
+      .slice(0, CONVERSATIONS_CAP);
+  } catch {
+    return [];
+  }
 }
 
 // ── Sidebar ──────────────────────────────────────────────────────
@@ -271,7 +307,12 @@ function InputBar({ value, onChange, onSend, isStreaming, activeMode, onModeChan
   }, [value]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); onSend(); }
+    // DISC-46 — plain Enter sends; Shift+Enter inserts a newline. Matches
+    // the prevailing convention across ChatGPT / Claude.ai / Gemini.
+    if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      onSend();
+    }
   };
 
   return (
@@ -296,7 +337,7 @@ function InputBar({ value, onChange, onSend, isStreaming, activeMode, onModeChan
           <ModeChips active={activeMode} onChange={onModeChange} />
           <div className="flex items-center gap-2 shrink-0">
             <span className="hidden sm:block text-[11px] text-muted-foreground/50">
-              {isStreaming ? "Generating…" : "⌘ Enter"}
+              {isStreaming ? "Generating…" : "Enter to send · Shift+Enter newline"}
             </span>
             <button
               onClick={onSend}
@@ -335,7 +376,7 @@ function ChatArea({ mode, onNewMessage, onModeChange }: {
   onNewMessage: (preview: string, agent: string | undefined) => void;
   onModeChange: (m: ModeAgent) => void;
 }) {
-  const { messages, isStreaming, sendMessage } = useStream({ agentName: mode.agentName ?? undefined });
+  const { messages, isStreaming, error, sendMessage, retry } = useStream({ agentName: mode.agentName ?? undefined });
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastReportedLength = useRef(0);
@@ -379,6 +420,26 @@ function ChatArea({ mode, onNewMessage, onModeChange }: {
         )}
       </div>
 
+      {error ? (
+        <div className="mx-auto w-full max-w-5xl px-6 pt-3" role="alert">
+          <div className="flex items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
+              <span>Connection lost — your last message didn&apos;t get a response.</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => void retry()}
+              disabled={isStreaming}
+              className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-900 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-100 dark:hover:bg-red-900/40"
+            >
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+              Retry
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <InputBar
         value={input}
         onChange={setInput}
@@ -397,6 +458,31 @@ export default function ChatPage() {
   const [conversations, setConversations] = useState<ConversationEntry[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [chatKey, setChatKey] = useState(0);
+  const conversationsHydrated = useRef(false);
+
+  // DISC-45 — hydrate the sidebar from localStorage after mount (client-only
+  // to avoid an SSR/client markup mismatch).
+  useEffect(() => {
+    const stored = readStoredConversations();
+    if (stored.length > 0) setConversations(stored);
+    conversationsHydrated.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!conversationsHydrated.current) return;
+    if (typeof window === "undefined") return;
+    try {
+      const serialized: StoredConversation[] = conversations.map((c) => ({
+        id: c.id,
+        preview: c.preview,
+        agentName: c.agentName,
+        timestamp: c.timestamp.toISOString(),
+      }));
+      window.localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(serialized));
+    } catch {
+      /* quota or disabled storage — ignore */
+    }
+  }, [conversations]);
 
   const currentMode = MODES.find((m) => m.agentName === activeMode) ?? MODES[0];
 

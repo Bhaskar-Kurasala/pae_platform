@@ -40,6 +40,7 @@ interface UseStreamReturn {
   isStreaming: boolean;
   error: string | null;
   sendMessage: (text: string) => Promise<void>;
+  retry: () => Promise<void>;
   clearMessages: () => void;
 }
 
@@ -51,6 +52,7 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const lastUserMessageRef = useRef<string | null>(null);
 
   const sendMessage = useCallback(
     async (text: string): Promise<void> => {
@@ -67,6 +69,7 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, userMessage]);
+      lastUserMessageRef.current = text;
 
       // Placeholder assistant message — shown as typing indicator until first token
       const assistantId = crypto.randomUUID();
@@ -203,18 +206,9 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
           err instanceof Error ? err.message : "Failed to reach the AI agents.";
         setError(errorMessage);
 
-        // Replace the placeholder assistant message with error text
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === assistantId
-              ? {
-                  ...msg,
-                  content: `Error: ${errorMessage}. Make sure the backend is running at ${API_BASE}.`,
-                  agentName: "system",
-                }
-              : msg,
-          ),
-        );
+        // DISC-44 — drop the developer-string placeholder so the UI shows a
+        // user-friendly "Connection lost — Retry" banner sourced from `error`.
+        setMessages((prev) => prev.filter((msg) => msg.id !== assistantId));
       } finally {
         setIsStreaming(false);
         abortControllerRef.current = null;
@@ -226,7 +220,29 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
   const clearMessages = useCallback(() => {
     setMessages([]);
     setError(null);
+    lastUserMessageRef.current = null;
   }, []);
 
-  return { messages, isStreaming, error, sendMessage, clearMessages };
+  const retry = useCallback(async (): Promise<void> => {
+    const last = lastUserMessageRef.current;
+    if (!last || isStreaming) return;
+    // Strip the previously-sent user message so sendMessage doesn't duplicate
+    // it — the user's intent is to re-send the same prompt, not double it.
+    setMessages((prev) => {
+      // Remove the last user message (the one we're about to re-send).
+      let removed = false;
+      const copy = [...prev].reverse();
+      const filtered = copy.filter((m) => {
+        if (!removed && m.role === "user" && m.content === last) {
+          removed = true;
+          return false;
+        }
+        return true;
+      });
+      return filtered.reverse();
+    });
+    await sendMessage(last);
+  }, [isStreaming, sendMessage]);
+
+  return { messages, isStreaming, error, sendMessage, retry, clearMessages };
 }

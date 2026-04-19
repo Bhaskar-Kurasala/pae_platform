@@ -8,6 +8,7 @@ import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 
+from app.agents._llm_utils import extract_first_balanced_json, flatten_content
 from app.agents.base_agent import AgentState, BaseAgent
 from app.agents.registry import register
 from app.core.config import settings
@@ -111,18 +112,13 @@ class CodeReviewAgent(BaseAgent):
         ]
 
         response = await llm.ainvoke(messages)
-        raw = str(response.content)
+        # DISC-42/43 — flatten Anthropic's list-of-dict content (thinking +
+        # text blocks) and then extract the first balanced JSON object so
+        # the rubric parses even when the model wraps JSON in prose.
+        raw = flatten_content(response.content)
 
-        # Try to parse JSON; fall back gracefully
-        review_json: dict[str, Any] = {}
-        try:
-            # Extract JSON from markdown code blocks if present
-            if "```json" in raw:
-                raw = raw.split("```json")[1].split("```")[0].strip()
-            elif "```" in raw:
-                raw = raw.split("```")[1].split("```")[0].strip()
-            review_json = json.loads(raw)
-        except (json.JSONDecodeError, IndexError):
+        review_json: dict[str, Any] | None = extract_first_balanced_json(raw)
+        if review_json is None:
             review_json = {"raw_response": raw, "score": 0, "approved": False}
 
         return state.model_copy(
