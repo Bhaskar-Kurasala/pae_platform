@@ -33,9 +33,13 @@ docker compose exec backend uv run alembic upgrade head
 
 ### 3. Verify
 ```bash
-curl http://localhost:8000/health   # → {"status": "ok"}
-open http://localhost:3000          # Next.js landing page
-open http://localhost:8000/docs     # FastAPI OpenAPI docs
+curl http://localhost:8080/health   # via nginx → {"status": "ok"}
+open http://localhost:3002          # Next.js landing page (docker maps 3000 → 3002)
+open http://localhost:8080/docs     # FastAPI OpenAPI docs via nginx
+
+# For local uvicorn dev (no docker):
+#   backend  → http://localhost:8000
+#   frontend → http://localhost:3000 (pnpm dev)
 ```
 
 ### 4. Develop
