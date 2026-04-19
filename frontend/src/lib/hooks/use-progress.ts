@@ -53,6 +53,26 @@ export function useCompleteLesson() {
   });
 }
 
+export function useUncompleteLesson() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (lessonId: string) => progressApi.uncomplete(lessonId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["progress"] });
+      void queryClient.invalidateQueries({ queryKey: ["skills"] });
+      if (typeof window !== "undefined" && typeof BroadcastChannel !== "undefined") {
+        try {
+          const channel = new BroadcastChannel(PROGRESS_CHANNEL);
+          channel.postMessage({ type: "lesson_uncompleted", at: Date.now() });
+          channel.close();
+        } catch {
+          // Best-effort cross-tab signal — safe to drop.
+        }
+      }
+    },
+  });
+}
+
 export function useLessonCompleted(lessonId: string, progress: ProgressResponse | undefined) {
   return progress?.courses.some((c) =>
     c.lessons.some((l) => l.id === lessonId && l.status === "completed"),

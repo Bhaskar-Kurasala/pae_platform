@@ -231,6 +231,34 @@ class ProgressService:
         await self._seed_retrieval_card(student.id, lesson_id)
         return progress
 
+    async def uncomplete_lesson(
+        self, lesson_id: str | uuid.UUID, student: User
+    ) -> None:
+        """Delete the student_progress row for (student, lesson). Idempotent.
+
+        DISC-25 — students need a way to recover from mis-clicking "Mark as
+        complete". We delete the row outright rather than flipping a status
+        field so the aggregation queries (overall %, weekly bars) stay clean
+        without additional filters.
+        """
+        from sqlalchemy import delete
+
+        lesson_uuid = (
+            lesson_id if isinstance(lesson_id, uuid.UUID) else uuid.UUID(str(lesson_id))
+        )
+        await self.db.execute(
+            delete(StudentProgress).where(
+                StudentProgress.student_id == student.id,
+                StudentProgress.lesson_id == lesson_uuid,
+            )
+        )
+        await self.db.flush()
+        log.info(
+            "lesson.uncompleted",
+            lesson_id=str(lesson_id),
+            student_id=str(student.id),
+        )
+
     async def _auto_enroll_if_free(
         self, student_id: uuid.UUID, lesson_id: str | uuid.UUID
     ) -> None:

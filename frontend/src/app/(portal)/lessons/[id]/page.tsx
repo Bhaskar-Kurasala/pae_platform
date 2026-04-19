@@ -2,9 +2,13 @@
 
 import { use, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, CheckCircle2, Loader2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, Loader2, RotateCcw } from "lucide-react";
 import { useLesson, useCourseLessons } from "@/lib/hooks/use-courses";
-import { useMyProgress, useCompleteLesson } from "@/lib/hooks/use-progress";
+import {
+  useMyProgress,
+  useCompleteLesson,
+  useUncompleteLesson,
+} from "@/lib/hooks/use-progress";
 import { ApiError, type ProgressResponse } from "@/lib/api-client";
 import { RetrievalQuizInline } from "@/components/features/retrieval-quiz-inline";
 
@@ -19,10 +23,13 @@ export default function LessonPage({ params }: { params: Promise<{ id: string }>
   const { data: lesson, isLoading, error } = useLesson(id);
   const { data: progress } = useMyProgress();
   const completeLesson = useCompleteLesson();
-  const [completed, setCompleted] = useState(false);
+  const uncompleteLesson = useUncompleteLesson();
+  const [completed, setCompleted] = useState<boolean | null>(null);
   const { data: siblingLessons } = useCourseLessons(lesson?.course_id ?? "");
 
-  const alreadyDone = isCompleted(id, progress) || completed;
+  // DISC-25 — local override wins over the cached progress snapshot so the
+  // UI reacts immediately when the student toggles completion.
+  const alreadyDone = completed ?? isCompleted(id, progress);
 
   const orderedSiblings = (siblingLessons ?? []).slice().sort((a, b) => a.order - b.order);
   const currentIndex = orderedSiblings.findIndex((l) => l.id === id);
@@ -35,6 +42,11 @@ export default function LessonPage({ params }: { params: Promise<{ id: string }>
   async function handleComplete() {
     await completeLesson.mutateAsync(id);
     setCompleted(true);
+  }
+
+  async function handleUncomplete() {
+    await uncompleteLesson.mutateAsync(id);
+    setCompleted(false);
   }
 
   if (isLoading) {
@@ -142,9 +154,25 @@ print("Welcome to", "${lesson.title}")`}</code>
         </Link>
 
         {alreadyDone ? (
-          <div className="inline-flex items-center gap-2 text-sm font-medium text-primary">
-            <CheckCircle2 className="h-5 w-5" aria-hidden="true" />
-            Completed
+          <div className="inline-flex items-center gap-3">
+            <span className="inline-flex items-center gap-2 text-sm font-medium text-primary">
+              <CheckCircle2 className="h-5 w-5" aria-hidden="true" />
+              Completed
+            </span>
+            <button
+              type="button"
+              onClick={handleUncomplete}
+              disabled={uncompleteLesson.isPending}
+              aria-label="Mark this lesson as incomplete"
+              className="inline-flex items-center gap-1.5 h-8 rounded-md border border-border/60 px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-foreground/40 disabled:opacity-60 transition-colors"
+            >
+              {uncompleteLesson.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              Mark as incomplete
+            </button>
           </div>
         ) : (
           <button

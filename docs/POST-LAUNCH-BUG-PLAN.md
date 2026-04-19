@@ -42,7 +42,7 @@ Safe to leave open at launch. Most are admin-side, edge-case, or cosmetic. Estim
 |---|---|---|
 | DISC-14 | Admin audit log filter by actor_role is slow on 10k+ rows | Add partial index when row count grows. |
 | DISC-23 | Lessons missing `video_id` show empty player | Backfill once real content lands. |
-| DISC-25 | Course catalog card hover state missing on Safari | CSS only. |
+| ~~DISC-25~~ | ~~Lesson page un-complete toggle missing~~ | Closed 2026-04-19 — added `DELETE /students/me/lessons/{id}/complete` + "Mark as incomplete" button. |
 | DISC-29 | Agent health page "last call" shows UTC not local | One-line `toLocaleString()` swap. |
 | DISC-36 | Student drilldown timeline pagination after 200 events | Not hit until power-users accumulate. |
 | ~~DISC-38~~ | ~~"Ask the tutor" handoff on failing submission~~ | Closed 2026-04-19 — exercise card CTA + chat `?submission_id=` prefill. |

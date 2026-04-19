@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -40,6 +40,18 @@ async def complete_lesson(
     current_user: User = Depends(get_current_user),
 ) -> StudentProgress:
     return await service.complete_lesson(lesson_id, current_user)
+
+
+@router.delete(
+    "/me/lessons/{lesson_id}/complete",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def uncomplete_lesson(
+    lesson_id: uuid.UUID,
+    service: ProgressService = Depends(get_service),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    await service.uncomplete_lesson(lesson_id, current_user)
 
 
 @router.get(

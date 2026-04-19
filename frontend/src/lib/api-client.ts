@@ -355,6 +355,8 @@ export const progressApi = {
   mine: () => api.get<ProgressResponse>("/api/v1/students/me/progress"),
   complete: (lessonId: string) =>
     api.post<LessonProgressRecord>(`/api/v1/students/me/lessons/${lessonId}/complete`, {}),
+  uncomplete: (lessonId: string) =>
+    api.del(`/api/v1/students/me/lessons/${lessonId}/complete`),
 };
 
 export const exercisesApi = {
