@@ -16,6 +16,7 @@ from app.repositories.lesson_repository import LessonRepository
 from app.repositories.progress_repository import ProgressRepository
 from app.schemas.progress import (
     CourseProgress,
+    DailyCompletion,
     LessonProgressItem,
     ProgressResponse,
 )
@@ -114,7 +115,78 @@ class ProgressService:
             else 0.0
         )
 
-        return ProgressResponse(courses=course_progresses, overall_progress=overall)
+        # 5. Aggregate cross-cutting KPIs: exercise completion, watch time,
+        #    and per-day completion buckets for the activity calendar + weekly
+        #    bar chart. All three live on this endpoint so the frontend can
+        #    render the full Progress page from a single fetch (DISC-47).
+        from app.models.exercise import Exercise
+        from app.models.exercise_submission import ExerciseSubmission
+
+        enrolled_course_ids = [course.id for _, course in enrollment_rows]
+        total_exercises = 0
+        exercises_completed = 0
+        if enrolled_course_ids:
+            total_ex_res = await self.db.execute(
+                select(Exercise)
+                .join(Lesson, Exercise.lesson_id == Lesson.id)
+                .where(
+                    Lesson.course_id.in_(enrolled_course_ids),
+                    Exercise.is_deleted.is_(False),
+                    Lesson.is_deleted.is_(False),
+                )
+            )
+            total_exercises = len(list(total_ex_res.scalars().all()))
+
+            # A student has "completed" an exercise when ANY of their submissions
+            # for it is `graded` with score >= 70 (matches the rubric pass bar).
+            sub_res = await self.db.execute(
+                select(ExerciseSubmission.exercise_id, ExerciseSubmission.score)
+                .where(
+                    ExerciseSubmission.student_id == student.id,
+                    ExerciseSubmission.status == "graded",
+                )
+            )
+            passed_ids: set[uuid.UUID] = set()
+            for ex_id, score in sub_res.all():
+                if score is not None and score >= 70:
+                    passed_ids.add(ex_id)
+            exercises_completed = len(passed_ids)
+
+        ex_rate = (
+            round(exercises_completed / total_exercises * 100, 1)
+            if total_exercises > 0
+            else 0.0
+        )
+
+        # Watch time — sum `watch_time_seconds` across every StudentProgress row
+        # (captures partial watches too, not just completions).
+        watch_total_s = sum(rec.watch_time_seconds for rec in progress_records)
+        watch_minutes = watch_total_s // 60
+
+        # Completions by day — bucket `completed_at` timestamps into the last
+        # 365 days so the frontend can drive the activity calendar + weekly
+        # bar chart without needing a second query.
+        day_counts: dict[str, int] = {}
+        for rec in progress_records:
+            if rec.status != "completed" or rec.completed_at is None:
+                continue
+            day_counts[rec.completed_at.date().isoformat()] = (
+                day_counts.get(rec.completed_at.date().isoformat(), 0) + 1
+            )
+        completions_by_day = [
+            DailyCompletion(date=day, count=count)
+            for day, count in sorted(day_counts.items())
+        ]
+
+        return ProgressResponse(
+            courses=course_progresses,
+            overall_progress=overall,
+            exercises_completed=exercises_completed,
+            total_exercises=total_exercises,
+            exercise_completion_rate=ex_rate,
+            watch_time_minutes=watch_minutes,
+            completions_by_day=completions_by_day,
+        )
 
     async def complete_lesson(self, lesson_id: str | uuid.UUID, student: User) -> StudentProgress:
         from sqlalchemy import select

@@ -14,7 +14,7 @@ import {
   PolarAngleAxis,
   Radar,
 } from "recharts";
-import { CheckCircle2, Clock, TrendingUp } from "lucide-react";
+import { CheckCircle2, Clock, FileCode2, TrendingUp } from "lucide-react";
 import { useMyProgress } from "@/lib/hooks/use-progress";
 import { useMySkillStates } from "@/lib/hooks/use-skills";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -88,10 +88,18 @@ const CONCEPT_AREAS = [
 export default function ProgressPage() {
   const { data: progressData, isLoading } = useMyProgress();
   const { data: skillStates } = useMySkillStates();
-  const activeDays = useMemo(
-    () => activeDaySet((skillStates ?? []).map((s) => s.last_touched_at)),
-    [skillStates],
-  );
+
+  const activeDays = useMemo(() => {
+    // DISC-47c — union lesson-completion dates (backend completions_by_day)
+    // with skill-touched dates so the calendar lights up from BOTH signals.
+    const skillDays = activeDaySet(
+      (skillStates ?? []).map((s) => s.last_touched_at),
+    );
+    for (const bucket of progressData?.completions_by_day ?? []) {
+      skillDays.add(bucket.date);
+    }
+    return skillDays;
+  }, [skillStates, progressData?.completions_by_day]);
 
   const stats = useMemo(() => {
     const courses = progressData?.courses ?? [];
@@ -100,28 +108,44 @@ export default function ProgressPage() {
     const totalLessons = allLessons.length;
     const completedCount = completedLessons.length;
 
-    // No watch_time in new shape — use 0
-    const totalMinutes = 0;
+    // DISC-47b — real watch time from the backend (sum of
+    // `student_progress.watch_time_seconds` / 60).
+    const totalMinutes = progressData?.watch_time_minutes ?? 0;
 
-    // Weekly bar chart: use per-course data as proxy (no per-lesson timestamps)
+    // DISC-47c — weekly bar chart buckets the last 8 weeks of
+    // `completions_by_day` into calendar-week windows.
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const completionsByDay = new Map<string, number>();
+    for (const bucket of progressData?.completions_by_day ?? []) {
+      completionsByDay.set(bucket.date, bucket.count);
+    }
+    const toYmd = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const weeklyData: { week: string; count: number }[] = [];
-    const now = Date.now();
     for (let w = 7; w >= 0; w--) {
-      const weekLabel = new Date(now - w * 7 * 86400000).toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
+      const weekStart = new Date(today.getTime() - w * 7 * 86400000);
+      let count = 0;
+      for (let d = 0; d < 7; d++) {
+        const day = new Date(weekStart.getTime() + d * 86400000);
+        count += completionsByDay.get(toYmd(day)) ?? 0;
+      }
+      weeklyData.push({
+        week: weekStart.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+        }),
+        count,
       });
-      weeklyData.push({ week: weekLabel, count: 0 });
     }
 
-    // Concept mastery: based on completion ratio
+    // Concept mastery: based on completion ratio (unchanged — radar is cosmetic)
     const masteryScore = Math.min(100, totalLessons > 0 ? (completedCount / totalLessons) * 100 : 0);
     const conceptMastery = CONCEPT_AREAS.map((subject, i) => ({
       subject,
       score: Math.round(masteryScore * (0.6 + (i % 3) * 0.15)),
     }));
 
-    // Course-level history for the lesson history section
     const courseHistory = courses.filter((c) => c.completed_lessons > 0);
 
     return {
@@ -129,6 +153,9 @@ export default function ProgressPage() {
       totalCount: totalLessons,
       totalMinutes,
       completionRate: totalLessons > 0 ? Math.round((completedCount / totalLessons) * 100) : 0,
+      exercisesCompleted: progressData?.exercises_completed ?? 0,
+      totalExercises: progressData?.total_exercises ?? 0,
+      exerciseRate: Math.round(progressData?.exercise_completion_rate ?? 0),
       weeklyData,
       conceptMastery,
       courseHistory,
@@ -161,7 +188,7 @@ export default function ProgressPage() {
       </div>
 
       {/* KPI row */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Card>
           <CardContent className="flex items-center gap-3 pt-5">
             <div className="rounded-lg bg-primary/10 p-2.5">
@@ -170,6 +197,24 @@ export default function ProgressPage() {
             <div>
               <p className="text-2xl font-bold leading-none">{stats.completedCount}</p>
               <p className="text-xs text-muted-foreground mt-1">Lessons completed</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center gap-3 pt-5">
+            <div className="rounded-lg bg-primary/10 p-2.5">
+              <FileCode2 className="h-5 w-5 text-primary" aria-hidden="true" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold leading-none">
+                {stats.exercisesCompleted}
+                <span className="text-base font-medium text-muted-foreground">
+                  /{stats.totalExercises}
+                </span>
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Exercises completed{stats.totalExercises > 0 ? ` · ${stats.exerciseRate}%` : ""}
+              </p>
             </div>
           </CardContent>
         </Card>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BookOpen,
   CalendarCheck,
@@ -86,48 +86,131 @@ function Stat({
   );
 }
 
-function LetterBody({ markdown }: { markdown: string }) {
-  // Lightweight markdown — preserve headings, bold, line breaks — without
-  // pulling in a full parser for a single-use surface.
+type LetterBlock =
+  | { kind: "heading"; level: 3 | 4; text: string }
+  | { kind: "bullet"; text: string }
+  | { kind: "rule" }
+  | { kind: "space" }
+  | { kind: "paragraph"; text: string }
+  | { kind: "code"; language: string | null; lines: string[] };
+
+function parseLetter(markdown: string): LetterBlock[] {
+  // DISC-51 — support triple-backtick fenced code blocks. The parser walks
+  // line-by-line, flips an `inFence` flag on opening/closing fences, and
+  // emits a single `code` block per fence. Everything else keeps the
+  // original lightweight behavior (headings, bullets, bold, hr, blank).
+  const blocks: LetterBlock[] = [];
   const lines = markdown.split("\n");
+  let inFence = false;
+  let fenceLang: string | null = null;
+  let fenceLines: string[] = [];
+
+  const flushFence = () => {
+    blocks.push({ kind: "code", language: fenceLang, lines: fenceLines });
+    fenceLang = null;
+    fenceLines = [];
+  };
+
+  for (const line of lines) {
+    const fenceMatch = line.match(/^```(\w*)\s*$/);
+    if (fenceMatch) {
+      if (inFence) {
+        flushFence();
+        inFence = false;
+      } else {
+        inFence = true;
+        fenceLang = fenceMatch[1] || null;
+        fenceLines = [];
+      }
+      continue;
+    }
+    if (inFence) {
+      fenceLines.push(line);
+      continue;
+    }
+    if (line.startsWith("# ")) {
+      blocks.push({ kind: "heading", level: 3, text: line.slice(2) });
+      continue;
+    }
+    if (line.startsWith("## ")) {
+      blocks.push({ kind: "heading", level: 4, text: line.slice(3) });
+      continue;
+    }
+    if (line.startsWith("- ")) {
+      blocks.push({ kind: "bullet", text: line.slice(2) });
+      continue;
+    }
+    if (line.trim() === "---") {
+      blocks.push({ kind: "rule" });
+      continue;
+    }
+    if (line.trim() === "") {
+      blocks.push({ kind: "space" });
+      continue;
+    }
+    blocks.push({ kind: "paragraph", text: line });
+  }
+  // Tolerate an unclosed fence — flush whatever we collected rather than
+  // dropping it silently.
+  if (inFence) {
+    flushFence();
+  }
+  return blocks;
+}
+
+function LetterBody({ markdown }: { markdown: string }) {
+  const blocks = useMemo(() => parseLetter(markdown), [markdown]);
   return (
     <div className="space-y-2 text-sm leading-relaxed text-foreground/90">
-      {lines.map((line, i) => {
-        if (line.startsWith("# ")) {
-          return (
-            <h3
-              key={i}
-              className="mt-2 text-base font-semibold text-foreground"
-            >
-              {line.slice(2)}
+      {blocks.map((block, i) => {
+        if (block.kind === "heading") {
+          const className =
+            block.level === 3
+              ? "mt-2 text-base font-semibold text-foreground"
+              : "mt-3 text-sm font-semibold text-foreground";
+          return block.level === 3 ? (
+            <h3 key={i} className={className}>
+              {block.text}
             </h3>
-          );
-        }
-        if (line.startsWith("## ")) {
-          return (
-            <h4
-              key={i}
-              className="mt-3 text-sm font-semibold text-foreground"
-            >
-              {line.slice(3)}
+          ) : (
+            <h4 key={i} className={className}>
+              {block.text}
             </h4>
           );
         }
-        if (line.startsWith("- ")) {
+        if (block.kind === "bullet") {
           return (
             <div key={i} className="ml-4 text-foreground/85">
-              • {line.slice(2)}
+              • {block.text}
             </div>
           );
         }
-        if (line.trim() === "---") {
+        if (block.kind === "rule") {
           return <hr key={i} className="my-2 border-border" />;
         }
-        if (line.trim() === "") {
+        if (block.kind === "space") {
           return <div key={i} className="h-1" />;
         }
-        // bold **...**
-        const parts = line.split(/(\*\*[^*]+\*\*)/g);
+        if (block.kind === "code") {
+          return (
+            <pre
+              key={i}
+              className="my-2 overflow-x-auto rounded-md bg-muted/60 p-3 text-xs"
+            >
+              <code
+                className={
+                  block.language
+                    ? `language-${block.language} font-mono`
+                    : "font-mono"
+                }
+              >
+                {block.lines.join("\n")}
+              </code>
+            </pre>
+          );
+        }
+        // paragraph with inline **bold**
+        const parts = block.text.split(/(\*\*[^*]+\*\*)/g);
         return (
           <p key={i}>
             {parts.map((part, j) =>
@@ -163,6 +246,20 @@ function ReceiptCard({
   };
   const showQuiz = (payload.quiz_attempts ?? 0) > 0;
   const showReflections = (payload.reflections ?? 0) > 0;
+
+  // DISC-50 — when a letter auto-expands on mount because it's unread, we
+  // also need to mark it read. The original code only called `onLetterOpen`
+  // inside the toggle handler, so users who landed with the letter already
+  // open had to click twice for the DB state to flip. Guard with a ref so
+  // we fire exactly once per mount even if the query refetches.
+  const autoReadFiredRef = useRef(false);
+  useEffect(() => {
+    if (autoReadFiredRef.current) return;
+    if (expanded && letter && !letter.is_read) {
+      autoReadFiredRef.current = true;
+      onLetterOpen(letter.id);
+    }
+  }, [expanded, letter, onLetterOpen]);
 
   function handleToggleLetter() {
     const next = !expanded;

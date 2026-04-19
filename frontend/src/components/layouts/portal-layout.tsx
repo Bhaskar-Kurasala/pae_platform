@@ -68,9 +68,12 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
   const router = useRouter();
   const { user, logout } = useAuthStore();
   const { data: unread } = useMyNotifications({ unreadOnly: true, limit: 50 });
-  const hasUnreadLetter = (unread ?? []).some(
+  // DISC-49 — surface the unread COUNT (not just a dot) so the sidebar
+  // reflects the real `useMyNotifications` feed. We scope to weekly-letter
+  // notifications to keep the badge specific to Receipts.
+  const unreadLetterCount = (unread ?? []).filter(
     (n) => n.notification_type === "weekly_letter",
-  );
+  ).length;
 
   function handleLogout() {
     logout();
@@ -122,11 +125,18 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
             >
               <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
               <span className="flex-1">{label}</span>
-              {href === "/receipts" && hasUnreadLetter && (
+              {href === "/receipts" && unreadLetterCount > 0 && (
                 <span
-                  className="h-2 w-2 rounded-full bg-primary"
-                  aria-label="Unread letter"
-                />
+                  className={cn(
+                    "inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+                    active
+                      ? "bg-primary-foreground/20 text-primary-foreground"
+                      : "bg-primary text-primary-foreground",
+                  )}
+                  aria-label={`${unreadLetterCount} unread ${unreadLetterCount === 1 ? "letter" : "letters"}`}
+                >
+                  {unreadLetterCount > 9 ? "9+" : unreadLetterCount}
+                </span>
               )}
               {active && <ChevronRight className="h-3 w-3 opacity-60" aria-hidden="true" />}
             </Link>

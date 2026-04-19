@@ -24,9 +24,21 @@ class CourseProgress(BaseModel):
     lessons: list[LessonProgressItem]
 
 
+class DailyCompletion(BaseModel):
+    """Count of lesson completions bucketed by local calendar date (YYYY-MM-DD)."""
+
+    date: str
+    count: int
+
+
 class ProgressResponse(BaseModel):
     courses: list[CourseProgress]
     overall_progress: float
+    exercises_completed: int = 0
+    total_exercises: int = 0
+    exercise_completion_rate: float = 0.0
+    watch_time_minutes: int = 0
+    completions_by_day: list[DailyCompletion] = []
 
 
 # Legacy flat schema used by complete_lesson endpoint

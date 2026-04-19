@@ -232,9 +232,19 @@ export interface CourseProgress {
   lessons: LessonProgressItem[];
 }
 
+export interface DailyCompletion {
+  date: string;
+  count: number;
+}
+
 export interface ProgressResponse {
   courses: CourseProgress[];
   overall_progress: number;
+  exercises_completed: number;
+  total_exercises: number;
+  exercise_completion_rate: number;
+  watch_time_minutes: number;
+  completions_by_day: DailyCompletion[];
 }
 
 export interface LessonProgressRecord {
