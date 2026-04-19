@@ -30,6 +30,9 @@ from app.core.rate_limit import limiter
 from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.agent import ChatRequest
+from app.services.attachment_service import AttachmentService
+from app.services.attachment_storage import build_default_storage
+from app.services.chat_service import ChatService
 from app.services.confidence_service import CONFIDENCE_CALIBRATION_OVERLAY
 from app.services.disagreement_service import (
     DISAGREEMENT_OVERLAY,
@@ -42,6 +45,8 @@ from app.services.intent_before_debug_service import (
 )
 from app.services.misconception_service import (
     detect_misconceptions,
+)
+from app.services.misconception_service import (
     format_overlay as format_misconception_overlay,
 )
 from app.services.preferences_service import PreferencesService
@@ -87,6 +92,11 @@ def _socratic_overlay_for(level: int) -> str | None:
 log = structlog.get_logger()
 
 router = APIRouter(prefix="/agents", tags=["agents-stream"])
+
+# P1-2 — regenerate lives under /chat/messages/{id}/regenerate to match the
+# rest of the chat persistence surface even though the implementation reuses
+# the SSE token generator. Mounted alongside the streaming router in main.py.
+chat_stream_router = APIRouter(prefix="/chat", tags=["chat-stream"])
 
 # System prompts per agent type for direct streaming (bypasses full MOA)
 _FORMATTING_RULES = (
@@ -172,11 +182,33 @@ async def _token_generator(
     student_context_block: str | None = None,
     socratic_level: int = 0,
     user_id: uuid.UUID | None = None,
+    conversation_id: uuid.UUID | None = None,
+    parent_user_message_id: uuid.UUID | None = None,
+    extra_first_event: dict[str, Any] | None = None,
+    user_content: str | list[dict[str, Any]] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Yield SSE-formatted token chunks from Claude's stream."""
+    # Track partial content so we can still persist the assistant turn when
+    # the stream errors mid-way — prevents corrupt conversations where only
+    # the user message got saved.
+    reply_chunks: list[str] = []
+    reply_total = 0
+    _REPLY_SCAN_CAP = 4000
     try:
-        # Emit agent identity immediately so UI can show who's responding
-        yield f"data: {json.dumps({'agent_name': agent_name, 'chunk': '', 'done': False})}\n\n"
+        # Emit agent identity + conversation id immediately so the UI can
+        # (a) show who's responding and (b) capture the conv id for follow-up
+        # turns. P0-2 adds `conversation_id`; agent_name stays for back-compat
+        # with existing clients that key off it.
+        first_event: dict[str, Any] = {
+            "agent_name": agent_name,
+            "chunk": "",
+            "done": False,
+        }
+        if conversation_id is not None:
+            first_event["conversation_id"] = str(conversation_id)
+        if extra_first_event:
+            first_event.update(extra_first_event)
+        yield f"data: {json.dumps(first_event)}\n\n"
 
         llm = build_llm()
         system_prompt = _get_system_prompt(agent_name)
@@ -256,15 +288,20 @@ async def _token_generator(
             else:
                 messages.append(AIMessage(content=content))
 
-        messages.append(HumanMessage(content=message))
+        # P1-6 — if the caller assembled a content-block list (images +
+        # fenced code-block prefix), use it verbatim. Otherwise fall back to
+        # the plain-text turn so the legacy path stays byte-identical.
+        final_content: str | list[dict[str, Any]] = (
+            user_content if user_content is not None else message
+        )
+        messages.append(HumanMessage(content=final_content))
 
         # Buffer the full reply so we can scan for disagreement markers after
         # streaming completes (P3 3A-6). Cap the buffer defensively — only the
         # beginning matters for the scan, and unbounded concatenation on a
-        # long reply wastes memory.
-        reply_chunks: list[str] = []
-        reply_total = 0
-        _REPLY_SCAN_CAP = 4000
+        # long reply wastes memory. (reply_chunks is declared above so an
+        # exception inside the loop still leaves the partial content available
+        # to the post-stream persistence block.)
 
         async for chunk in llm.astream(messages):
             content = getattr(chunk, "content", "")
@@ -320,6 +357,22 @@ async def _token_generator(
         log.warning("stream.token_generator_error", error=str(exc))
         error_payload = json.dumps({"chunk": f"\n[Stream error: {exc}]", "done": True})
         yield f"data: {error_payload}\n\n"
+    finally:
+        # P0-2: persist the assistant turn — even on partial/error streams —
+        # so the conversation isn't left asymmetric (user msg saved, assistant
+        # missing). Best-effort; never raise to the client because the stream
+        # has already flushed `done: true`.
+        if conversation_id is not None and reply_chunks:
+            full_reply = "".join(reply_chunks)
+            with contextlib.suppress(Exception):
+                async with AsyncSessionLocal() as persist_session:
+                    await ChatService(persist_session).record_assistant_message(
+                        conversation_id,
+                        full_reply,
+                        agent_name=agent_name,
+                        parent_id=parent_user_message_id,
+                    )
+                    await persist_session.commit()
 
 
 @router.post("/stream")
@@ -371,6 +424,7 @@ async def stream_chat(
     tutor_mode = "standard"
     socratic_level = 0
     student_context_block: str | None = None
+    persisted_conversation_id: uuid.UUID | None = None
     async with AsyncSessionLocal() as session:
         prefs = await PreferencesService(session).get_or_create(current_user.id)
         tutor_mode = prefs.tutor_mode
@@ -401,6 +455,51 @@ async def stream_chat(
             log.warning("stream.student_context_failed", error=str(exc))
             student_context_block = None
 
+        # P0-2: resolve-or-create the persisted conversation and save the user
+        # message BEFORE the stream starts. Ownership mismatch raises 404
+        # here so the client gets a proper status code instead of mid-stream
+        # failure noise. We commit inside this block so a failure later in
+        # the generator (post-yield) can't roll back the user-turn write.
+        chat_service = ChatService(session)
+        conversation = await chat_service.ensure_conversation_for_stream(
+            conversation_id=payload.conversation_id,
+            user_id=current_user.id,
+            agent_name=agent_name,
+            first_message=message,
+        )
+        persisted_conversation_id = conversation.id
+        user_msg = await chat_service.record_user_message(conversation, message)
+        persisted_user_message_id = user_msg.id
+        await chat_service.touch(conversation)
+
+        # P1-6 — resolve any pending attachments, bind them to the freshly
+        # inserted user message, and pre-load their bytes into Anthropic
+        # content blocks for the LLM call below. Ownership + per-message cap
+        # are enforced by the service; raises 404 for unknown/foreign ids
+        # before the stream starts. `user_content` stays None when there are
+        # no attachments, so the existing text-only path is untouched.
+        user_content: str | list[dict[str, Any]] | None = None
+        if payload.attachment_ids:
+            attachment_service = AttachmentService(
+                session, build_default_storage()
+            )
+            pending = await attachment_service.verify_and_fetch_pending(
+                user_id=current_user.id, ids=payload.attachment_ids
+            )
+            await attachment_service.bind_to_message(
+                pending, persisted_user_message_id
+            )
+            blocks = await attachment_service.build_claude_content_blocks(
+                pending, text_message=message
+            )
+            # Only pass through the block list — if the service short-circuited
+            # to a bare string (no attachments actually resolved) we fall back
+            # to the plain-text path below.
+            if isinstance(blocks, list):
+                user_content = blocks
+
+        await session.commit()
+
     return StreamingResponse(
         _token_generator(
             message,
@@ -412,14 +511,136 @@ async def stream_chat(
             student_context_block,
             socratic_level,
             current_user.id,
+            persisted_conversation_id,
+            persisted_user_message_id,
+            None,  # extra_first_event
+            user_content,
         ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
             "X-Agent-Name": agent_name,
+            "X-Conversation-Id": str(persisted_conversation_id),
             "X-Scaffolding-Level": scaffolding.label if scaffolding else "none",
             "X-Tutor-Mode": tutor_mode,
             "X-Socratic-Level": str(socratic_level),
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Regenerate (P1-2)
+# ---------------------------------------------------------------------------
+
+
+@chat_stream_router.post("/messages/{assistant_message_id}/regenerate")
+@limiter.limit("30/minute")
+async def regenerate_assistant_message(
+    request: Request,
+    assistant_message_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """Regenerate an assistant reply, keeping the prior version(s) as siblings.
+
+    Validates ownership + message role, rebuilds the history slice up to and
+    including the user turn that prompted the reply, and streams a fresh
+    assistant message via the shared `_token_generator` so the frontend can
+    reuse the SSE plumbing from `use-stream.ts`. The new row is persisted in
+    the generator's `finally:` block with `parent_id` set to the user
+    message id — that's what makes the set of assistant messages with the
+    same `parent_id` the "siblings" behind the <1/N> navigator.
+
+    Returns 404 on a missing or foreign message; 400 if the target isn't
+    an assistant row.
+    """
+    conversation_history: list[dict[str, Any]] = []
+    parent_msg_id: uuid.UUID
+    conversation_id: uuid.UUID
+    agent_name: str
+    scaffolding: ScaffoldingLevel | None = None
+    tutor_mode = "standard"
+    socratic_level = 0
+    student_context_block: str | None = None
+
+    async with AsyncSessionLocal() as session:
+        chat_service = ChatService(session)
+        assistant_msg, parent_msg, history_rows = await chat_service.prepare_regenerate(
+            assistant_message_id=assistant_message_id,
+            user_id=current_user.id,
+        )
+        conversation_id = assistant_msg.conversation_id
+        parent_msg_id = parent_msg.id
+        # Resolve the agent: prefer the original assistant's agent_name so
+        # the regenerated reply matches the visual label; fall back to the
+        # conversation's own agent_name or keyword-route on the user prompt.
+        agent_name = (
+            assistant_msg.agent_name
+            or (await chat_service.repo.get_conversation(conversation_id)).agent_name  # type: ignore[union-attr]
+            or _keyword_route(parent_msg.content)
+            or "socratic_tutor"
+        )
+        if agent_name not in ROUTABLE_AGENTS and agent_name not in _STREAM_SYSTEM_PROMPTS:
+            agent_name = "socratic_tutor"
+
+        # Build the history payload the same way the frontend does on a
+        # normal turn — {role, content} pairs for every turn strictly before
+        # the parent user message. The LLM consumer caps at the last 6
+        # entries anyway.
+        for row in history_rows:
+            if row.id == parent_msg.id:
+                continue
+            if row.role not in ("user", "assistant"):
+                continue
+            if not row.content:
+                continue
+            conversation_history.append(
+                {"role": row.role, "content": row.content}
+            )
+
+        # Preferences + student context mirror the normal stream path so the
+        # regenerated reply gets the same socratic overlays, scaffolding,
+        # etc. Student context failure must not block regeneration.
+        prefs = await PreferencesService(session).get_or_create(current_user.id)
+        tutor_mode = prefs.tutor_mode
+        socratic_level = getattr(prefs, "socratic_level", 0) or 0
+        try:
+            student_context_block, _missing = await build_context_block(
+                session, current_user.id
+            )
+        except Exception as exc:
+            log.warning("regenerate.student_context_failed", error=str(exc))
+            student_context_block = None
+
+    log.info(
+        "stream.regenerate_request",
+        student_id=str(current_user.id),
+        assistant_message_id=str(assistant_message_id),
+        parent_user_message_id=str(parent_msg_id),
+        agent=agent_name,
+    )
+
+    return StreamingResponse(
+        _token_generator(
+            parent_msg.content,
+            agent_name,
+            conversation_history,
+            None,  # code_context — regenerate doesn't re-read the editor
+            scaffolding,
+            tutor_mode,
+            student_context_block,
+            socratic_level,
+            current_user.id,
+            conversation_id,
+            parent_msg_id,
+            {"regenerated_from": str(assistant_message_id)},
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "X-Agent-Name": agent_name,
+            "X-Conversation-Id": str(conversation_id),
+            "X-Regenerated-From": str(assistant_message_id),
         },
     )

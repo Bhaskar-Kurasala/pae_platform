@@ -11,6 +11,7 @@ import {
 } from "@/lib/hooks/use-progress";
 import { ApiError, type ProgressResponse } from "@/lib/api-client";
 import { RetrievalQuizInline } from "@/components/features/retrieval-quiz-inline";
+import { PageShell } from "@/components/layouts/page-shell";
 
 function isCompleted(lessonId: string, progress: ProgressResponse | undefined): boolean {
   return progress?.courses.some((c) =>
@@ -51,10 +52,10 @@ export default function LessonPage({ params }: { params: Promise<{ id: string }>
 
   if (isLoading) {
     return (
-      <div className="p-8 max-w-3xl mx-auto space-y-4 animate-pulse">
+      <PageShell className="space-y-4 animate-pulse">
         <div className="h-6 bg-muted rounded w-1/3" />
         <div className="aspect-video bg-muted rounded-xl" />
-      </div>
+      </PageShell>
     );
   }
 
@@ -62,7 +63,7 @@ export default function LessonPage({ params }: { params: Promise<{ id: string }>
     const courseId =
       (error.body as { detail?: { course_id?: string } })?.detail?.course_id ?? "";
     return (
-      <div className="p-8 max-w-xl mx-auto text-center space-y-3">
+      <PageShell variant="narrow" className="text-center space-y-3">
         <h1 className="text-xl font-semibold">Enroll to unlock this lesson</h1>
         <p className="text-sm text-muted-foreground">
           This lesson is part of a paid course. Enroll on the course page to continue.
@@ -73,7 +74,7 @@ export default function LessonPage({ params }: { params: Promise<{ id: string }>
         >
           Go to course
         </Link>
-      </div>
+      </PageShell>
     );
   }
 
@@ -89,7 +90,7 @@ export default function LessonPage({ params }: { params: Promise<{ id: string }>
   }
 
   return (
-    <div className="p-6 md:p-8 max-w-3xl mx-auto space-y-6">
+    <PageShell className="space-y-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Link href={`/courses/${lesson.course_id}`} className="hover:text-foreground inline-flex items-center gap-1">
@@ -226,6 +227,6 @@ print("Welcome to", "${lesson.title}")`}</code>
           )}
         </nav>
       )}
-    </div>
+    </PageShell>
   );
 }

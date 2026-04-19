@@ -85,10 +85,16 @@ export function CodeBlock({
   }, [highlightLines, hashLines]);
 
   const handleCopy = async () => {
+    // SSR / unsupported browser guard — modern HTTPS / localhost envs have
+    // this; older contexts get a console warning and a no-op.
+    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+      console.warn("[CodeBlock] navigator.clipboard unavailable; copy skipped");
+      return;
+    }
     try {
       await navigator.clipboard.writeText(trimmed);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
+      setTimeout(() => setCopied(false), 1500);
     } catch {
       // clipboard unavailable — silently ignore
     }
@@ -131,20 +137,25 @@ export function CodeBlock({
           ) : null}
         </div>
         {copyable ? (
-          <button
-            type="button"
-            onClick={() => void handleCopy()}
-            aria-label={copied ? "Copied" : "Copy code"}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-all duration-fast",
-              copied
-                ? "bg-emerald-500/20 text-emerald-400"
-                : "bg-white/10 text-zinc-400 hover:bg-white/20 hover:text-white",
-            )}
-          >
-            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-            {copied ? "Copied" : "Copy"}
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => void handleCopy()}
+              aria-label={copied ? "Copied" : "Copy code"}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-all duration-fast",
+                copied
+                  ? "bg-emerald-500/20 text-emerald-400"
+                  : "bg-white/10 text-zinc-400 hover:bg-white/20 hover:text-white",
+              )}
+            >
+              {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+              {copied ? "Copied" : "Copy"}
+            </button>
+            <span role="status" aria-live="polite" className="sr-only">
+              {copied ? "Copied" : ""}
+            </span>
+          </>
         ) : null}
       </div>
       <div

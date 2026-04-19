@@ -36,6 +36,67 @@ log = structlog.get_logger()
 router = APIRouter(prefix="/interview", tags=["interview"])
 
 
+def _flatten_llm_content(content: Any) -> str:
+    """Normalize Anthropic list-of-dicts content (extended thinking etc.) to text.
+
+    Claude sometimes returns `content` as [{"type": "thinking", ...}, {"type": "text", "text": "..."}]
+    rather than a plain string. str() on that yields Python repr, which is useless
+    for JSON parsing. Skip thinking blocks and concatenate text chunks.
+    """
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type") == "thinking":
+                    continue
+                text = block.get("text", "")
+                if text:
+                    parts.append(str(text))
+            else:
+                parts.append(str(block))
+        return "".join(parts)
+    return str(content)
+
+
+def _extract_first_json_object(text: str) -> dict[str, Any] | None:
+    """Return the first balanced {...} JSON object in `text`, or None.
+
+    Tolerates leading/trailing prose the model sometimes emits alongside JSON.
+    """
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                candidate = text[start : i + 1]
+                try:
+                    parsed = json.loads(candidate)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except json.JSONDecodeError:
+                    return None
+    return None
+
+
 class StartRequest(BaseModel):
     problem_slug: str | None = None  # optional: let user pick, else auto
 
@@ -140,6 +201,10 @@ async def _interview_token_stream(
             messages.append(HumanMessage(content=content))
         elif role == "assistant":
             messages.append(AIMessage(content=content))
+    # append_turn() persisted the new user message to Redis, but our local
+    # `session` snapshot predates it — add the current turn so the LLM
+    # actually sees what the candidate just said.
+    messages.append(HumanMessage(content=user_message))
 
     try:
         llm = build_llm()
@@ -203,13 +268,13 @@ async def debrief(
         transcript_lines.append(f"{role}: {turn['content']}")
     transcript = "\n\n".join(transcript_lines)
 
-    llm = build_llm(max_tokens=1200)
+    llm = build_llm(max_tokens=2000)
     messages: list[Any] = [
         SystemMessage(content=debrief_system_prompt(problem)),
         HumanMessage(content=f"Transcript:\n\n{transcript}"),
     ]
     resp = await llm.ainvoke(messages)
-    raw = str(resp.content).strip()
+    raw = _flatten_llm_content(resp.content).strip()
     # Strip accidental code fences the model sometimes adds.
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[1] if "\n" in raw else raw
@@ -217,11 +282,10 @@ async def debrief(
             raw = raw.rsplit("```", 1)[0]
         raw = raw.strip()
 
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        log.warning("interview.debrief_parse_failed", error=str(exc), raw=raw[:400])
-        raise HTTPException(status_code=502, detail="Debrief scoring failed — try again") from exc
+    parsed = _extract_first_json_object(raw)
+    if parsed is None:
+        log.warning("interview.debrief_parse_failed", raw=raw[:400])
+        raise HTTPException(status_code=502, detail="Debrief scoring failed — try again")
 
     # Clean up the session now — the debrief is the artifact the user keeps.
     await store.delete(session_id)

@@ -91,6 +91,14 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: list[str] = ["http://localhost:3000"]
 
+    # Chat attachments (P1-6). Local dev stores attachment bytes on disk under
+    # `attachments_dir`; created lazily on first upload. In production this
+    # swaps to S3 by replacing the `AttachmentStorage` backend without any
+    # schema change.
+    attachments_dir: str = "var/attachments"
+    attachments_max_bytes: int = 10 * 1024 * 1024  # 10 MB per file
+    attachments_max_per_message: int = 4
+
     # Celery — default to the same Redis as the app (host-aware) so docker
     # and local runs don't silently point the worker at localhost. Any env
     # override of celery_broker_url / celery_result_backend still wins.

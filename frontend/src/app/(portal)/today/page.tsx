@@ -15,6 +15,7 @@ import { TodaySignal } from "@/components/features/today-signal";
 import { TeachBackWidget } from "@/components/features/teach-back-widget";
 import { useMyGoal } from "@/lib/hooks/use-goal";
 import { useAuthStore } from "@/stores/auth-store";
+import { PageShell } from "@/components/layouts/page-shell";
 
 type Variant = "morning" | "evening";
 
@@ -74,7 +75,7 @@ export default function TodayPage() {
   const isMorning = variant === "morning";
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 py-10 md:py-14">
+    <PageShell variant="narrow" density="flush" className="px-6 py-10 md:py-14">
       <MotionFade>
         <header className="mb-8">
           <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
@@ -181,6 +182,6 @@ export default function TodayPage() {
           </section>
         </MotionFade>
       </div>
-    </div>
+    </PageShell>
   );
 }

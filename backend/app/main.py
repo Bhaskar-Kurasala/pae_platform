@@ -89,8 +89,12 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.skills import router as skills_router
     from app.api.v1.routes.srs import router as srs_router
     from app.api.v1.routes.career import router as career_router
+    from app.api.v1.routes.chat import router as chat_router
     from app.api.v1.routes.clarification import router as clarification_router
-    from app.api.v1.routes.stream import router as stream_router
+    from app.api.v1.routes.stream import (
+        chat_stream_router,
+        router as stream_router,
+    )
     from app.api.v1.routes.students import router as students_router
     from app.api.v1.routes.teach_back import router as teach_back_router
     from app.api.v1.routes.today import router as today_router
@@ -107,6 +111,7 @@ def create_app() -> FastAPI:
         webhooks_router,
         agents_router,
         stream_router,
+        chat_stream_router,
         demo_router,
         billing_router,
         oauth_router,
@@ -130,6 +135,7 @@ def create_app() -> FastAPI:
         today_router,
         feedback_router,
         career_router,
+        chat_router,
         clarification_router,
     ]
     for r in api_routers:

@@ -2,11 +2,32 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { AlertTriangle, ArrowUp, Bot, BriefcaseBusiness, Clock, Code2, GraduationCap, Plus, RefreshCw, Sparkles, User } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { AlertTriangle, Archive, ArchiveRestore, ArrowDown, ArrowUp, Bot, BriefcaseBusiness, Check, ChevronLeft, ChevronRight, Clock, Code2, Copy, Download, FileText, GraduationCap, ImageIcon, Lock, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCw, Search, Sparkles, Square, Timer, Trash2, User, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MarkdownRenderer } from "@/components/features/markdown-renderer";
-import { useStream } from "@/hooks/use-stream";
+import {
+  useStream,
+  clearAuthForReauth,
+  type StreamError,
+  type StreamMessage,
+} from "@/hooks/use-stream";
+import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { exercisesApi } from "@/lib/api-client";
+import {
+  chatApi,
+  exportConversationMarkdown,
+  regenerateMessage,
+  uploadAttachment,
+  type ChatAttachmentRead,
+  type ChatFeedbackCreate,
+  type ChatFeedbackRead,
+  type ChatMessageRead,
+  type ConversationListItem,
+} from "@/lib/chat-api";
+import { ChatSkeleton } from "./chat-skeleton";
+import { FeedbackControls } from "./feedback-controls";
+import { getAgentLabel } from "@/lib/agent-labels";
 
 // ── Mode chips ───────────────────────────────────────────────────
 const MODES = [
@@ -32,61 +53,466 @@ function agentGradient(name: string | undefined) {
   return AGENT_GRADIENTS[name] ?? "from-primary to-primary/70";
 }
 
-interface ConversationEntry {
-  id: string;
-  preview: string;
-  agentName?: string;
-  timestamp: Date;
-}
+// P0-3 — drop the localStorage conversation cache in favor of server truth.
+// We still stash the most-recently-viewed id so a reload renders the same
+// conversation before the sidebar list has finished fetching.
+const LAST_VIEWED_KEY = "chat-last-viewed-v1";
 
-// DISC-45 — persist the sidebar's recent-conversations index to localStorage
-// so refresh + tab-reopen preserves history. Only 20 most recent are kept,
-// matching the existing cap in handleNewMessage. Each entry is tiny (id +
-// preview + agent + ts) so we stay well under localStorage quota.
-const CONVERSATIONS_KEY = "chat-conversations-v1";
-const CONVERSATIONS_CAP = 20;
-
-type StoredConversation = Omit<ConversationEntry, "timestamp"> & { timestamp: string };
-
-function readStoredConversations(): ConversationEntry[] {
-  if (typeof window === "undefined") return [];
+function readLastViewedId(): string | null {
+  if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(CONVERSATIONS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((e): ConversationEntry | null => {
-        if (!e || typeof e !== "object") return null;
-        const s = e as Partial<StoredConversation>;
-        if (typeof s.id !== "string" || typeof s.preview !== "string") return null;
-        const ts = typeof s.timestamp === "string" ? new Date(s.timestamp) : new Date();
-        return {
-          id: s.id,
-          preview: s.preview,
-          agentName: typeof s.agentName === "string" ? s.agentName : undefined,
-          timestamp: Number.isNaN(ts.getTime()) ? new Date() : ts,
-        };
-      })
-      .filter((x): x is ConversationEntry => x !== null)
-      .slice(0, CONVERSATIONS_CAP);
+    return window.localStorage.getItem(LAST_VIEWED_KEY);
   } catch {
-    return [];
+    return null;
   }
 }
 
+function writeLastViewedId(id: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (id) window.localStorage.setItem(LAST_VIEWED_KEY, id);
+    else window.localStorage.removeItem(LAST_VIEWED_KEY);
+  } catch {
+    /* quota / disabled storage — ignore */
+  }
+}
+
+/** Map backend `ChatMessageRead` → hook's in-memory `StreamMessage`. */
+function messageFromServer(m: ChatMessageRead): StreamMessage | null {
+  // The hook doesn't render `system` messages; filter them defensively.
+  if (m.role !== "user" && m.role !== "assistant") return null;
+  return {
+    id: m.id,
+    role: m.role,
+    content: m.content,
+    agentName: m.agent_name ?? undefined,
+    timestamp: new Date(m.created_at),
+    // P1-5 — hydrate the user's own thumb rating inline so the bubble can
+    // render its active state without a follow-up fetch.
+    myFeedback: m.my_feedback ?? undefined,
+    // P1-2 — sibling set for the regenerate navigator. Empty array stays
+    // undefined on the hook side so the navigator component can render
+    // via a simple length check.
+    siblingIds: m.sibling_ids && m.sibling_ids.length > 0 ? m.sibling_ids : undefined,
+  };
+}
+
+// ── Sidebar row + actions menu ───────────────────────────────────
+// P1-8 — the row hosts the ⋯ menu anchor for Rename / Pin / Archive /
+// Delete / Export. Rename is inline (turns the title into a textbox;
+// Enter saves, Esc cancels). Delete opens a small confirm dialog — we
+// use a hand-rolled modal rather than shadcn AlertDialog (not installed
+// in this repo) so the component stays self-contained. All menu items
+// have aria labels + keyboard handlers per the accessibility criteria.
+function SidebarRow({
+  conv,
+  isActive,
+  onSelect,
+  onRename,
+  onTogglePin,
+  onToggleArchive,
+  onDelete,
+}: {
+  conv: ConversationListItem;
+  isActive: boolean;
+  onSelect: (id: string) => void;
+  onRename: (id: string, title: string) => Promise<void>;
+  onTogglePin: (id: string, pinned: boolean) => Promise<void>;
+  onToggleArchive: (id: string, archived: boolean) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState(conv.title ?? "");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  // Close menu on outside click + on Escape.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
+
+  // Focus the rename input when it appears.
+  useEffect(() => {
+    if (editing) {
+      editInputRef.current?.focus();
+      editInputRef.current?.select();
+    }
+  }, [editing]);
+
+  const handleExport = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    if (exporting) return;
+    setExporting(true);
+    try {
+      await exportConversationMarkdown(conv.id);
+    } catch (err) {
+      console.error("[chat] export failed", err);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const beginRename = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    setEditValue(conv.title ?? "");
+    setEditing(true);
+  };
+
+  const commitRename = async () => {
+    const next = editValue.trim();
+    setEditing(false);
+    if (!next || next === (conv.title ?? "")) return;
+    try {
+      await onRename(conv.id, next);
+    } catch (err) {
+      console.error("[chat] rename failed", err);
+    }
+  };
+
+  const cancelRename = () => {
+    setEditing(false);
+    setEditValue(conv.title ?? "");
+  };
+
+  const handleTogglePin = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    try {
+      await onTogglePin(conv.id, !conv.pinned_at);
+    } catch (err) {
+      console.error("[chat] pin toggle failed", err);
+    }
+  };
+
+  const handleToggleArchive = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    try {
+      await onToggleArchive(conv.id, !conv.archived_at);
+    } catch (err) {
+      console.error("[chat] archive toggle failed", err);
+    }
+  };
+
+  const handleDeleteClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    setConfirmingDelete(true);
+  };
+
+  const confirmDelete = async () => {
+    setConfirmingDelete(false);
+    try {
+      await onDelete(conv.id);
+    } catch (err) {
+      console.error("[chat] delete failed", err);
+    }
+  };
+
+  const modeMatch = MODES.find((m) => m.agentName === conv.agent_name);
+  const title = conv.title?.trim() || "Untitled conversation";
+  const ts = new Date(conv.updated_at);
+  const isPinned = Boolean(conv.pinned_at);
+  const isArchived = Boolean(conv.archived_at);
+
+  return (
+    <div
+      ref={rootRef}
+      className={cn(
+        "group relative w-full rounded-xl mb-0.5 transition-colors",
+        isActive
+          ? "bg-primary/10 text-primary"
+          : "hover:bg-muted/70 text-foreground",
+      )}
+    >
+      {editing ? (
+        <div className="px-3 py-2.5 pr-2">
+          <input
+            ref={editInputRef}
+            type="text"
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void commitRename();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                cancelRename();
+              }
+            }}
+            onBlur={() => {
+              // Commit on blur so clicking another row saves the rename.
+              void commitRename();
+            }}
+            onClick={(e) => e.stopPropagation()}
+            aria-label="Rename conversation"
+            className="w-full rounded-md border border-primary/40 bg-background px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+          />
+        </div>
+      ) : (
+        <button
+          onClick={() => onSelect(conv.id)}
+          aria-label={`Open conversation: ${title}`}
+          className="w-full text-left rounded-xl px-3 py-2.5 pr-9"
+        >
+          <div className="flex items-center gap-1.5">
+            {isPinned && (
+              <Pin
+                className="h-3 w-3 shrink-0 text-primary/70"
+                aria-label="Pinned"
+              />
+            )}
+            <p className="text-sm font-medium truncate leading-snug">{title}</p>
+          </div>
+          <div className="flex items-center gap-1.5 mt-1">
+            {conv.agent_name && (
+              <span
+                className={cn(
+                  "text-[10px] font-medium capitalize",
+                  isActive ? "text-primary/70" : modeMatch?.color ?? "text-primary/60",
+                )}
+              >
+                {modeMatch?.label ?? conv.agent_name.split("_").join(" ")}
+              </span>
+            )}
+            <span className="text-[10px] text-muted-foreground">
+              {ts.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+            </span>
+            {conv.message_count > 0 && (
+              <span className="ml-auto text-[10px] text-muted-foreground/60">
+                {conv.message_count}
+              </span>
+            )}
+          </div>
+        </button>
+      )}
+      {!editing && (
+        <button
+          type="button"
+          aria-label="Conversation actions"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuOpen((v) => !v);
+          }}
+          className={cn(
+            "absolute right-2 top-2 h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground/60 hover:text-foreground hover:bg-muted/80 transition-opacity",
+            menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
+          )}
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      )}
+      {menuOpen && (
+        <div
+          role="menu"
+          aria-label="Conversation actions menu"
+          className="absolute right-2 top-9 z-20 min-w-[180px] rounded-lg border bg-popover text-popover-foreground shadow-md py-1"
+        >
+          <button
+            role="menuitem"
+            type="button"
+            onClick={beginRename}
+            aria-label="Rename conversation"
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left hover:bg-muted"
+          >
+            <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Rename</span>
+          </button>
+          <button
+            role="menuitem"
+            type="button"
+            onClick={handleTogglePin}
+            aria-label={isPinned ? "Unpin conversation" : "Pin conversation"}
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left hover:bg-muted"
+          >
+            {isPinned ? (
+              <PinOff className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <Pin className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+            <span>{isPinned ? "Unpin" : "Pin"}</span>
+          </button>
+          <button
+            role="menuitem"
+            type="button"
+            onClick={handleToggleArchive}
+            aria-label={
+              isArchived ? "Unarchive conversation" : "Archive conversation"
+            }
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left hover:bg-muted"
+          >
+            {isArchived ? (
+              <ArchiveRestore className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <Archive className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+            <span>{isArchived ? "Unarchive" : "Archive"}</span>
+          </button>
+          <button
+            role="menuitem"
+            type="button"
+            onClick={handleExport}
+            disabled={exporting}
+            aria-label="Export conversation as Markdown"
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left hover:bg-muted disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            <Download className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{exporting ? "Exporting…" : "Export as Markdown"}</span>
+          </button>
+          <div className="my-1 h-px bg-border" role="none" />
+          <button
+            role="menuitem"
+            type="button"
+            onClick={handleDeleteClick}
+            aria-label="Delete conversation"
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left text-destructive hover:bg-destructive/10"
+          >
+            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Delete</span>
+          </button>
+        </div>
+      )}
+      {confirmingDelete && (
+        <DeleteConfirmDialog
+          title={title}
+          onConfirm={() => void confirmDelete()}
+          onCancel={() => setConfirmingDelete(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Delete confirm dialog ────────────────────────────────────────
+// shadcn's AlertDialog isn't installed in this repo; we render a minimal
+// modal ourselves so the sidebar doesn't pull in a new dep. Backdrop tap
+// or Escape dismisses; the primary CTA calls `onConfirm`.
+function DeleteConfirmDialog({
+  title,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const confirmBtnRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCancel();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    // Move focus to the cancel-adjacent primary so Enter confirms.
+    confirmBtnRef.current?.focus();
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Confirm delete conversation"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+    >
+      <div
+        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+        onClick={onCancel}
+        aria-hidden="true"
+      />
+      <div className="relative z-10 w-full max-w-sm rounded-xl border bg-popover p-5 text-popover-foreground shadow-lg">
+        <h2 className="text-sm font-semibold">Delete conversation?</h2>
+        <p className="mt-2 text-xs text-muted-foreground">
+          &ldquo;{title}&rdquo; will be permanently deleted. This cannot be undone.
+        </p>
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted"
+            aria-label="Cancel delete"
+          >
+            Cancel
+          </button>
+          <button
+            ref={confirmBtnRef}
+            type="button"
+            onClick={onConfirm}
+            className="rounded-md bg-destructive px-3 py-1.5 text-xs font-medium text-destructive-foreground hover:bg-destructive/90"
+            aria-label="Confirm delete"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Sidebar ──────────────────────────────────────────────────────
+// P1-8 — adds a debounced search input at the top, an "Show archived"
+// toggle at the bottom, and a Pinned section rendered above a divider
+// when any row is pinned. Search + archived toggle both trigger a
+// refetch via the parent (`onQueryChange`, `onToggleArchived`).
 function Sidebar({
   conversations,
   activeId,
   onSelect,
   onNew,
+  loading,
+  query,
+  onQueryChange,
+  showArchived,
+  onToggleArchived,
+  onRename,
+  onTogglePin,
+  onToggleArchive,
+  onDelete,
 }: {
-  conversations: ConversationEntry[];
+  conversations: ConversationListItem[];
   activeId: string | null;
   onSelect: (id: string) => void;
   onNew: () => void;
+  loading: boolean;
+  query: string;
+  onQueryChange: (q: string) => void;
+  showArchived: boolean;
+  onToggleArchived: (next: boolean) => void;
+  onRename: (id: string, title: string) => Promise<void>;
+  onTogglePin: (id: string, pinned: boolean) => Promise<void>;
+  onToggleArchive: (id: string, archived: boolean) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
 }) {
+  // P1-8 — split pinned vs the rest so we can render the pinned section
+  // with its own header above a divider. Backend already orders pinned
+  // first; splitting in the UI is cosmetic.
+  const pinned = conversations.filter((c) => c.pinned_at);
+  const rest = conversations.filter((c) => !c.pinned_at);
+  const hasQuery = query.trim().length > 0;
+
   return (
     <aside className="hidden lg:flex flex-col w-64 xl:w-72 border-r bg-card/50 shrink-0">
       <div className="flex items-center justify-between px-4 h-16 border-b shrink-0">
@@ -105,42 +531,116 @@ function Sidebar({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-3 px-2">
-        {conversations.length === 0 ? (
+      <div className="px-3 pt-3 pb-2 shrink-0">
+        <div className="relative">
+          <Search
+            className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60"
+            aria-hidden="true"
+          />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => onQueryChange(e.target.value)}
+            placeholder="Search conversations…"
+            aria-label="Search conversations"
+            className="w-full rounded-lg border bg-background/60 pl-8 pr-8 py-1.5 text-xs outline-none placeholder:text-muted-foreground/50 focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+          />
+          {hasQuery && (
+            <button
+              type="button"
+              onClick={() => onQueryChange("")}
+              aria-label="Clear search"
+              className="absolute right-1.5 top-1/2 h-5 w-5 -translate-y-1/2 rounded-md text-muted-foreground/60 hover:bg-muted hover:text-foreground flex items-center justify-center"
+            >
+              <X className="h-3 w-3" aria-hidden="true" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div
+        className="flex-1 overflow-y-auto py-1 px-2"
+        data-testid="conversation-list"
+      >
+        {loading ? (
+          <div
+            role="status"
+            aria-label="Loading conversations"
+            className="flex flex-col items-center justify-center py-12 gap-3 text-center px-4"
+          >
+            <div
+              className="h-6 w-6 rounded-full border-2 border-muted border-t-primary animate-spin"
+              aria-hidden="true"
+            />
+            <p className="text-xs text-muted-foreground">Loading conversations…</p>
+          </div>
+        ) : conversations.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 gap-3 text-center px-4">
             <Clock className="h-8 w-8 text-muted-foreground/30" aria-hidden="true" />
-            <p className="text-xs text-muted-foreground">No conversations yet</p>
+            <p className="text-xs text-muted-foreground">
+              {hasQuery ? "No matches" : "No conversations yet"}
+            </p>
           </div>
         ) : (
           <>
-            <p className="px-2 mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
-              Recent
-            </p>
-            {conversations.map((conv) => (
-              <button
-                key={conv.id}
-                onClick={() => onSelect(conv.id)}
-                aria-label={`Open conversation: ${conv.preview}`}
-                className={cn(
-                  "w-full text-left rounded-xl px-3 py-2.5 mb-0.5 transition-colors",
-                  activeId === conv.id ? "bg-primary/10 text-primary" : "hover:bg-muted/70 text-foreground",
-                )}
-              >
-                <p className="text-sm font-medium truncate leading-snug">{conv.preview}</p>
-                <div className="flex items-center gap-1.5 mt-1">
-                  {conv.agentName && (
-                    <span className={cn("text-[10px] font-medium capitalize", activeId === conv.id ? "text-primary/70" : "text-primary/60")}>
-                      {MODES.find((m) => m.agentName === conv.agentName)?.label ?? conv.agentName.split("_").join(" ")}
-                    </span>
-                  )}
-                  <span className="text-[10px] text-muted-foreground">
-                    {conv.timestamp.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-                  </span>
-                </div>
-              </button>
-            ))}
+            {pinned.length > 0 && (
+              <>
+                <p className="px-2 mt-1 mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
+                  Pinned
+                </p>
+                {pinned.map((conv) => (
+                  <SidebarRow
+                    key={conv.id}
+                    conv={conv}
+                    isActive={activeId === conv.id}
+                    onSelect={onSelect}
+                    onRename={onRename}
+                    onTogglePin={onTogglePin}
+                    onToggleArchive={onToggleArchive}
+                    onDelete={onDelete}
+                  />
+                ))}
+                <div
+                  className="my-2 mx-2 h-px bg-border"
+                  role="separator"
+                  aria-hidden="true"
+                />
+              </>
+            )}
+            {rest.length > 0 && (
+              <>
+                <p className="px-2 mt-1 mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
+                  {hasQuery ? "Results" : "Recent"}
+                </p>
+                {rest.map((conv) => (
+                  <SidebarRow
+                    key={conv.id}
+                    conv={conv}
+                    isActive={activeId === conv.id}
+                    onSelect={onSelect}
+                    onRename={onRename}
+                    onTogglePin={onTogglePin}
+                    onToggleArchive={onToggleArchive}
+                    onDelete={onDelete}
+                  />
+                ))}
+              </>
+            )}
           </>
         )}
+      </div>
+
+      <div className="border-t px-3 py-2 shrink-0">
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground hover:text-foreground">
+          <input
+            type="checkbox"
+            checked={showArchived}
+            onChange={(e) => onToggleArchived(e.target.checked)}
+            aria-label="Show archived conversations"
+            className="h-3.5 w-3.5 rounded border-border accent-primary"
+          />
+          <span>Show archived</span>
+        </label>
       </div>
     </aside>
   );
@@ -199,13 +699,174 @@ function WelcomeScreen({ mode, onPrompt }: { mode: typeof MODES[number]; onPromp
 }
 
 // ── Message bubbles ──────────────────────────────────────────────
-function UserBubble({ content }: { content: string }) {
+// P1-1 — user bubble hosts an inline edit affordance. `onEdit` is only
+// provided when the row is a persisted (server-side) message id AND the
+// transcript isn't currently streaming; otherwise the pencil is hidden. The
+// textarea reuses the bubble's width and autosizes to content.
+function UserBubble({
+  messageId,
+  content,
+  onEdit,
+  canEdit,
+}: {
+  messageId: string;
+  content: string;
+  canEdit: boolean;
+  onEdit?: (messageId: string, nextContent: string) => Promise<void>;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(content);
+  const [isSaving, setIsSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Autosize the textarea when entering edit mode + as the draft grows.
+  useEffect(() => {
+    if (!isEditing) return;
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, 280)}px`;
+  }, [isEditing, draft]);
+
+  // If the server-side content changes (e.g. after a successful edit the
+  // bubble re-renders with the new message's text), keep the draft in sync
+  // when we're NOT mid-edit so the next open starts from fresh state.
+  useEffect(() => {
+    if (!isEditing) setDraft(content);
+  }, [content, isEditing]);
+
+  const openEditor = () => {
+    setDraft(content);
+    setEditError(null);
+    setIsEditing(true);
+    // Focus on next tick so the textarea has mounted.
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (ta) {
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+      }
+    });
+  };
+
+  const cancelEdit = () => {
+    if (isSaving) return;
+    setIsEditing(false);
+    setDraft(content);
+    setEditError(null);
+  };
+
+  const save = async () => {
+    if (!onEdit) return;
+    const next = draft.trim();
+    if (!next) {
+      setEditError("Message can't be empty.");
+      return;
+    }
+    if (next === content.trim()) {
+      // No-op edit — just close without round-tripping.
+      setIsEditing(false);
+      return;
+    }
+    setIsSaving(true);
+    setEditError(null);
+    try {
+      await onEdit(messageId, next);
+      setIsEditing(false);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Edit failed. Please try again.";
+      setEditError(message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      cancelEdit();
+    } else if (
+      e.key === "Enter" &&
+      (e.metaKey || e.ctrlKey) &&
+      !e.shiftKey
+    ) {
+      e.preventDefault();
+      void save();
+    }
+  };
+
   return (
-    <div className="flex justify-end gap-3">
-      <div className="max-w-[60%]">
-        <div className="rounded-3xl rounded-tr-lg bg-primary px-5 py-3.5 text-sm text-primary-foreground leading-relaxed shadow-sm">
-          {content}
-        </div>
+    <div className="group/msg flex justify-end gap-3">
+      <div className="max-w-[60%] flex flex-col items-end">
+        {isEditing ? (
+          <div className="w-full rounded-3xl rounded-tr-lg bg-card border border-border/60 shadow-sm p-3">
+            <textarea
+              ref={textareaRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={isSaving}
+              maxLength={10000}
+              aria-label="Edit message"
+              data-testid="edit-textarea"
+              className="w-full resize-none bg-transparent text-sm leading-relaxed outline-none disabled:opacity-60 min-h-[3rem] max-h-[280px]"
+            />
+            {editError ? (
+              <p
+                role="alert"
+                className="mt-1 text-xs text-destructive"
+                data-testid="edit-error"
+              >
+                {editError}
+              </p>
+            ) : null}
+            <div className="mt-2 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={cancelEdit}
+                disabled={isSaving}
+                data-testid="edit-cancel"
+                className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void save()}
+                disabled={isSaving || !draft.trim()}
+                data-testid="edit-save"
+                className="inline-flex items-center rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSaving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="rounded-3xl rounded-tr-lg bg-primary px-5 py-3.5 text-sm text-primary-foreground leading-relaxed shadow-sm whitespace-pre-wrap">
+              {content}
+            </div>
+            {canEdit && onEdit ? (
+              <div
+                className="mt-1 mr-1 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity"
+                aria-label="Message actions"
+              >
+                <button
+                  type="button"
+                  onClick={openEditor}
+                  aria-label="Edit message"
+                  data-testid="edit-open"
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                >
+                  <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                  Edit
+                </button>
+              </div>
+            ) : null}
+          </>
+        )}
       </div>
       <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0 mt-1 border border-border/50">
         <User className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
@@ -214,28 +875,224 @@ function UserBubble({ content }: { content: string }) {
   );
 }
 
-function ThinkingDots() {
+// P2-3 — thinking indicator now reveals the routed agent as soon as the
+// first SSE event arrives (carrying `agent_name` before any content
+// tokens). Before the first event `agentName` is undefined and we render
+// a neutral "Thinking…" so there's no flicker the moment the classifier
+// decides. The dot color encodes the agent's category.
+function ThinkingDots({ agentName }: { agentName?: string | null }) {
+  const { displayName, colorClass } = getAgentLabel(agentName);
+  const label = agentName ? `${displayName} is thinking…` : "Thinking…";
   return (
-    <div className="flex items-center gap-1 py-1" aria-label="Thinking">
-      {[0, 150, 300].map((delay) => (
-        <span
-          key={delay}
-          className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-bounce"
-          style={{ animationDelay: `${delay}ms` }}
-          aria-hidden="true"
-        />
-      ))}
+    <div
+      className="flex items-center gap-2 py-1"
+      aria-label={label}
+      role="status"
+      aria-live="polite"
+    >
+      <span
+        className={cn(
+          "h-1.5 w-1.5 rounded-full shrink-0",
+          agentName ? colorClass : "bg-muted-foreground/40",
+        )}
+        aria-hidden="true"
+        data-testid="thinking-agent-dot"
+      />
+      <span className="text-xs text-muted-foreground" data-testid="thinking-label">
+        {label}
+      </span>
+      <span className="flex items-center gap-1 ml-1" aria-hidden="true">
+        {[0, 150, 300].map((delay) => (
+          <span
+            key={delay}
+            className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-bounce"
+            style={{ animationDelay: `${delay}ms` }}
+          />
+        ))}
+      </span>
     </div>
   );
 }
 
-function AssistantBubble({ content, agentName, isStreaming, isLast, isThinking }: {
-  content: string; agentName?: string; isStreaming: boolean; isLast: boolean; isThinking?: boolean;
-}) {
-  const modeLabel = MODES.find((m) => m.agentName === agentName)?.label;
+function CopyMessageButton({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    // SSR / unsupported browser guard. Modern HTTPS/localhost has it.
+    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+      console.warn("[CopyMessageButton] navigator.clipboard unavailable; copy skipped");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // silently ignore — user will notice no feedback
+    }
+  };
 
   return (
-    <div className="flex gap-3">
+    <>
+      <button
+        type="button"
+        onClick={() => void handleCopy()}
+        aria-label={copied ? "Copied" : "Copy message"}
+        className={cn(
+          "inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
+          copied
+            ? "text-emerald-600 dark:text-emerald-400"
+            : "text-muted-foreground hover:bg-muted hover:text-foreground",
+        )}
+      >
+        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        {copied ? "Copied" : "Copy"}
+      </button>
+      <span role="status" aria-live="polite" className="sr-only">
+        {copied ? "Copied" : ""}
+      </span>
+    </>
+  );
+}
+
+// P1-2 — "Regenerate" hover action on assistant bubbles. Matches the existing
+// hover-action visual style (CopyMessageButton / FeedbackControls). The click
+// handler lives in the parent so the regenerate fetch + stream consumption can
+// share state with useStream (new variant replaces the current bubble's
+// content + sibling list grows by one).
+function RegenerateButton({
+  onClick,
+  isRegenerating,
+  disabled,
+}: {
+  onClick: () => void;
+  isRegenerating: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled || isRegenerating}
+      aria-label={isRegenerating ? "Regenerating response" : "Regenerate response"}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
+        "text-muted-foreground hover:bg-muted hover:text-foreground",
+        "disabled:opacity-50 disabled:cursor-not-allowed",
+      )}
+    >
+      <RotateCw
+        className={cn("h-3.5 w-3.5", isRegenerating && "animate-spin")}
+        aria-hidden="true"
+      />
+      {isRegenerating ? "Regenerating" : "Regenerate"}
+    </button>
+  );
+}
+
+// P1-2 — `< 1 / N >` variant switcher below an assistant bubble that has
+// siblings. Hidden when there's only one variant. The caller owns the
+// click handlers (they need to fetch the sibling content + mutate the
+// hook's message array in place).
+function SiblingNavigator({
+  siblingIds,
+  currentId,
+  onSelect,
+  disabled,
+}: {
+  siblingIds: string[];
+  currentId: string;
+  onSelect: (targetId: string) => void;
+  disabled?: boolean;
+}) {
+  const idx = siblingIds.indexOf(currentId);
+  if (idx < 0 || siblingIds.length < 2) return null;
+  const atStart = idx === 0;
+  const atEnd = idx === siblingIds.length - 1;
+  const goPrev = () => {
+    if (atStart || disabled) return;
+    onSelect(siblingIds[idx - 1]);
+  };
+  const goNext = () => {
+    if (atEnd || disabled) return;
+    onSelect(siblingIds[idx + 1]);
+  };
+
+  return (
+    <div
+      role="group"
+      aria-label={`Response ${idx + 1} of ${siblingIds.length}`}
+      data-testid="sibling-navigator"
+      className="inline-flex items-center gap-0.5 rounded-md text-[11px] text-muted-foreground"
+    >
+      <button
+        type="button"
+        onClick={goPrev}
+        disabled={atStart || disabled}
+        aria-label="Previous response"
+        className="inline-flex items-center justify-center rounded-md p-1 hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+      >
+        <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
+      </button>
+      <span className="tabular-nums px-1 min-w-[38px] text-center">
+        {idx + 1} / {siblingIds.length}
+      </span>
+      <button
+        type="button"
+        onClick={goNext}
+        disabled={atEnd || disabled}
+        aria-label="Next response"
+        className="inline-flex items-center justify-center rounded-md p-1 hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+      >
+        <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
+function AssistantBubble({
+  messageId,
+  content,
+  agentName,
+  isStreaming,
+  isLast,
+  isThinking,
+  myFeedback,
+  onSubmitFeedback,
+  siblingIds,
+  onSelectSibling,
+  onRegenerate,
+  isRegenerating,
+}: {
+  messageId: string;
+  content: string;
+  agentName?: string;
+  isStreaming: boolean;
+  isLast: boolean;
+  isThinking?: boolean;
+  myFeedback?: ChatFeedbackRead | null;
+  // P1-5 — parent owns the POST + optimistic state update. Omitted for the
+  // live-streaming bubble (its id is a client UUID, not the persisted one),
+  // in which case the thumbs are hidden.
+  onSubmitFeedback?: (
+    messageId: string,
+    payload: ChatFeedbackCreate,
+  ) => Promise<void>;
+  // P1-2 — sibling navigator + regenerate. Both are undefined for the
+  // live-streaming bubble (persisted-only actions).
+  siblingIds?: string[];
+  onSelectSibling?: (messageId: string, targetId: string) => Promise<void>;
+  onRegenerate?: (messageId: string) => Promise<void>;
+  isRegenerating?: boolean;
+}) {
+  const modeLabel = MODES.find((m) => m.agentName === agentName)?.label;
+  const showActions = !isThinking && !(isStreaming && isLast) && content.length > 0;
+  const canRate = showActions && onSubmitFeedback !== undefined;
+  const canRegenerate = showActions && onRegenerate !== undefined;
+  const hasSiblings = (siblingIds?.length ?? 0) > 1;
+
+  return (
+    <div className="group/msg flex gap-3">
       <div className={cn(
         "h-8 w-8 rounded-full bg-gradient-to-br flex items-center justify-center shrink-0 mt-1 shadow-sm",
         isThinking ? "animate-pulse" : "",
@@ -251,11 +1108,42 @@ function AssistantBubble({ content, agentName, isStreaming, isLast, isThinking }
         )}
         <div className="rounded-3xl rounded-tl-lg bg-card border border-border/50 px-5 py-4 shadow-sm">
           {isThinking ? (
-            <ThinkingDots />
+            <ThinkingDots agentName={agentName} />
           ) : (
             <MarkdownRenderer content={content} isStreaming={isStreaming && isLast} />
           )}
         </div>
+        {showActions && (
+          <div
+            className="mt-1 ml-1 flex items-center gap-1 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity"
+            aria-label="Message actions"
+          >
+            <CopyMessageButton content={content} />
+            {canRegenerate && (
+              <RegenerateButton
+                onClick={() => void onRegenerate(messageId)}
+                isRegenerating={!!isRegenerating}
+              />
+            )}
+            {hasSiblings && onSelectSibling && siblingIds && (
+              <SiblingNavigator
+                siblingIds={siblingIds}
+                currentId={messageId}
+                onSelect={(targetId) =>
+                  void onSelectSibling(messageId, targetId)
+                }
+                disabled={isRegenerating}
+              />
+            )}
+            {canRate && (
+              <FeedbackControls
+                messageId={messageId}
+                myFeedback={myFeedback}
+                onSubmit={onSubmitFeedback}
+              />
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -290,16 +1178,56 @@ function ModeChips({ active, onChange }: { active: ModeAgent; onChange: (m: Mode
   );
 }
 
+// P1-6 — accept list for the native file picker + the paste/drop handlers.
+// Keep it in sync with the backend's `ALLOWED_MIME_TYPES` in
+// `backend/app/services/attachment_service.py`. Extensions are included for
+// macOS Chrome, which sometimes sends `application/octet-stream` for .ipynb
+// and relies on the file-extension fallback server-side.
+const ATTACHMENT_ACCEPT = "image/png,image/jpeg,.py,.md,.txt,.ipynb";
+const KB = 1024;
+const MB = KB * 1024;
+
+function formatBytes(n: number): string {
+  if (n >= MB) return `${(n / MB).toFixed(1)} MB`;
+  if (n >= KB) return `${(n / KB).toFixed(0)} KB`;
+  return `${n} B`;
+}
+
 // ── Input bar ────────────────────────────────────────────────────
-function InputBar({ value, onChange, onSend, isStreaming, activeMode, onModeChange }: {
+function InputBar({
+  value,
+  onChange,
+  onSend,
+  onCancel,
+  isStreaming,
+  activeMode,
+  onModeChange,
+  attachments,
+  onUploadFiles,
+  onRemoveAttachment,
+  uploadError,
+}: {
   value: string;
   onChange: (v: string) => void;
   onSend: () => void;
+  // P0-4: while streaming, the send button becomes a Stop button that calls
+  // this handler. Parent threads `cancel` from `useStream`.
+  onCancel: () => void;
   isStreaming: boolean;
   activeMode: ModeAgent;
   onModeChange: (m: ModeAgent) => void;
+  // P1-6 — attachments API. `attachments` is the list of already-uploaded
+  // pending rows (slim projection from the backend); `onUploadFiles` accepts
+  // any `FileList | File[]` from the three entry points (picker / paste /
+  // drop); `onRemoveAttachment` drops a single chip.
+  attachments: ChatAttachmentRead[];
+  onUploadFiles: (files: FileList | File[]) => void;
+  onRemoveAttachment: (id: string) => void;
+  uploadError: string | null;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   useEffect(() => {
     const ta = textareaRef.current;
@@ -317,18 +1245,114 @@ function InputBar({ value, onChange, onSend, isStreaming, activeMode, onModeChan
     }
   };
 
+  // P1-6 — paste handler. Walks the clipboard items, keeps entries with a
+  // .getAsFile() and hands them to the parent uploader. Skips plain text so
+  // normal copy/paste of a snippet still lands in the textarea.
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const files: File[] = [];
+    for (const item of Array.from(items)) {
+      if (item.kind === "file") {
+        const f = item.getAsFile();
+        if (f) files.push(f);
+      }
+    }
+    if (files.length > 0) {
+      e.preventDefault();
+      onUploadFiles(files);
+    }
+  };
+
+  // P1-6 — drag-drop. preventDefault on dragOver is required for drop to
+  // fire; dragEnter/Leave + isDragging drive the outline highlight.
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer?.files?.length) {
+      onUploadFiles(e.dataTransfer.files);
+    }
+  };
+
   return (
     <div className="shrink-0 px-4 pb-4 pt-2">
-      <div className={cn(
-        "max-w-5xl mx-auto rounded-3xl border bg-card shadow-lg transition-shadow",
-        "focus-within:shadow-xl focus-within:border-primary/40",
-        isStreaming ? "border-primary/30" : "border-border/60",
-      )}>
+      <div
+        className={cn(
+          "max-w-5xl mx-auto rounded-3xl border bg-card shadow-lg transition-shadow",
+          "focus-within:shadow-xl focus-within:border-primary/40",
+          isStreaming ? "border-primary/30" : "border-border/60",
+          isDragging && "ring-2 ring-primary/40",
+        )}
+        onDragOver={(e) => {
+          e.preventDefault();
+        }}
+        onDragEnter={(e) => {
+          e.preventDefault();
+          setIsDragging(true);
+        }}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          // Only flip off when the pointer exits the composer surface. Child
+          // enters bubble a dragLeave on the parent; clamping to when the
+          // relatedTarget is outside avoids a flicker.
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+            setIsDragging(false);
+          }
+        }}
+        onDrop={handleDrop}
+      >
+        {/* P1-6 — pending-attachments chip row. Rendered above the textarea so
+            the student always sees what they're about to send. Each chip
+            shows an icon (image vs file), filename, size, and a × button. */}
+        {attachments.length > 0 && (
+          <div
+            className="flex flex-wrap gap-2 px-4 pt-3"
+            aria-label="Pending attachments"
+            data-testid="attachment-chips"
+          >
+            {attachments.map((att) => {
+              const isImage = att.mime_type.startsWith("image/");
+              const Icon = isImage ? ImageIcon : FileText;
+              return (
+                <div
+                  key={att.id}
+                  className="flex items-center gap-2 rounded-full border border-border/60 bg-muted/40 pl-2 pr-1 py-1 text-xs"
+                >
+                  <Icon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+                  <span className="max-w-[180px] truncate font-medium">
+                    {att.filename}
+                  </span>
+                  <span className="text-muted-foreground/70">
+                    {formatBytes(att.size_bytes)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onRemoveAttachment(att.id)}
+                    aria-label={`Remove ${att.filename}`}
+                    className="h-5 w-5 rounded-full flex items-center justify-center hover:bg-muted"
+                  >
+                    <X className="h-3 w-3" aria-hidden="true" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {uploadError && (
+          <p
+            className="px-5 pt-2 text-[11px] text-destructive"
+            role="alert"
+            aria-live="polite"
+          >
+            {uploadError}
+          </p>
+        )}
         <textarea
           ref={textareaRef}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder="Ask your AI coach anything…"
           rows={1}
           disabled={isStreaming}
@@ -336,28 +1360,60 @@ function InputBar({ value, onChange, onSend, isStreaming, activeMode, onModeChan
           className="w-full resize-none bg-transparent px-5 pt-4 pb-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground/50 disabled:opacity-60 max-h-[160px] overflow-y-auto"
         />
         <div className="flex items-center justify-between px-4 pb-3 gap-3">
-          <ModeChips active={activeMode} onChange={onModeChange} />
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isStreaming}
+              aria-label="Attach files"
+              title="Attach files (PNG/JPEG, .py/.md/.txt/.ipynb — max 4, 10 MB each)"
+              className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Paperclip className="h-4 w-4" aria-hidden="true" />
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept={ATTACHMENT_ACCEPT}
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files && e.target.files.length > 0) {
+                  onUploadFiles(e.target.files);
+                }
+                // Reset so selecting the same file twice re-fires onChange.
+                e.target.value = "";
+              }}
+            />
+            <ModeChips active={activeMode} onChange={onModeChange} />
+          </div>
           <div className="flex items-center gap-2 shrink-0">
             <span className="hidden sm:block text-[11px] text-muted-foreground/50">
               {isStreaming ? "Generating…" : "Enter to send · Shift+Enter newline"}
             </span>
             <button
-              onClick={onSend}
-              disabled={isStreaming || !value.trim()}
-              aria-label={isStreaming ? "Generating response" : "Send message"}
+              // P0-4: while streaming, this is a Stop button that cancels the
+              // in-flight request. Otherwise it's the Send button. Keeping a
+              // single element means layout doesn't shift when the state
+              // flips; only the icon + color + handler change.
+              onClick={isStreaming ? onCancel : onSend}
+              disabled={!isStreaming && !value.trim()}
+              aria-label={isStreaming ? "Stop generating" : "Send message"}
+              title={isStreaming ? "Stop (Esc)" : undefined}
               className={cn(
-                "h-9 w-9 rounded-2xl flex items-center justify-center transition-all",
-                "bg-primary text-primary-foreground shadow-sm",
-                "hover:bg-primary/90 hover:shadow-md active:scale-95",
+                "h-9 w-9 rounded-2xl flex items-center justify-center transition-all shadow-sm",
+                "hover:shadow-md active:scale-95",
+                isStreaming
+                  ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  : "bg-primary text-primary-foreground hover:bg-primary/90",
                 "disabled:opacity-30 disabled:cursor-not-allowed",
               )}
             >
               {isStreaming ? (
-                <span className="flex gap-0.5" aria-hidden="true">
-                  <span className="h-1 w-1 rounded-full bg-current animate-bounce [animation-delay:0ms]" />
-                  <span className="h-1 w-1 rounded-full bg-current animate-bounce [animation-delay:120ms]" />
-                  <span className="h-1 w-1 rounded-full bg-current animate-bounce [animation-delay:240ms]" />
-                </span>
+                // Filled square — the universal "stop" affordance (matches
+                // ChatGPT / Claude.ai / Gemini). `fill="currentColor"` makes
+                // lucide's outline render as a solid glyph.
+                <Square className="h-3.5 w-3.5" fill="currentColor" aria-hidden="true" />
               ) : (
                 <ArrowUp className="h-4 w-4" aria-hidden="true" />
               )}
@@ -372,18 +1428,425 @@ function InputBar({ value, onChange, onSend, isStreaming, activeMode, onModeChan
   );
 }
 
+// ── Error banner (P0-5) ──────────────────────────────────────────
+// Distinct copy, icon, and retry behavior per error kind. For `rate_limit`
+// we drive a live countdown off `retryAfterMs` so the Retry button disables
+// until the server's window elapses. For `auth`, the action button clears
+// the auth store and navigates to /login instead of retrying the request.
+function ErrorBanner({ error, isStreaming, onRetry }: {
+  error: StreamError;
+  isStreaming: boolean;
+  onRetry: () => Promise<void>;
+}) {
+  const router = useRouter();
+  // Rate-limit countdown. We render `secondsRemaining` directly; the effect
+  // below seeds it from the current error and ticks it down each second.
+  // Date.now() lives inside the effect (not render) so the react-compiler
+  // purity rule stays happy.
+  const [secondsRemaining, setSecondsRemaining] = useState(0);
+
+  useEffect(() => {
+    if (error.kind !== "rate_limit") return;
+    const deadline = Date.now() + (error.retryAfterMs ?? 30_000);
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      setSecondsRemaining(remaining);
+    };
+    tick(); // seed immediately
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [error]);
+
+  const Icon =
+    error.kind === "auth" ? Lock
+    : error.kind === "rate_limit" ? Timer
+    : AlertTriangle;
+
+  const copy =
+    error.kind === "auth"
+      ? "Session expired — please sign in again."
+    : error.kind === "rate_limit"
+      ? secondsRemaining > 0
+        ? `Too many requests — try again in ${secondsRemaining}s.`
+        : "Too many requests — you can try again now."
+    : error.kind === "server"
+      ? error.message
+    : "Connection lost — your last message didn\u2019t get a response.";
+
+  const actionLabel = error.kind === "auth" ? "Sign in" : "Retry";
+  const actionDisabled =
+    error.kind === "auth"
+      ? false
+      : isStreaming || (error.kind === "rate_limit" && secondsRemaining > 0);
+
+  const handleAction = () => {
+    if (error.kind === "auth") {
+      clearAuthForReauth();
+      router.push("/login");
+      return;
+    }
+    void onRetry();
+  };
+
+  return (
+    <div className="mx-auto w-full max-w-5xl px-6 pt-3" role="alert">
+      <div className="flex items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4 shrink-0" aria-hidden />
+          <span>{copy}</span>
+        </div>
+        <button
+          type="button"
+          onClick={handleAction}
+          disabled={actionDisabled}
+          aria-label={actionLabel}
+          className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-900 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-100 dark:hover:bg-red-900/40"
+        >
+          {error.kind === "auth" ? (
+            <Lock className="h-3.5 w-3.5" aria-hidden />
+          ) : (
+            <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+          )}
+          {actionLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Chat area ────────────────────────────────────────────────────
-function ChatArea({ mode, onNewMessage, onModeChange, prefill }: {
+// P0-3: `ChatArea` is remounted via `key={chatKey}` on every conversation
+// switch, new-chat, or mode change. `initialMessages` + `initialConversationId`
+// seed the hook on mount for pre-existing conversations. Smoother transitions
+// (no remount) are P1-1/P1-2 scope.
+function ChatArea({
+  mode,
+  onFirstMessage,
+  onConversationId,
+  onModeChange,
+  prefill,
+  initialMessages,
+  initialConversationId,
+  initialInput,
+  onInputChange,
+}: {
   mode: typeof MODES[number];
-  onNewMessage: (preview: string, agent: string | undefined) => void;
+  onFirstMessage: (preview: string, agent: string | undefined) => void;
+  onConversationId: (id: string) => void;
   onModeChange: (m: ModeAgent) => void;
   prefill?: string;
+  initialMessages?: StreamMessage[];
+  initialConversationId?: string;
+  initialInput?: string;
+  onInputChange: (next: string) => void;
 }) {
-  const { messages, isStreaming, error, sendMessage, retry } = useStream({ agentName: mode.agentName ?? undefined });
-  const [input, setInput] = useState("");
+  const {
+    messages,
+    isStreaming,
+    error,
+    sendMessage,
+    retry,
+    cancel,
+    setMessages,
+    conversationId,
+  } = useStream({
+    agentName: mode.agentName ?? undefined,
+    initialMessages,
+    conversationId: initialConversationId,
+    onConversationId,
+  });
+
+  // P1-5 — POST the rating then patch `myFeedback` on the message in-place.
+  // The hook exposes `setMessages` (functional setter) so we don't duplicate
+  // the full message array into page-level state. Parent owns the state to
+  // keep FeedbackControls pure; catch is swallow-and-log so a transient
+  // failure doesn't crash the bubble (the chip stays visually unset, user
+  // can retry).
+  const handleSubmitFeedback = useCallback(
+    async (messageId: string, payload: ChatFeedbackCreate): Promise<void> => {
+      try {
+        const saved = await chatApi.postFeedback(messageId, payload);
+        setMessages((prev) =>
+          prev.map((m) => (m.id === messageId ? { ...m, myFeedback: saved } : m)),
+        );
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to submit feedback", err);
+      }
+    },
+    [setMessages],
+  );
+
+  // P1-1 — edit a persisted user turn.
+  //  1) POST /chat/messages/{id}/edit → server soft-deletes the target +
+  //     downstream rows, returns the freshly-inserted user row.
+  //  2) Trim local state to every message with `created_at` strictly older
+  //     than the edited one (we use array index since hook state is already
+  //     chronological).
+  //  3) Call sendMessage(new content) so `useStream` appends the new user
+  //     bubble + streams a fresh assistant reply — identical to a normal send
+  //     from the UI's perspective. The hook keeps the same conversationId so
+  //     the backend appends rather than creating a new conversation.
+  // Throws on failure so the bubble can display the error inline.
+  const handleEditUserMessage = useCallback(
+    async (messageId: string, nextContent: string): Promise<void> => {
+      await chatApi.editMessage(messageId, { content: nextContent });
+      setMessages((prev) => {
+        const idx = prev.findIndex((m) => m.id === messageId);
+        if (idx < 0) return prev;
+        // Drop the edited message and everything after it; sendMessage will
+        // append the new user bubble + the streaming assistant reply.
+        return prev.slice(0, idx);
+      });
+      await sendMessage(nextContent);
+    },
+    [sendMessage, setMessages],
+  );
+
+  // P1-1 — server-known ids snapshot. Used by the render map to decide which
+  // messages expose the pencil / thumbs / regenerate / sibling-navigator
+  // affordances. Seeded at mount from `initialMessages` AND any sibling ids
+  // they advertise (regenerated variants aren't in the canonical chain but
+  // are still real server rows — see P1-2). The set is mutable: new sibling
+  // ids minted by a successful regenerate / sibling-swap get added here so
+  // the bubble can flip between them without losing its affordances.
+  // Declared ABOVE the regenerate/sibling callbacks so closures capture it
+  // without hitting the TDZ when React re-runs the function body.
+  const persistedIdSet = useRef<Set<string>>(
+    new Set([
+      ...(initialMessages ?? []).map((m) => m.id),
+      ...(initialMessages ?? []).flatMap((m) => m.siblingIds ?? []),
+    ]),
+  ).current;
+
+  // P1-2 — regenerate an assistant reply. We stream a fresh variant via
+  // `POST /chat/messages/{id}/regenerate` and replace the source bubble's
+  // content + id with the new sibling in place. The prior variant stays in
+  // the DB (the navigator's < / > flips back to it via `handleSelectSibling`).
+  //
+  // Because `useStream` owns the top-level `isStreaming` flag used by the
+  // composer, we keep this flow decoupled — a local `regeneratingId` gate
+  // prevents parallel clicks per-bubble without blocking the user from
+  // sending a new turn while the regenerate is in flight (matching ChatGPT's
+  // UX). If the backend rejects ownership, the handler logs and returns.
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const handleRegenerate = useCallback(
+    async (messageId: string): Promise<void> => {
+      if (regeneratingId !== null) return;
+      setRegeneratingId(messageId);
+      try {
+        const res = await regenerateMessage(messageId);
+        if (!res.ok) {
+          // Surface the backend's detail if present (401/404/400/429/5xx) so
+          // the console points at the failure class while the bubble reverts
+          // to its pre-click state.
+          let detail = `${res.status}`;
+          try {
+            const body = (await res.json()) as { detail?: string };
+            if (body.detail) detail = body.detail;
+          } catch {
+            /* non-JSON — keep status only */
+          }
+          // eslint-disable-next-line no-console
+          console.error("Regenerate failed", detail);
+          return;
+        }
+        const reader = res.body?.getReader();
+        if (!reader) return;
+        // Flip the bubble to a thinking state for the duration of the stream.
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === messageId
+              ? { ...m, content: "", isThinking: true }
+              : m,
+          ),
+        );
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let detectedAgent: string | undefined;
+        let newMessageId: string | null = null;
+        let accumulated = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith("data: ")) continue;
+            const jsonStr = trimmed.slice(6);
+            if (jsonStr === "[DONE]") continue;
+            try {
+              const parsed = JSON.parse(jsonStr) as {
+                chunk?: string;
+                done?: boolean;
+                agent_name?: string;
+                regenerated_from?: string;
+                error?: string;
+              };
+              if (parsed.agent_name) {
+                detectedAgent = parsed.agent_name;
+              }
+              if (parsed.chunk !== undefined && parsed.chunk !== "") {
+                accumulated += parsed.chunk;
+                // Mutate the bubble's content in-place. Keep the old id while
+                // streaming; we swap to the server-side id on done below
+                // (or on next hydration).
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === messageId
+                      ? {
+                          ...m,
+                          content: accumulated,
+                          agentName: detectedAgent ?? m.agentName,
+                          isThinking: false,
+                        }
+                      : m,
+                  ),
+                );
+              }
+              if (parsed.done === true) break;
+            } catch {
+              /* best-effort SSE parse */
+            }
+          }
+        }
+        // Fetch the conversation to re-hydrate sibling ids + grab the
+        // newly-persisted assistant id. This is cheaper than tracking the
+        // id through the SSE protocol and keeps the UI source-of-truth in
+        // sync with the server's canonical chain.
+        try {
+          if (conversationId) {
+            const fresh = await chatApi.getConversation(conversationId);
+            const newCanonical = fresh.messages
+              .filter((m) => m.role === "assistant")
+              .find((m) =>
+                (m.sibling_ids ?? []).includes(messageId)
+                  ? true
+                  : false,
+              );
+            if (newCanonical) {
+              newMessageId = newCanonical.id;
+              // Track every known sibling id so the bubble keeps its pencil /
+              // regenerate / navigator affordances after we swap its id in
+              // place. `persistedIdSet.has(msg.id)` is the gate on those
+              // controls, and the newly-minted row isn't in the initial seed.
+              persistedIdSet.add(newCanonical.id);
+              for (const sid of newCanonical.sibling_ids ?? []) {
+                persistedIdSet.add(sid);
+              }
+            }
+            setMessages((prev) => {
+              // Replace the regenerating bubble (by old id) with the fresh
+              // canonical assistant row + its sibling list.
+              return prev.map((m) => {
+                if (m.id !== messageId) return m;
+                const fromServer = fresh.messages.find(
+                  (fm) => fm.id === (newMessageId ?? m.id),
+                );
+                if (!fromServer) {
+                  return { ...m, siblingIds: undefined };
+                }
+                return {
+                  ...m,
+                  id: fromServer.id,
+                  content: fromServer.content,
+                  agentName: fromServer.agent_name ?? m.agentName,
+                  myFeedback: fromServer.my_feedback ?? undefined,
+                  siblingIds:
+                    fromServer.sibling_ids && fromServer.sibling_ids.length > 0
+                      ? fromServer.sibling_ids
+                      : undefined,
+                  isThinking: false,
+                };
+              });
+            });
+          }
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn("Regenerate hydrate failed", err);
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("Regenerate error", err);
+      } finally {
+        setRegeneratingId(null);
+      }
+    },
+    [regeneratingId, setMessages, conversationId, persistedIdSet],
+  );
+
+  // P1-2 — flip the visible assistant bubble to a different sibling.
+  // Fetches the target variant via `/messages/{id}` and swaps the bubble's
+  // id + content in place. The sibling list itself doesn't change, so the
+  // < / > navigator keeps counting correctly.
+  const handleSelectSibling = useCallback(
+    async (currentMessageId: string, targetId: string): Promise<void> => {
+      try {
+        const row = await chatApi.getMessage(targetId);
+        // Defensive: the target id is always a real server row (the API 404s
+        // on anything else), so mark it persisted in case it wasn't in the
+        // initial seed or wasn't discovered via a prior regenerate.
+        persistedIdSet.add(row.id);
+        for (const sid of row.sibling_ids ?? []) {
+          persistedIdSet.add(sid);
+        }
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === currentMessageId
+              ? {
+                  ...m,
+                  id: row.id,
+                  content: row.content,
+                  agentName: row.agent_name ?? m.agentName,
+                  myFeedback: row.my_feedback ?? undefined,
+                  siblingIds:
+                    row.sibling_ids && row.sibling_ids.length > 0
+                      ? row.sibling_ids
+                      : m.siblingIds,
+                  isThinking: false,
+                }
+              : m,
+          ),
+        );
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to load sibling", err);
+      }
+    },
+    [setMessages, persistedIdSet],
+  );
+
+  const [input, setInput] = useState<string>(initialInput ?? "");
+  // P1-6 — local state for pending (uploaded-but-not-yet-sent) attachments.
+  // Each `ChatAttachmentRead` carries the server-assigned id we pass to
+  // `sendMessage` via `attachment_ids` on the next turn. `uploadError` shows
+  // the backend's 415/413 detail inline under the composer.
+  const [pendingAttachments, setPendingAttachments] = useState<ChatAttachmentRead[]>([]);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const lastReportedLength = useRef(0);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const lastReportedLength = useRef(initialMessages?.length ?? 0);
   const prefillApplied = useRef(false);
+  const onInputChangeRef = useRef(onInputChange);
+  onInputChangeRef.current = onInputChange;
+
+  // P0-3: mirror composer input up to the page so it survives conversation
+  // switches (which remount this component). Effect avoids re-rendering the
+  // parent on every keystroke synchronously.
+  useEffect(() => {
+    onInputChangeRef.current(input);
+  }, [input]);
+
+  // P2-1 — smart auto-scroll. Only yank to bottom if the user is already
+  // there; otherwise show a "Jump to bottom" pill.
+  const { isAtBottom, jumpToBottom } = useSmartAutoScroll({
+    messages,
+    isStreaming,
+    containerRef: scrollContainerRef,
+    sentinelRef: messagesEndRef,
+  });
 
   // DISC-38 — when routed from a failing submission (?submission_id=...),
   // seed the composer with a concrete prompt so the student can send it or
@@ -398,72 +1861,177 @@ function ChatArea({ mode, onNewMessage, onModeChange, prefill }: {
     prefillApplied.current = true;
   }, [prefill, messages.length]);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
+  // P0-3: notify the page on the FIRST user turn of a fresh conversation so
+  // it can cache preview/agent for the optimistic sidebar insert that
+  // happens when `onConversationId` fires from the first SSE event. Skipped
+  // for hydrated conversations (which already have server state).
   useEffect(() => {
     if (messages.length > lastReportedLength.current) {
       const last = messages[messages.length - 1];
-      if (last?.role === "user" && messages.length === 1) {
-        onNewMessage(last.content.slice(0, 60), mode.agentName ?? undefined);
+      if (
+        last?.role === "user" &&
+        !initialConversationId &&
+        (initialMessages?.length ?? 0) === 0 &&
+        messages.length === 1
+      ) {
+        onFirstMessage(last.content.slice(0, 60), mode.agentName ?? undefined);
       }
       lastReportedLength.current = messages.length;
     }
-  }, [messages, mode.agentName, onNewMessage]);
+  }, [messages, mode.agentName, onFirstMessage, initialConversationId, initialMessages]);
+
+  // P1-6 — attachment handlers. Uploading happens eagerly on drop/paste/pick
+  // so the user sees the chip immediately; the server-assigned id goes into
+  // `pendingAttachments` and rides along with the next send. On error we
+  // surface the backend's detail (415/413 message) under the composer.
+  const MAX_ATTACHMENTS_PER_MESSAGE = 4;
+  const handleUploadFiles = useCallback(
+    async (files: FileList | File[]) => {
+      setUploadError(null);
+      const incoming = Array.from(files);
+      const remaining = Math.max(
+        0,
+        MAX_ATTACHMENTS_PER_MESSAGE - pendingAttachments.length,
+      );
+      if (remaining <= 0) {
+        setUploadError(
+          `Max ${MAX_ATTACHMENTS_PER_MESSAGE} attachments per message.`,
+        );
+        return;
+      }
+      const slice = incoming.slice(0, remaining);
+      for (const file of slice) {
+        try {
+          const att = await uploadAttachment(file);
+          setPendingAttachments((prev) => [...prev, att]);
+        } catch (err) {
+          setUploadError(
+            err instanceof Error ? err.message : "Upload failed.",
+          );
+        }
+      }
+      if (incoming.length > slice.length) {
+        setUploadError(
+          `Max ${MAX_ATTACHMENTS_PER_MESSAGE} attachments — extras ignored.`,
+        );
+      }
+    },
+    [pendingAttachments.length],
+  );
+
+  const handleRemoveAttachment = useCallback((id: string) => {
+    setPendingAttachments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
     if (!text || isStreaming) return;
     setInput("");
-    await sendMessage(text);
-  }, [input, isStreaming, sendMessage]);
+    // P1-6 — snapshot + clear the chip row before awaiting the stream so the
+    // user immediately sees the composer empty out and can start typing the
+    // next turn without stale chips.
+    const ids = pendingAttachments.map((a) => a.id);
+    setPendingAttachments([]);
+    setUploadError(null);
+    await sendMessage(text, ids.length > 0 ? ids : undefined);
+  }, [input, isStreaming, sendMessage, pendingAttachments]);
+
+  // P0-4 — Esc cancels the in-flight stream from anywhere on the page.
+  // Attached to `window`, not the textarea, because the student may have
+  // scrolled the transcript or clicked a sidebar row before they decide to
+  // stop. Only active while streaming so Esc doesn't steal focus behavior
+  // from other components (e.g. closing menus) at rest.
+  useEffect(() => {
+    if (!isStreaming) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cancel();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isStreaming, cancel]);
+
+  // P2-1 — pill is visible whenever the user is scrolled away from the
+  // live edge and there's transcript to return to. We deliberately skip
+  // the `isStreaming` gate — the pill is equally useful right after a
+  // reply finishes so the student can re-anchor before sending again.
+  const showJumpPill = !isAtBottom && messages.length > 0;
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      <div className="flex-1 overflow-y-auto" aria-live="polite">
+    <div className="relative flex flex-col h-full overflow-hidden">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto" aria-live="polite">
         {messages.length === 0 ? (
           <WelcomeScreen mode={mode} onPrompt={setInput} />
         ) : (
           <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
             {messages.map((msg, i) => {
               const isLast = i === messages.length - 1;
+              // P1-1 — a message is "persisted" (has a real server id the
+              // edit/feedback endpoints can accept) iff it came in via
+              // `initialMessages`. Client-side uuids minted by `useStream`
+              // during a live stream aren't known server-side until the
+              // conversation gets re-hydrated on a remount, so we block edit
+              // on those rows until then.
+              const isPersisted = persistedIdSet.has(msg.id);
+              const canEdit = isPersisted && !isStreaming;
               return msg.role === "user"
-                ? <UserBubble key={msg.id} content={msg.content} />
-                : <AssistantBubble key={msg.id} content={msg.content} agentName={msg.agentName} isStreaming={isStreaming} isLast={isLast} isThinking={msg.isThinking} />;
+                ? <UserBubble
+                    key={msg.id}
+                    messageId={msg.id}
+                    content={msg.content}
+                    canEdit={canEdit}
+                    onEdit={handleEditUserMessage}
+                  />
+                : <AssistantBubble
+                    key={msg.id}
+                    messageId={msg.id}
+                    content={msg.content}
+                    agentName={msg.agentName}
+                    isStreaming={isStreaming}
+                    isLast={isLast}
+                    isThinking={msg.isThinking}
+                    myFeedback={msg.myFeedback}
+                    onSubmitFeedback={isPersisted ? handleSubmitFeedback : undefined}
+                    siblingIds={msg.siblingIds}
+                    onSelectSibling={isPersisted ? handleSelectSibling : undefined}
+                    onRegenerate={isPersisted ? handleRegenerate : undefined}
+                    isRegenerating={regeneratingId === msg.id}
+                  />;
             })}
             <div ref={messagesEndRef} className="h-4" />
           </div>
         )}
       </div>
 
+      {showJumpPill && (
+        <button
+          type="button"
+          onClick={jumpToBottom}
+          aria-label="Jump to bottom"
+          className="absolute bottom-28 right-6 z-10 h-9 w-9 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:opacity-90 transition-opacity"
+        >
+          <ArrowDown className="h-4 w-4" aria-hidden="true" />
+        </button>
+      )}
+
       {error ? (
-        <div className="mx-auto w-full max-w-5xl px-6 pt-3" role="alert">
-          <div className="flex items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
-              <span>Connection lost — your last message didn&apos;t get a response.</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => void retry()}
-              disabled={isStreaming}
-              className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-900 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-100 dark:hover:bg-red-900/40"
-            >
-              <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-              Retry
-            </button>
-          </div>
-        </div>
+        <ErrorBanner error={error} isStreaming={isStreaming} onRetry={retry} />
       ) : null}
 
       <InputBar
         value={input}
         onChange={setInput}
         onSend={() => void handleSend()}
+        onCancel={cancel}
         isStreaming={isStreaming}
         activeMode={mode.agentName}
         onModeChange={onModeChange}
+        attachments={pendingAttachments}
+        onUploadFiles={(files) => void handleUploadFiles(files)}
+        onRemoveAttachment={handleRemoveAttachment}
+        uploadError={uploadError}
       />
     </div>
   );
@@ -472,27 +2040,46 @@ function ChatArea({ mode, onNewMessage, onModeChange, prefill }: {
 // ── Page ─────────────────────────────────────────────────────────
 export default function ChatPage() {
   return (
-    <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading…</div>}>
+    <Suspense fallback={<ChatSkeleton />}>
       <ChatPageInner />
     </Suspense>
   );
 }
 
 function ChatPageInner() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const submissionId = searchParams.get("submission_id");
   const topic = searchParams.get("topic");
+  const urlConvId = searchParams.get("c");
 
   const [activeMode, setActiveMode] = useState<ModeAgent>(null);
-  const [conversations, setConversations] = useState<ConversationEntry[]>([]);
+  // P0-3: conversations are server-truth now. Fetched once on mount; updated
+  // optimistically when the stream endpoint returns a new conversation_id.
+  const [conversations, setConversations] = useState<ConversationListItem[]>([]);
+  const [conversationsLoading, setConversationsLoading] = useState(true);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  const [hydratedMessages, setHydratedMessages] = useState<StreamMessage[] | undefined>(undefined);
   const [chatKey, setChatKey] = useState(0);
   const [prefill, setPrefill] = useState<string | undefined>(undefined);
-  const conversationsHydrated = useRef(false);
+  // P0-3: preserve composer input across conversation switches so a
+  // half-typed thought doesn't get wiped when the user clicks a row.
+  const [composerInput, setComposerInput] = useState<string>("");
+  // P1-8 — sidebar search + archive toggle. `query` drives the input (updated
+  // every keystroke); `debouncedQuery` is what we send to the server so we
+  // don't thrash /conversations on every character.
+  const [query, setQuery] = useState<string>("");
+  const [debouncedQuery, setDebouncedQuery] = useState<string>("");
+  const [showArchived, setShowArchived] = useState<boolean>(false);
   const prefillLoadedFor = useRef<string | null>(null);
+  const initialConvApplied = useRef(false);
+  // Same-tick cache for the first-message preview/agent so we can synthesize
+  // a sidebar entry when the server id arrives in the first SSE event.
+  const pendingFirstMessageRef = useRef<{ preview: string; agent: string | undefined } | null>(null);
 
   // DISC-38 — if arrived from a failing exercise submission, fetch the
   // submission, build a tutor-ready prompt, and switch to Tutor mode.
+  // P0-3: prefill always starts a fresh conversation.
   useEffect(() => {
     if (!submissionId) return;
     if (prefillLoadedFor.current === submissionId) return;
@@ -508,9 +2095,15 @@ function ChatPageInner() {
         const feedback = sub.feedback ? `\n\nFeedback I got:\n${sub.feedback}` : "";
         setPrefill(`${intro}${feedback}`);
         setActiveMode("socratic_tutor");
+        setActiveConvId(null);
+        setHydratedMessages(undefined);
+        setChatKey((k) => k + 1);
       } catch {
         setPrefill("I need help with an exercise I just submitted — it didn't pass. Can you walk me through what might have gone wrong?");
         setActiveMode("socratic_tutor");
+        setActiveConvId(null);
+        setHydratedMessages(undefined);
+        setChatKey((k) => k + 1);
       }
     })();
     return () => {
@@ -518,59 +2111,295 @@ function ChatPageInner() {
     };
   }, [submissionId, topic]);
 
-  // DISC-45 — hydrate the sidebar from localStorage after mount (client-only
-  // to avoid an SSR/client markup mismatch).
+  // P1-8 — debounce the search input so we only fire one /conversations
+  // request ~300ms after the user stops typing.
   useEffect(() => {
-    const stored = readStoredConversations();
-    if (stored.length > 0) setConversations(stored);
-    conversationsHydrated.current = true;
-  }, []);
+    const handle = window.setTimeout(() => {
+      setDebouncedQuery(query.trim());
+    }, 300);
+    return () => window.clearTimeout(handle);
+  }, [query]);
 
+  // P0-3 / P1-8: fetch the sidebar conversation list. Re-runs when the
+  // debounced query or `showArchived` toggle changes so the server does the
+  // ILIKE + archived filtering (and the pinned rows stay floated to the top).
   useEffect(() => {
-    if (!conversationsHydrated.current) return;
-    if (typeof window === "undefined") return;
-    try {
-      const serialized: StoredConversation[] = conversations.map((c) => ({
-        id: c.id,
-        preview: c.preview,
-        agentName: c.agentName,
-        timestamp: c.timestamp.toISOString(),
-      }));
-      window.localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(serialized));
-    } catch {
-      /* quota or disabled storage — ignore */
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await chatApi.listConversations({
+          includeArchived: showArchived,
+          q: debouncedQuery || undefined,
+        });
+        if (cancelled) return;
+        setConversations(list);
+      } catch {
+        // Best-effort: empty sidebar on failure. Could surface a toast here
+        // but the existing error-banner targets stream turns, not sidebar.
+        if (!cancelled) setConversations([]);
+      } finally {
+        if (!cancelled) setConversationsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedQuery, showArchived]);
+
+  // P0-3: load a conversation's messages + hydrate. Used by sidebar clicks
+  // AND the initial-mount `?c=` / last-viewed-id path.
+  const openConversation = useCallback(
+    async (id: string, opts: { pushUrl?: boolean } = { pushUrl: true }) => {
+      try {
+        const conv = await chatApi.getConversation(id);
+        const msgs = conv.messages
+          .map(messageFromServer)
+          .filter((m): m is StreamMessage => m !== null);
+        setHydratedMessages(msgs);
+        setActiveConvId(id);
+        writeLastViewedId(id);
+        if (conv.agent_name) {
+          const match = MODES.find((m) => m.agentName === conv.agent_name);
+          setActiveMode(match?.agentName ?? null);
+        }
+        setChatKey((k) => k + 1);
+        if (opts.pushUrl !== false) {
+          router.replace(`/chat?c=${id}`);
+        }
+      } catch {
+        // Fall back to a fresh conversation if the server returns 404/403.
+        setHydratedMessages(undefined);
+        setActiveConvId(null);
+        writeLastViewedId(null);
+      }
+    },
+    [router],
+  );
+
+  // P0-3: on initial mount, honor `?c=` first, fall back to last-viewed id.
+  useEffect(() => {
+    if (initialConvApplied.current) return;
+    initialConvApplied.current = true;
+    const target = urlConvId ?? readLastViewedId();
+    if (!target) return;
+    void openConversation(target, { pushUrl: !urlConvId });
+  }, [urlConvId, openConversation]);
+
+  // P0-3: sync when the URL `?c=` changes via back/forward.
+  useEffect(() => {
+    if (!initialConvApplied.current) return;
+    if (!urlConvId) {
+      if (activeConvId !== null) {
+        setActiveConvId(null);
+        setHydratedMessages(undefined);
+        setChatKey((k) => k + 1);
+      }
+      return;
     }
-  }, [conversations]);
+    if (urlConvId === activeConvId) return;
+    void openConversation(urlConvId, { pushUrl: false });
+  }, [urlConvId, activeConvId, openConversation]);
 
   const currentMode = MODES.find((m) => m.agentName === activeMode) ?? MODES[0];
 
   const handleModeChange = (m: ModeAgent) => {
     setActiveMode(m);
+    // Mode switch wipes the conversation for now (P2-10 keeps context).
+    setActiveConvId(null);
+    setHydratedMessages(undefined);
+    writeLastViewedId(null);
+    router.replace("/chat");
     setChatKey((k) => k + 1);
   };
 
   const handleNew = () => {
     setActiveMode(null);
-    setChatKey((k) => k + 1);
     setActiveConvId(null);
+    setHydratedMessages(undefined);
+    setComposerInput("");
+    writeLastViewedId(null);
+    router.replace("/chat");
+    setChatKey((k) => k + 1);
   };
 
-  const handleNewMessage = useCallback((preview: string, agent: string | undefined) => {
-    const id = crypto.randomUUID();
-    setActiveConvId(id);
-    setConversations((prev) => [
-      { id, preview, agentName: agent, timestamp: new Date() },
-      ...prev.slice(0, 19),
-    ]);
-  }, []);
+  const handleSelectConversation = (id: string) => {
+    if (id === activeConvId) return;
+    void openConversation(id, { pushUrl: true });
+  };
+
+  // P0-3: cache preview/agent for the optimistic sidebar insert that
+  // happens when `onConversationId` fires from the first SSE event.
+  const handleFirstMessage = useCallback(
+    (preview: string, agent: string | undefined) => {
+      pendingFirstMessageRef.current = {
+        preview: preview.trim(),
+        agent,
+      };
+    },
+    [],
+  );
+
+  const handleConversationId = useCallback(
+    (id: string) => {
+      setActiveConvId(id);
+      writeLastViewedId(id);
+      router.replace(`/chat?c=${id}`);
+      const pending = pendingFirstMessageRef.current;
+      pendingFirstMessageRef.current = null;
+      setConversations((prev) => {
+        // Dedup by id — callback fires once per stream, defend against
+        // React strict-mode double-invoke anyway.
+        if (prev.some((c) => c.id === id)) return prev;
+        const now = new Date().toISOString();
+        const entry: ConversationListItem = {
+          id,
+          title: pending?.preview || "New conversation",
+          agent_name: pending?.agent ?? null,
+          updated_at: now,
+          archived_at: null,
+          pinned_at: null,
+          // User turn (persisted pre-stream) + assistant turn (persisted on
+          // done) = 2 by the time we see an id.
+          message_count: 2,
+        };
+        return [entry, ...prev];
+      });
+    },
+    [router],
+  );
+
+  // P1-8 — inline rename. Patch the list row in-place on success; swallow
+  // errors so the menu collapses cleanly (the row stays at the old title).
+  const handleRenameConversation = useCallback(
+    async (id: string, nextTitle: string): Promise<void> => {
+      const trimmed = nextTitle.trim();
+      if (!trimmed) return;
+      try {
+        const updated = await chatApi.renameConversation(id, trimmed);
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === id
+              ? { ...c, title: updated.title, updated_at: updated.updated_at }
+              : c,
+          ),
+        );
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to rename conversation", err);
+      }
+    },
+    [],
+  );
+
+  // P1-8 — pin/unpin. Server stamps `pinned_at` on true, clears on false.
+  // We mirror that locally so the sidebar re-sorts without waiting for the
+  // next fetch; the ordering matches the server's ORDER BY.
+  const handleTogglePinConversation = useCallback(
+    async (id: string, nextPinned: boolean): Promise<void> => {
+      try {
+        const updated = await chatApi.pinConversation(id, nextPinned);
+        setConversations((prev) => {
+          const next = prev.map((c) =>
+            c.id === id
+              ? { ...c, pinned_at: updated.pinned_at, updated_at: updated.updated_at }
+              : c,
+          );
+          // Resort locally: pinned rows first (pinned_at DESC), then rest by
+          // updated_at DESC. Mirrors the server's ORDER BY.
+          return [...next].sort((a, b) => {
+            if (a.pinned_at && !b.pinned_at) return -1;
+            if (!a.pinned_at && b.pinned_at) return 1;
+            if (a.pinned_at && b.pinned_at) {
+              return a.pinned_at < b.pinned_at ? 1 : -1;
+            }
+            return a.updated_at < b.updated_at ? 1 : -1;
+          });
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to toggle pin", err);
+      }
+    },
+    [],
+  );
+
+  // P1-8 — archive/unarchive. If the current `showArchived` filter would
+  // exclude the freshly-archived row, we drop it from local state; otherwise
+  // we patch `archived_at` in place so the row styling updates.
+  const handleToggleArchiveConversation = useCallback(
+    async (id: string, nextArchived: boolean): Promise<void> => {
+      try {
+        const updated = await chatApi.archiveConversation(id, nextArchived);
+        setConversations((prev) => {
+          if (nextArchived && !showArchived) {
+            return prev.filter((c) => c.id !== id);
+          }
+          return prev.map((c) =>
+            c.id === id
+              ? {
+                  ...c,
+                  archived_at: updated.archived_at,
+                  updated_at: updated.updated_at,
+                }
+              : c,
+          );
+        });
+        // If we archived the currently open conversation, bounce back to the
+        // empty chat so the student isn't left staring at a transcript that's
+        // no longer in their sidebar.
+        if (nextArchived && activeConvId === id && !showArchived) {
+          setActiveConvId(null);
+          setHydratedMessages(undefined);
+          writeLastViewedId(null);
+          router.replace("/chat");
+          setChatKey((k) => k + 1);
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to toggle archive", err);
+      }
+    },
+    [activeConvId, router, showArchived],
+  );
+
+  // P1-8 — soft-delete via server. Remove from local state and, if it was
+  // the active conversation, reset the main pane like "New conversation".
+  const handleDeleteConversation = useCallback(
+    async (id: string): Promise<void> => {
+      try {
+        await chatApi.deleteConversation(id);
+        setConversations((prev) => prev.filter((c) => c.id !== id));
+        if (activeConvId === id) {
+          setActiveConvId(null);
+          setHydratedMessages(undefined);
+          writeLastViewedId(null);
+          router.replace("/chat");
+          setChatKey((k) => k + 1);
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to delete conversation", err);
+      }
+    },
+    [activeConvId, router],
+  );
 
   return (
     <div className="flex h-full overflow-hidden bg-background">
       <Sidebar
         conversations={conversations}
         activeId={activeConvId}
-        onSelect={setActiveConvId}
+        onSelect={handleSelectConversation}
         onNew={handleNew}
+        loading={conversationsLoading}
+        query={query}
+        onQueryChange={setQuery}
+        showArchived={showArchived}
+        onToggleArchived={setShowArchived}
+        onRename={handleRenameConversation}
+        onTogglePin={handleTogglePinConversation}
+        onToggleArchive={handleToggleArchiveConversation}
+        onDelete={handleDeleteConversation}
       />
 
       <div className="flex flex-col flex-1 overflow-hidden min-w-0">
@@ -591,9 +2420,14 @@ function ChatPageInner() {
           <ChatArea
             key={chatKey}
             mode={currentMode}
-            onNewMessage={handleNewMessage}
+            onFirstMessage={handleFirstMessage}
+            onConversationId={handleConversationId}
             onModeChange={handleModeChange}
             prefill={prefill}
+            initialMessages={hydratedMessages}
+            initialConversationId={activeConvId ?? undefined}
+            initialInput={composerInput}
+            onInputChange={setComposerInput}
           />
         </div>
       </div>

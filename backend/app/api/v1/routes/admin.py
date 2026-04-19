@@ -757,3 +757,27 @@ async def get_pulse(
         "new_enrollments_7d": new_enrollments,
         "open_feedback": open_feedback,
     }
+
+
+# P1-5 — weekly rollup of thumbs up/down feedback per agent. The service layer
+# (`ChatService.feedback_rollup`) joins `chat_message_feedback` against
+# `chat_messages` so we can filter by agent name, then aggregates reason
+# counts + sample comments in Python (avoids dialect-specific JSON unnesting).
+@router.get("/chat-feedback")
+async def get_chat_feedback_rollup(
+    agent_name: str | None = Query(default=None, max_length=100),
+    since_days: int = Query(default=7, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(_require_admin),
+) -> dict[str, Any]:
+    """Aggregate thumbs feedback across a recent window for an agent.
+
+    Response shape:
+      `{up_count, down_count, top_reasons: [{reason, count}],
+        sample_comments: [str, ...]}`
+    """
+    from app.services.chat_service import ChatService
+
+    since = datetime.now(UTC) - timedelta(days=since_days)
+    service = ChatService(db)
+    return await service.feedback_rollup(agent_name=agent_name, since=since)

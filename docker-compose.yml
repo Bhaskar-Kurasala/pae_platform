@@ -12,6 +12,10 @@ services:
       - "3002:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8080
+      # Docker Desktop on Windows/WSL2 doesn't forward inotify events into the
+      # container reliably, so Next.js HMR misses file changes. Polling works.
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
     depends_on:
       - backend
     volumes:

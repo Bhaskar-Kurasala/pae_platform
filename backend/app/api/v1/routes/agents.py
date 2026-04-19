@@ -29,7 +29,11 @@ async def chat(
         result = await orchestrator.chat(
             student_id=str(current_user.id),
             message=payload.message,
-            conversation_id=payload.conversation_id,
+            # Orchestrator expects a str (Redis cache key); schema is UUID for
+            # the P0-2 persistence layer, so stringify at the boundary.
+            conversation_id=(
+                str(payload.conversation_id) if payload.conversation_id else None
+            ),
             agent_name=payload.agent_name,
             context=payload.context,
         )

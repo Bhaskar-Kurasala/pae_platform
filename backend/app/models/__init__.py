@@ -1,5 +1,9 @@
 from app.models.agent_action import AgentAction
+from app.models.chat_attachment import ChatAttachment
+from app.models.chat_feedback import ChatMessageFeedback
+from app.models.chat_message import ChatMessage
 from app.models.confidence_report import ConfidenceReport
+from app.models.conversation import Conversation
 from app.models.feedback import Feedback  # noqa: F401
 from app.models.conversation_memory import ConversationMemory
 from app.models.interview_question import InterviewQuestion  # noqa: F401
@@ -42,7 +46,11 @@ __all__ = [
     "QuizResult",
     "MCQBank",
     "AgentAction",
+    "ChatAttachment",
+    "ChatMessage",
+    "ChatMessageFeedback",
     "ConfidenceReport",
+    "Conversation",
     "ConversationMemory",
     "DailyIntention",
     "Payment",
