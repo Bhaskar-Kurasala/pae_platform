@@ -21,6 +21,7 @@ import {
 } from "@/lib/api-client";
 import { PeerGallery } from "@/components/features/peer-gallery";
 import { SelfExplanationModal } from "@/components/features/self-explanation-modal";
+import { PageShell } from "@/components/layouts/page-shell";
 
 const CODE_MIN = 1;
 const CODE_MAX = 20000;
@@ -166,24 +167,24 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
 
   if (exerciseQuery.isLoading) {
     return (
-      <div className="p-6 md:p-8 max-w-3xl mx-auto">
+      <PageShell>
         <Loader2 className="h-5 w-5 animate-spin" />
-      </div>
+      </PageShell>
     );
   }
 
   if (exerciseQuery.error || !exercise) {
     return (
-      <div className="p-6 md:p-8 max-w-3xl mx-auto">
+      <PageShell>
         <div className="rounded-lg bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">
           Exercise not found.
         </div>
-      </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="p-6 md:p-8 max-w-3xl mx-auto space-y-6">
+    <PageShell className="space-y-6">
       <Link
         href="/exercises"
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
@@ -202,7 +203,7 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
       </div>
 
       {exercise.description && (
-        <div className="rounded-xl border bg-card p-5">
+        <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-5">
           <h2 className="font-semibold mb-2">Prompt</h2>
           <pre className="whitespace-pre-wrap text-sm leading-relaxed font-sans">
             {exercise.description}
@@ -211,7 +212,7 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
       )}
 
       {rubricEntries && (
-        <div className="rounded-xl border bg-card p-5">
+        <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-5">
           <h2 className="font-semibold mb-2">Rubric</h2>
           <ul className="text-sm space-y-1">
             {rubricEntries.map(([k, v]) => (
@@ -303,7 +304,7 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
       </form>
 
       {result && (
-        <div className="rounded-xl border bg-card p-5 space-y-3">
+        <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-5 space-y-3">
           <div className="flex items-center gap-2">
             <Star className="h-5 w-5 text-yellow-500" aria-hidden="true" />
             <h2 className="font-semibold">
@@ -345,7 +346,7 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
       )}
 
       {historyQuery.data && historyQuery.data.length > 0 && (
-        <div className="rounded-xl border bg-card p-5">
+        <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-5">
           <h2 className="font-semibold mb-3 inline-flex items-center gap-2">
             <History className="h-4 w-4" /> Previous attempts
           </h2>
@@ -381,7 +382,7 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
       )}
 
       {solutionUnlocked && (
-        <div className="rounded-xl border bg-card p-5 space-y-3">
+        <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-5 space-y-3">
           <div className="flex items-center justify-between gap-3">
             <h2 className="font-semibold inline-flex items-center gap-2">
               <Key className="h-4 w-4 text-primary" aria-hidden="true" />
@@ -438,6 +439,6 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
         onConfirm={(explanation) => void performSubmit(explanation)}
         onCancel={() => setExplainOpen(false)}
       />
-    </div>
+    </PageShell>
   );
 }

@@ -5,6 +5,8 @@ import { useFitScore, useLearningPlan } from "@/lib/hooks/use-career";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { MarkdownRenderer } from "@/components/features/markdown-renderer";
+import { PageShell } from "@/components/layouts/page-shell";
+import { PageHeader } from "@/components/layouts/page-header";
 
 export default function JdFitPage() {
   const [jdText, setJdText] = useState("");
@@ -20,8 +22,8 @@ export default function JdFitPage() {
   };
 
   return (
-    <div className="mx-auto max-w-2xl space-y-4 p-6">
-      <h1 className="text-xl font-semibold">JD Fit Analysis</h1>
+    <PageShell variant="narrow" density="compact" className="space-y-4">
+      <PageHeader title="JD Fit Analysis" />
       <Textarea
         placeholder="Paste job description here…"
         value={jdText}
@@ -71,6 +73,6 @@ export default function JdFitPage() {
           <MarkdownRenderer content={learningPlan.data.plan} />
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }

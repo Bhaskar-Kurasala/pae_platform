@@ -4,14 +4,16 @@ import { useState } from "react";
 import { useInterviewQuestions } from "@/lib/hooks/use-career";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
+import { PageShell } from "@/components/layouts/page-shell";
+import { PageHeader } from "@/components/layouts/page-header";
 
 export default function InterviewBankPage() {
   const [query, setQuery] = useState("");
   const { data: questions = [], isLoading } = useInterviewQuestions(query);
 
   return (
-    <div className="mx-auto max-w-2xl space-y-4 p-6">
-      <h1 className="text-xl font-semibold">Interview Question Bank</h1>
+    <PageShell variant="narrow" density="compact" className="space-y-4">
+      <PageHeader title="Interview Question Bank" />
       <Input
         placeholder="Search questions…"
         value={query}
@@ -51,6 +53,6 @@ export default function InterviewBankPage() {
           </li>
         ))}
       </ul>
-    </div>
+    </PageShell>
   );
 }

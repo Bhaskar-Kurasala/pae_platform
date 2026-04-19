@@ -3,6 +3,8 @@
 import { useMyResume } from "@/lib/hooks/use-career";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MarkdownRenderer } from "@/components/features/markdown-renderer";
+import { PageShell } from "@/components/layouts/page-shell";
+import { PageHeader } from "@/components/layouts/page-header";
 
 export default function ResumePage() {
   const { data: resume, isLoading } = useMyResume();
@@ -16,8 +18,8 @@ export default function ResumePage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-4 p-6">
-      <h1 className="text-xl font-semibold">Resume</h1>
+    <PageShell variant="narrow" density="compact" className="space-y-4">
+      <PageHeader title="Resume" />
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Professional Summary</CardTitle>
@@ -42,6 +44,6 @@ export default function ResumePage() {
           </CardContent>
         </Card>
       )}
-    </div>
+    </PageShell>
   );
 }

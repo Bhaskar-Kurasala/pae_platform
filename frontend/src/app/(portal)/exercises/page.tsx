@@ -5,14 +5,16 @@ import { Code2, ExternalLink, Loader2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { exercisesApi, type ExerciseResponse } from "@/lib/api-client";
+import { PageShell } from "@/components/layouts/page-shell";
+import { PageHeader } from "@/components/layouts/page-header";
 
 const diffBadge: Record<string, string> = {
-  beginner: "bg-green-100 text-green-700",
-  easy: "bg-green-100 text-green-700",
-  intermediate: "bg-yellow-100 text-yellow-700",
-  medium: "bg-yellow-100 text-yellow-700",
-  advanced: "bg-red-100 text-red-700",
-  hard: "bg-red-100 text-red-700",
+  beginner: "bg-muted text-muted-foreground",
+  easy: "bg-muted text-muted-foreground",
+  intermediate: "bg-muted text-foreground/80",
+  medium: "bg-muted text-foreground/80",
+  advanced: "bg-primary/10 text-primary",
+  hard: "bg-primary/10 text-primary",
 };
 
 export default function ExercisesPage() {
@@ -22,13 +24,11 @@ export default function ExercisesPage() {
   });
 
   return (
-    <div className="p-6 md:p-8 max-w-3xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold">Exercises</h1>
-        <p className="text-muted-foreground mt-1">
-          Hands-on coding challenges with AI-powered code review.
-        </p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Exercises"
+        description="Hands-on coding challenges with AI-powered code review."
+      />
 
       {isLoading && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -80,6 +80,6 @@ export default function ExercisesPage() {
           </Card>
         ))}
       </div>
-    </div>
+    </PageShell>
   );
 }

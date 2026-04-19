@@ -17,6 +17,8 @@ import {
   type InterviewProblemSummary,
   type InterviewStartResponse,
 } from "@/lib/api-client";
+import { PageShell } from "@/components/layouts/page-shell";
+import { PageHeader } from "@/components/layouts/page-header";
 
 interface Turn {
   id: string;
@@ -45,10 +47,10 @@ function formatElapsed(ms: number): string {
 
 function VerdictBadge({ verdict }: { verdict: InterviewDebrief["overall_verdict"] }) {
   const map: Record<InterviewDebrief["overall_verdict"], { label: string; tone: string }> = {
-    strong_hire: { label: "Strong hire", tone: "bg-emerald-500/15 text-emerald-500" },
-    lean_hire: { label: "Lean hire", tone: "bg-sky-500/15 text-sky-500" },
-    on_the_fence: { label: "On the fence", tone: "bg-amber-500/15 text-amber-500" },
-    no_hire: { label: "No hire (yet)", tone: "bg-rose-500/15 text-rose-500" },
+    strong_hire: { label: "Strong hire", tone: "bg-primary/10 text-primary" },
+    lean_hire: { label: "Lean hire", tone: "bg-primary/10 text-primary" },
+    on_the_fence: { label: "On the fence", tone: "bg-muted text-foreground/80" },
+    no_hire: { label: "No hire (yet)", tone: "bg-destructive/10 text-destructive" },
   };
   const meta = map[verdict];
   return (
@@ -219,17 +221,13 @@ export default function InterviewPage() {
   // ── Pre-session: problem picker ──
   if (!session) {
     return (
-      <div className="mx-auto max-w-3xl p-6 md:p-8 space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold">Mock interview</h1>
-          <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
-            FAANG-style AI engineering interview with a senior interviewer persona. No hints,
-            no hand-holding. You&apos;ll get a structured debrief at the end with specific
-            observations — not a vanity score.
-          </p>
-        </div>
+      <PageShell className="space-y-6">
+        <PageHeader
+          title="Mock interview"
+          description="FAANG-style AI engineering interview with a senior interviewer persona. No hints, no hand-holding. You'll get a structured debrief at the end with specific observations — not a vanity score."
+        />
 
-        <div className="rounded-xl border bg-card p-5 space-y-4">
+        <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-5 space-y-4">
           <div>
             <label className="text-sm font-medium">Pick a problem (or leave to auto-pick)</label>
             <div className="mt-2 grid gap-2">
@@ -289,7 +287,7 @@ export default function InterviewPage() {
             {starting ? "Starting…" : "Start interview"}
           </button>
         </div>
-      </div>
+      </PageShell>
     );
   }
 
@@ -301,17 +299,17 @@ export default function InterviewPage() {
     ][];
 
     return (
-      <div className="mx-auto max-w-3xl p-6 md:p-8 space-y-6">
-        <div className="flex items-center justify-between gap-3">
-          <h1 className="text-2xl font-bold">Debrief</h1>
-          <VerdictBadge verdict={debrief.overall_verdict} />
-        </div>
+      <PageShell className="space-y-6">
+        <PageHeader
+          title="Debrief"
+          actions={<VerdictBadge verdict={debrief.overall_verdict} />}
+        />
 
-        <div className="rounded-xl border bg-card p-5">
+        <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-5">
           <p className="text-sm leading-relaxed">{debrief.headline}</p>
         </div>
 
-        <div className="rounded-xl border bg-card p-5 space-y-3">
+        <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-5 space-y-3">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Gauge className="h-4 w-4 text-primary" aria-hidden="true" />
             Axes
@@ -336,14 +334,14 @@ export default function InterviewPage() {
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
-          <div className="rounded-xl border bg-card p-4">
+          <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-4">
             <div className="flex items-center gap-2 text-sm font-semibold">
               <Award className="h-4 w-4 text-emerald-500" aria-hidden="true" />
               Strongest moment
             </div>
             <p className="mt-1.5 text-xs leading-relaxed">{debrief.strongest_moment}</p>
           </div>
-          <div className="rounded-xl border bg-card p-4">
+          <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-4">
             <div className="flex items-center gap-2 text-sm font-semibold">
               <Target className="h-4 w-4 text-amber-500" aria-hidden="true" />
               Biggest gap
@@ -364,13 +362,13 @@ export default function InterviewPage() {
         >
           Start another
         </button>
-      </div>
+      </PageShell>
     );
   }
 
   // ── Active interview: chat UI ──
   return (
-    <div className="mx-auto max-w-3xl p-4 md:p-6 h-[calc(100vh-4rem)] flex flex-col gap-4">
+    <PageShell density="compact" fullHeight>
       <header className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-bold">{session.problem.title}</h1>
@@ -402,7 +400,7 @@ export default function InterviewPage() {
 
       <div
         ref={scrollRef}
-        className="flex-1 overflow-auto rounded-xl border bg-card p-4 space-y-3"
+        className="flex-1 overflow-auto rounded-xl ring-1 ring-foreground/10 bg-card p-4 space-y-3"
       >
         {turns.map((t) => (
           <div
@@ -463,6 +461,6 @@ export default function InterviewPage() {
           Send
         </button>
       </form>
-    </div>
+    </PageShell>
   );
 }

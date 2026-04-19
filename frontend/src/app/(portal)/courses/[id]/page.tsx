@@ -17,6 +17,7 @@ import {
   type EnrollmentResponse,
   type ProgressResponse,
 } from "@/lib/api-client";
+import { PageShell } from "@/components/layouts/page-shell";
 
 function completedSet(progress: ProgressResponse | undefined, courseId: string): Set<string> {
   const course = progress?.courses.find((c) => c.course_id === courseId);
@@ -112,11 +113,11 @@ export default function CourseDetailPage({ params }: { params: Promise<{ id: str
 
   if (courseLoading || lessonsLoading) {
     return (
-      <div className="p-8 max-w-3xl mx-auto space-y-4 animate-pulse">
+      <PageShell className="space-y-4 animate-pulse">
         <div className="h-6 bg-muted rounded w-1/2" />
         <div className="h-4 bg-muted rounded w-full" />
         <div className="h-4 bg-muted rounded w-3/4" />
-      </div>
+      </PageShell>
     );
   }
 
@@ -132,7 +133,7 @@ export default function CourseDetailPage({ params }: { params: Promise<{ id: str
   }
 
   return (
-    <div className="p-6 md:p-8 max-w-3xl mx-auto">
+    <PageShell>
       <Link
         href="/courses"
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-6"
@@ -192,7 +193,7 @@ export default function CourseDetailPage({ params }: { params: Promise<{ id: str
 
         {/* CTA: Enroll (not yet enrolled) OR Continue learning (enrolled) */}
         {!isEnrolled ? (
-          <div className="rounded-xl border bg-card p-5 space-y-3">
+          <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-5 space-y-3">
             <div>
               <p className="font-semibold">
                 {isPaid
@@ -229,7 +230,7 @@ export default function CourseDetailPage({ params }: { params: Promise<{ id: str
             </button>
           </div>
         ) : continueLesson ? (
-          <div className="rounded-xl border bg-card p-5 space-y-3">
+          <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-5 space-y-3">
             <div>
               <p className="text-sm font-medium">
                 {completedCount > 0
@@ -250,7 +251,7 @@ export default function CourseDetailPage({ params }: { params: Promise<{ id: str
         ) : null}
 
         {/* Lesson list */}
-        <div className="rounded-xl border bg-card overflow-hidden">
+        <div className="rounded-xl ring-1 ring-foreground/10 bg-card overflow-hidden">
           <div className="px-5 py-3 border-b bg-muted/40">
             <h2 className="font-semibold text-sm">Course Content</h2>
           </div>
@@ -280,6 +281,6 @@ export default function CourseDetailPage({ params }: { params: Promise<{ id: str
           )}
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

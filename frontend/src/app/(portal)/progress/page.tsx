@@ -20,6 +20,8 @@ import { useMySkillStates } from "@/lib/hooks/use-skills";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { activeDaySet } from "@/lib/streak";
+import { PageShell } from "@/components/layouts/page-shell";
+import { PageHeader } from "@/components/layouts/page-header";
 
 // ── Skeleton ─────────────────────────────────────────────────────
 function Skeleton({ className }: { className?: string }) {
@@ -165,7 +167,7 @@ export default function ProgressPage() {
 
   if (isLoading) {
     return (
-      <div className="p-6 md:p-8 max-w-5xl mx-auto space-y-6">
+      <PageShell className="space-y-6">
         <Skeleton className="h-8 w-48" />
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Skeleton className="h-24" />
@@ -174,18 +176,16 @@ export default function ProgressPage() {
         </div>
         <Skeleton className="h-48" />
         <Skeleton className="h-64" />
-      </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="p-6 md:p-8 max-w-5xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Progress</h1>
-        <p className="text-muted-foreground text-sm mt-0.5">
-          Your learning journey at a glance.
-        </p>
-      </div>
+    <PageShell className="space-y-8">
+      <PageHeader
+        title="Progress"
+        description="Your learning journey at a glance."
+      />
 
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -287,18 +287,20 @@ export default function ProgressPage() {
                   axisLine={false}
                 />
                 <Tooltip
+                  cursor={{ fill: "oklch(var(--muted) / 0.4)" }}
                   contentStyle={{
                     borderRadius: "8px",
                     fontSize: "12px",
-                    border: "1px solid #27272A",
-                    background: "#111111",
-                    color: "#FAFAFA",
+                    border: "1px solid oklch(var(--border))",
+                    background: "oklch(var(--popover))",
+                    color: "oklch(var(--popover-foreground))",
+                    boxShadow: "var(--elevation-2)",
                   }}
                   formatter={(v) => [`${String(v)} lessons`, "Completed"]}
                 />
                 <Bar dataKey="count" radius={[4, 4, 0, 0]}>
                   {stats.weeklyData.map((_, i) => (
-                    <Cell key={i} fill="#1D9E75" fillOpacity={0.9} />
+                    <Cell key={i} fill="oklch(var(--primary))" fillOpacity={0.85} />
                   ))}
                 </Bar>
               </BarChart>
@@ -314,17 +316,17 @@ export default function ProgressPage() {
           <CardContent>
             <ResponsiveContainer width="100%" height={200}>
               <RadarChart data={stats.conceptMastery} margin={{ top: 10, right: 20, bottom: 10, left: 20 }}>
-                <PolarGrid stroke="#27272A" />
+                <PolarGrid stroke="oklch(var(--border))" />
                 <PolarAngleAxis
                   dataKey="subject"
-                  tick={{ fontSize: 11, fill: "#A1A1AA" }}
+                  tick={{ fontSize: 11, fill: "oklch(var(--muted-foreground))" }}
                 />
                 <Radar
                   name="Mastery"
                   dataKey="score"
-                  stroke="#1D9E75"
-                  fill="#1D9E75"
-                  fillOpacity={0.25}
+                  stroke="oklch(var(--primary))"
+                  fill="oklch(var(--primary))"
+                  fillOpacity={0.2}
                 />
               </RadarChart>
             </ResponsiveContainer>
@@ -366,6 +368,6 @@ export default function ProgressPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   );
 }

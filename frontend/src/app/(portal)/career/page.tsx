@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Briefcase, FileText, MessageCircle } from "lucide-react";
+import { PageHeader } from "@/components/layouts/page-header";
 
 const CAREER_SECTIONS = [
   {
@@ -26,12 +27,7 @@ const CAREER_SECTIONS = [
 export default function CareerPage() {
   return (
     <div className="p-6">
-      <header className="mb-6">
-        <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
-          Career
-        </p>
-        <h1 className="mt-1 text-xl font-semibold">Job Readiness</h1>
-      </header>
+      <PageHeader eyebrow="Career" title="Job Readiness" />
       <div className="grid gap-4 sm:grid-cols-3">
         {CAREER_SECTIONS.map(({ title, description, href, icon: Icon }) => (
           <Link key={href} href={href} aria-label={title}>

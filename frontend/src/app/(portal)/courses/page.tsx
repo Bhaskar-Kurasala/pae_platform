@@ -5,6 +5,8 @@ import Link from "next/link";
 import { BookOpen, Search } from "lucide-react";
 import { useCourses } from "@/lib/hooks/use-courses";
 import { CourseCard } from "@/components/features/course-card";
+import { PageShell } from "@/components/layouts/page-shell";
+import { PageHeader } from "@/components/layouts/page-header";
 
 type DifficultyFilter = "all" | "beginner" | "intermediate" | "advanced";
 type PriceFilter = "all" | "free" | "paid";
@@ -12,7 +14,7 @@ type SortMode = "default" | "title-asc" | "hours-asc" | "hours-desc" | "price-as
 
 function CourseSkeleton() {
   return (
-    <div className="rounded-xl border bg-card p-5 animate-pulse space-y-3">
+    <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-5 animate-pulse space-y-3">
       <div className="h-4 bg-muted rounded w-3/4" />
       <div className="h-3 bg-muted rounded w-1/3" />
       <div className="h-3 bg-muted rounded w-full" />
@@ -66,16 +68,14 @@ export default function PortalCoursesPage() {
     search.trim() !== "" || difficulty !== "all" || price !== "all" || sort !== "default";
 
   return (
-    <div className="p-6 md:p-8 max-w-6xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold tracking-tight">Courses</h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Production-grade GenAI engineering courses built by practitioners.
-        </p>
-      </div>
+    <PageShell variant="wide">
+      <PageHeader
+        title="Courses"
+        description="Production-grade GenAI engineering courses built by practitioners."
+      />
 
       {/* Filter bar */}
-      <div className="mb-6 rounded-xl border bg-card p-4 grid gap-3 md:grid-cols-[1fr_auto_auto_auto]">
+      <div className="mb-6 rounded-xl ring-1 ring-foreground/10 bg-card p-4 grid gap-3 md:grid-cols-[1fr_auto_auto_auto]">
         <div className="relative">
           <Search
             className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"
@@ -157,7 +157,7 @@ export default function PortalCoursesPage() {
       )}
 
       {!isLoading && courses && courses.length > 0 && filtered.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-16 text-center rounded-xl border bg-card">
+        <div className="flex flex-col items-center justify-center py-16 text-center rounded-xl ring-1 ring-foreground/10 bg-card">
           <BookOpen className="h-10 w-10 text-muted-foreground/30 mb-3" aria-hidden="true" />
           <h2 className="font-semibold mb-1">No courses match your filters</h2>
           <p className="text-muted-foreground text-sm mb-4">
@@ -199,6 +199,6 @@ export default function PortalCoursesPage() {
           </div>
         </>
       )}
-    </div>
+    </PageShell>
   );
 }

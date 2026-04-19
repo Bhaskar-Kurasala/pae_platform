@@ -21,6 +21,8 @@ import { useAuthStore } from "@/stores/auth-store";
 import { activeDaySet, computeStreak } from "@/lib/streak";
 import { api, type CourseResponse } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { PageShell } from "@/components/layouts/page-shell";
+import { PageHeader } from "@/components/layouts/page-header";
 
 // ── Types ────────────────────────────────────────────────────────
 interface AdminStats {
@@ -56,7 +58,7 @@ function KpiCard({
   accent: string;
 }) {
   return (
-    <div className="rounded-xl border bg-card p-5 flex flex-col gap-3">
+    <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-5 flex flex-col gap-3">
       <div className="flex items-start justify-between">
         <div className={cn("rounded-lg p-2.5", accent)}>
           <Icon className="h-4 w-4" aria-hidden="true" />
@@ -88,14 +90,14 @@ function MiniProgress({ value }: { value: number }) {
 // ── Course Card ──────────────────────────────────────────────────
 function CourseCard({ course, progress }: { course: CourseResponse; progress: number }) {
   const difficultyColor: Record<string, string> = {
-    beginner: "bg-emerald-500/10 text-emerald-600",
-    intermediate: "bg-amber-500/10 text-amber-600",
-    advanced: "bg-rose-500/10 text-rose-600",
+    beginner: "bg-muted text-muted-foreground",
+    intermediate: "bg-muted text-foreground/80",
+    advanced: "bg-primary/10 text-primary",
   };
   const badgeClass = difficultyColor[course.difficulty] ?? "bg-muted text-muted-foreground";
 
   return (
-    <div className="rounded-xl border bg-card p-5 flex flex-col gap-4 hover:shadow-md transition-shadow">
+    <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-5 flex flex-col gap-4 hover:ring-foreground/20 hover:shadow-[var(--elevation-2)] transition-[box-shadow,--tw-ring-color] duration-base ease-out-quad">
       <div className="flex items-start justify-between gap-2">
         <h3 className="font-semibold leading-snug line-clamp-2">{course.title}</h3>
         <span className={cn("shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium capitalize", badgeClass)}>
@@ -124,16 +126,16 @@ function CourseCard({ course, progress }: { course: CourseResponse; progress: nu
 
 // ── Agent Quick-Access ────────────────────────────────────────────
 const QUICK_AGENTS = [
-  { name: "socratic_tutor", label: "Socratic Tutor", color: "bg-[#1D9E75]/10 text-[#1D9E75]", hint: "Guided Q&A" },
-  { name: "code_review", label: "Code Review", color: "bg-[#7C3AED]/10 text-[#7C3AED]", hint: "Production readiness" },
-  { name: "adaptive_quiz", label: "Adaptive Quiz", color: "bg-amber-500/10 text-amber-600", hint: "Test your knowledge" },
-  { name: "mock_interview", label: "Mock Interview", color: "bg-rose-500/10 text-rose-600", hint: "FAANG prep" },
-  { name: "progress_report", label: "Progress Report", color: "bg-cyan-500/10 text-cyan-700", hint: "Weekly summary" },
+  { name: "socratic_tutor", label: "Socratic Tutor", color: "bg-primary/10 text-primary", hint: "Guided Q&A" },
+  { name: "code_review", label: "Code Review", color: "bg-muted text-foreground", hint: "Production readiness" },
+  { name: "adaptive_quiz", label: "Adaptive Quiz", color: "bg-muted text-foreground", hint: "Test your knowledge" },
+  { name: "mock_interview", label: "Mock Interview", color: "bg-muted text-foreground", hint: "FAANG prep" },
+  { name: "progress_report", label: "Progress Report", color: "bg-muted text-foreground", hint: "Weekly summary" },
 ];
 
 function AgentShortcuts() {
   return (
-    <div className="rounded-xl border bg-card overflow-hidden">
+    <div className="rounded-xl ring-1 ring-foreground/10 bg-card overflow-hidden">
       <div className="px-5 py-4 border-b">
         <h2 className="font-semibold text-sm">Quick Agents</h2>
       </div>
@@ -233,16 +235,11 @@ export default function DashboardPage() {
   });
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8">
-      {/* Welcome bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            {greeting()}, {user?.full_name?.split(" ")[0] ?? "there"}
-          </h1>
-          <p className="text-muted-foreground text-sm mt-0.5">{today}</p>
-        </div>
-      </div>
+    <PageShell variant="wide" className="space-y-8">
+      <PageHeader
+        title={`${greeting()}, ${user?.full_name?.split(" ")[0] ?? "there"}`}
+        description={today}
+      />
 
       {/* KPI row */}
       {isLoading ? (
@@ -265,21 +262,21 @@ export default function DashboardPage() {
             value={skillsTouched}
             sub={skillsTouched > 0 ? "Growth in motion" : "Explore the skill map"}
             icon={Sparkles}
-            accent="bg-emerald-500/10 text-emerald-600"
+            accent="bg-muted text-foreground"
           />
           <KpiCard
             label="Consistency"
             value={`${streakDays}d`}
             sub={streakDays > 0 ? "Days active in a row" : "Any activity today starts the count"}
             icon={CalendarCheck}
-            accent="bg-[#7C3AED]/10 text-[#7C3AED]"
+            accent="bg-muted text-foreground"
           />
           <KpiCard
             label="Course Progress"
             value={`${overallProgress}%`}
             sub={`${courseCount} course${courseCount !== 1 ? "s" : ""} enrolled`}
             icon={TrendingUp}
-            accent="bg-blue-500/10 text-blue-600"
+            accent="bg-muted text-foreground"
           />
         </div>
       )}
@@ -345,7 +342,7 @@ export default function DashboardPage() {
                 ))}
               </div>
             ) : recentActivity.length > 0 ? (
-              <div className="rounded-xl border bg-card divide-y overflow-hidden">
+              <div className="rounded-xl ring-1 ring-foreground/10 bg-card divide-y overflow-hidden">
                 {recentActivity.map((c) => (
                   <div key={c.course_id} className="px-5 py-3.5">
                     <ActivityItem
@@ -406,6 +403,6 @@ export default function DashboardPage() {
           <AgentShortcuts />
         </aside>
       </div>
-    </div>
+    </PageShell>
   );
 }

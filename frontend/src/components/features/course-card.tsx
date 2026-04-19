@@ -16,9 +16,9 @@ interface CourseCardProps {
 }
 
 const difficultyColor: Record<string, string> = {
-  beginner: "bg-green-100 text-green-700",
-  intermediate: "bg-yellow-100 text-yellow-700",
-  advanced: "bg-red-100 text-red-700",
+  beginner: "bg-muted text-muted-foreground",
+  intermediate: "bg-muted text-foreground/80",
+  advanced: "bg-primary/10 text-primary",
 };
 
 export function CourseCard({

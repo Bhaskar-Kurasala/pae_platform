@@ -22,6 +22,8 @@ import { ReceiptsTimeChart } from "@/components/features/receipts-time-chart";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { AppNotification, GrowthSnapshot } from "@/lib/api-client";
+import { PageShell } from "@/components/layouts/page-shell";
+import { PageHeader } from "@/components/layouts/page-header";
 
 function Skeleton({ className }: { className?: string }) {
   return (
@@ -427,14 +429,11 @@ export default function ReceiptsPage() {
   }, [notifications]);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
-      <header>
-        <h1 className="text-2xl font-semibold text-foreground">Receipts</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          A weekly record of what you actually did — plus a short note from
-          your AI coach. Generated every Sunday.
-        </p>
-      </header>
+    <PageShell density="compact" className="space-y-6">
+      <PageHeader
+        title="Receipts"
+        description="A weekly record of what you actually did — plus a short note from your AI coach. Generated every Sunday."
+      />
 
       <PortfolioAutopsyWidget />
 
@@ -537,6 +536,6 @@ export default function ReceiptsPage() {
           ))}
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }
