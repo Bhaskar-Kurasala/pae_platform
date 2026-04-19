@@ -4,6 +4,7 @@ class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public body?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
@@ -146,7 +147,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     } else {
       message = res.statusText;
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, detail);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
