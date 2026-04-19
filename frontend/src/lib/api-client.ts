@@ -298,11 +298,24 @@ export const authApi = {
   me: () => api.get<UserResponse>("/api/v1/auth/me"),
 };
 
+export interface EnrollmentResponse {
+  id: string;
+  student_id: string;
+  course_id: string;
+  status: string;
+  enrolled_at: string;
+  progress_pct?: number;
+}
+
 export const coursesApi = {
   list: () => api.get<CourseResponse[]>("/api/v1/courses"),
   get: (id: string) => api.get<CourseResponse>(`/api/v1/courses/${id}`),
   lessons: (courseId: string) =>
     api.get<LessonResponse[]>(`/api/v1/courses/${courseId}/lessons`),
+  enroll: (id: string) =>
+    api.post<EnrollmentResponse>(`/api/v1/courses/${id}/enroll`, {}),
+  myEnrollment: (id: string) =>
+    api.get<EnrollmentResponse | null>(`/api/v1/courses/${id}/my-enrollment`),
 };
 
 export const lessonsApi = {

@@ -75,3 +75,16 @@ async def enroll_in_course(
     current_user: User = Depends(get_current_user),
 ) -> Enrollment:
     return await service.enroll_student(course_id, current_user)
+
+
+@router.get("/{course_id}/my-enrollment", response_model=EnrollmentResponse | None)
+async def my_enrollment(
+    course_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Enrollment | None:
+    from app.repositories.enrollment_repository import EnrollmentRepository
+
+    return await EnrollmentRepository(db).get_by_student_and_course(
+        current_user.id, course_id
+    )
