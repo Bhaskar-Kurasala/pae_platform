@@ -60,14 +60,27 @@ services:
     restart: unless-stopped
 
   # ── Celery Beat (scheduled tasks) ──
+  # DISC-1: depends on db (tasks import SQLAlchemy models that bind at import).
+  # `--schedule=/tmp/celerybeat-schedule` + `--pidfile=` avoid the two silent
+  # restart-loop causes: a stale pidfile in CWD (refuses to boot) and an
+  # un-writable schedule shelve file on read-only app layer.
   celery-beat:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: uv run celery -A app.core.celery_app beat --loglevel=info
+    command: >
+      uv run celery -A app.core.celery_app beat
+      --loglevel=info
+      --schedule=/tmp/celerybeat-schedule
+      --pidfile=
     env_file: .env
     depends_on:
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app
     restart: unless-stopped
 
   # ── PostgreSQL ──
