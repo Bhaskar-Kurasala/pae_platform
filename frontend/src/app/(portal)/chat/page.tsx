@@ -1504,6 +1504,9 @@ function AssistantBubble({
   onSaveToNotebook,
   isSaved = false,
   onQuizMe,
+  truncated = false,
+  dbMessageId,
+  onContinue,
 }: {
   messageId: string;
   content: string;
@@ -1545,6 +1548,11 @@ function AssistantBubble({
   isSaved?: boolean;
   // P3-3 — quiz me button callback. Undefined for live-streaming bubbles.
   onQuizMe?: (messageId: string, content: string) => void;
+  // Long-answer continuation. Set when the backend hit its token budget.
+  truncated?: boolean;
+  // Server-assigned DB message id — needed to reference the row for continuation.
+  dbMessageId?: string;
+  onContinue?: (dbMessageId: string, assistantMessageId: string) => void;
 }) {
   const modeLabel = MODES.find((m) => m.agentName === agentName)?.label;
   const showActions = !isThinking && !(isStreaming && isLast) && content.length > 0;
@@ -1603,6 +1611,18 @@ function AssistantBubble({
             <MarkdownRenderer content={content} isStreaming={isStreaming && isLast} />
           )}
         </div>
+        {truncated && !isStreaming && dbMessageId && onContinue && (
+          <button
+            type="button"
+            onClick={() => onContinue(dbMessageId, messageId)}
+            aria-label="Continue writing"
+            data-testid="continue-writing-button"
+            className="mt-2 ml-1 inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-primary border border-primary/30 hover:bg-primary/10 transition-colors"
+          >
+            <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
+            Continue writing
+          </button>
+        )}
         {showActions && (
           <div
             className="mt-1 ml-1 flex items-center gap-1 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity"
@@ -2486,6 +2506,7 @@ function ChatArea({
     isStreaming,
     error,
     sendMessage,
+    continueMessage,
     retry,
     cancel,
     setMessages,
@@ -3133,6 +3154,14 @@ function ChatArea({
                         : undefined
                     }
                     isSaved={savedMessageIds.has(msg.id)}
+                    // Long-answer continuation.
+                    truncated={msg.truncated}
+                    dbMessageId={msg.dbMessageId}
+                    onContinue={
+                      msg.truncated && msg.dbMessageId
+                        ? (dbId, assistantId) => void continueMessage(dbId, assistantId)
+                        : undefined
+                    }
                   />;
             })}
             <div ref={messagesEndRef} className="h-4" />

@@ -235,6 +235,7 @@ async def _token_generator(
     reply_chunks: list[str] = []
     reply_total = 0
     _REPLY_SCAN_CAP = 4000
+    _persisted = False  # guard against double-persist on happy path
     # P2-5 — hover-panel metadata. `start_time` is stamped before the first
     # yield so latency reflects wall-clock from generator entry; `first_token_ms`
     # is set on the first non-empty token; `input_tokens` / `output_tokens` are
@@ -246,6 +247,7 @@ async def _token_generator(
     input_tokens: int | None = None
     output_tokens: int | None = None
     model_id: str | None = None
+    stop_reason: str | None = None
     try:
         # Emit agent identity + conversation id immediately so the UI can
         # (a) show who's responding and (b) capture the conv id for follow-up
@@ -383,6 +385,9 @@ async def _token_generator(
                 )
                 if isinstance(model_in_meta, str) and model_in_meta:
                     model_id = model_in_meta
+                stop_reason_in_meta = chunk_resp_meta.get("stop_reason")
+                if isinstance(stop_reason_in_meta, str) and stop_reason_in_meta:
+                    stop_reason = stop_reason_in_meta
             if token:
                 if first_token_ms is None:
                     first_token_ms = int((time.monotonic() - start_time) * 1000)
@@ -392,8 +397,48 @@ async def _token_generator(
                 payload = json.dumps({"chunk": token, "done": False})
                 yield f"data: {payload}\n\n"
 
-        # Signal completion
-        yield f"data: {json.dumps({'chunk': '', 'done': True})}\n\n"
+        # Signal completion — include truncated flag so the UI can offer a
+        # "Continue writing" button when the model hit its token budget.
+        done_event: dict[str, Any] = {"chunk": "", "done": True}
+        if stop_reason == "max_tokens":
+            done_event["truncated"] = True
+        yield f"data: {json.dumps(done_event)}\n\n"
+
+        # Persist the assistant turn inside the try block so we can emit a
+        # meta event with the saved message_id (needed for continuation).
+        # This is safe because done: true already shipped above.
+        if conversation_id is not None and reply_chunks:
+            full_reply_inner = "".join(reply_chunks)
+            total_duration_ms_inner = int((time.monotonic() - start_time) * 1000)
+            resolved_model_inner = model_id or (
+                settings.minimax_model
+                if getattr(settings, "minimax_api_key", None)
+                else "claude-sonnet-4-6"
+            )
+            with contextlib.suppress(Exception):
+                async with AsyncSessionLocal() as persist_session_inner:
+                    saved_msg = await ChatService(persist_session_inner).record_assistant_message(
+                        conversation_id,
+                        full_reply_inner,
+                        agent_name=agent_name,
+                        parent_id=parent_user_message_id,
+                        first_token_ms=first_token_ms,
+                        total_duration_ms=total_duration_ms_inner,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        model=resolved_model_inner,
+                    )
+                    await persist_session_inner.commit()
+                    _persisted = True
+                    # Emit meta event so UI knows the DB row id for continuation.
+                    meta_payload: dict[str, Any] = {
+                        "message_id": str(saved_msg.id),
+                        "meta": True,
+                        "done": False,
+                    }
+                    if stop_reason == "max_tokens":
+                        meta_payload["truncated"] = True
+                    yield f"data: {json.dumps(meta_payload)}\n\n"
 
         # Post-stream: scan for a disagreement marker and persist a
         # misconception row when the student made a factual claim. Best
@@ -437,7 +482,7 @@ async def _token_generator(
         # reflects wall-clock through stream completion + the finally: hook.
         # When the provider didn't hand us a concrete model, fall back to the
         # configured default so the hover panel still has something to show.
-        if conversation_id is not None and reply_chunks:
+        if not _persisted and conversation_id is not None and reply_chunks:
             full_reply = "".join(reply_chunks)
             total_duration_ms = int((time.monotonic() - start_time) * 1000)
             resolved_model = model_id or (
@@ -595,6 +640,30 @@ async def stream_chat(
             # to the plain-text path below.
             if isinstance(blocks, list):
                 user_content = blocks
+
+        # Long-answer continuation: when the client sends continue_from_message_id,
+        # load the truncated assistant message and inject a continuation directive
+        # so the LLM picks up mid-sentence rather than restarting.
+        if payload.continue_from_message_id is not None:
+            truncated_msg = await chat_service.get_message_for_user(
+                message_id=payload.continue_from_message_id,
+                user_id=current_user.id,
+            )
+            truncated_content = truncated_msg.content or ""
+            # Inject the truncated text as the last assistant turn so the LLM
+            # has full context, then override the user "message" to a directive
+            # to continue. This is invisible to the student — the UI appends
+            # the continuation to the original bubble.
+            conversation_history = list(conversation_history) + [
+                {"role": "assistant", "content": truncated_content},
+            ]
+            message = (
+                "[SYSTEM DIRECTIVE — do not quote back to the student]: "
+                "Your previous response was cut off by the token limit. "
+                "Continue EXACTLY from where you left off — do not repeat any text, "
+                "do not add a transition phrase, do not restart. "
+                "Resume mid-sentence if needed."
+            )
 
         # P1-7 — resolve context refs (submission / lesson / exercise) into a
         # markdown prefix and splice it ahead of the user's typed message.

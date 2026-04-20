@@ -23,6 +23,10 @@ class ChatRequest(BaseModel):
     # exercise). Server-resolved and prepended to the user turn; capped at 3
     # so a chatty client can't flood the prompt.
     context_refs: list[ContextRef] | None = Field(default=None, max_length=3)
+    # Long-answer continuation: when set, the stream will fetch the truncated
+    # assistant message by this id and instruct the LLM to continue from where
+    # it left off, appending seamlessly to the same bubble.
+    continue_from_message_id: uuid.UUID | None = None
 
 
 class ChatResponse(BaseModel):

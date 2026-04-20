@@ -10,7 +10,7 @@ from pydantic import SecretStr
 from app.core.config import settings
 
 
-def build_llm(max_tokens: int = 1024) -> ChatAnthropic:
+def build_llm(max_tokens: int = 4096) -> ChatAnthropic:
     """Return a ChatAnthropic instance pointed at MiniMax or Anthropic."""
     if settings.minimax_api_key:
         return ChatAnthropic(  # type: ignore[call-arg]

@@ -106,6 +106,14 @@ export interface StreamMessage {
   inputTokens?: number | null;
   outputTokens?: number | null;
   model?: string | null;
+  // Long-answer continuation: true when the backend hit its token budget
+  // mid-response. The UI renders a "Continue writing ↓" button below the
+  // bubble; clicking it calls continueMessage(dbMessageId).
+  truncated?: boolean;
+  // Server-assigned DB id for this assistant message — distinct from the
+  // ephemeral in-memory `id`. Populated via the `meta` SSE event after
+  // persistence; used to reference the row when requesting continuation.
+  dbMessageId?: string;
 }
 
 /**
@@ -213,6 +221,14 @@ interface UseStreamReturn {
    * escape hatch for edge cases.
    */
   setConversationId: (id: string | null) => void;
+  /**
+   * Long-answer continuation. When an assistant message comes back with
+   * `truncated: true`, the UI renders a "Continue writing ↓" button.
+   * Clicking it calls this with the server-assigned `dbMessageId` from the
+   * message. The hook streams the continuation and appends it to the same
+   * bubble (no new bubble is added).
+   */
+  continueMessage: (dbMessageId: string, assistantMessageId: string) => Promise<void>;
   /**
    * P1-5: imperative messages setter — lets the page apply optimistic
    * updates (e.g. flipping `myFeedback` after POST `/messages/{id}/feedback`)
@@ -610,6 +626,9 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
                 conversation_id?: string;
                 routing_reason?: string;
                 error?: string;
+                meta?: boolean;
+                message_id?: string;
+                truncated?: boolean;
               };
 
               // P0-3: capture the server-assigned conversation id from the
@@ -674,11 +693,35 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
                 );
               }
 
+              // Meta event: carries the server-assigned DB message id and
+              // truncated flag after persistence (emitted after done: true).
+              if (parsed.meta === true && parsed.message_id) {
+                const dbMsgId = parsed.message_id;
+                const isTruncated = parsed.truncated === true;
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantId
+                      ? { ...msg, dbMessageId: dbMsgId, truncated: isTruncated }
+                      : msg,
+                  ),
+                );
+                continue;
+              }
+
               if (parsed.done === true) {
                 // P2-2 — final synchronous flush so no buffered tokens are
                 // lost; then apply any final agent-name update on top of the
                 // flushed content.
                 flushNow();
+                if (parsed.done && parsed.truncated) {
+                  // Pre-stamp truncated so the button appears immediately;
+                  // the meta event will also set dbMessageId shortly after.
+                  setMessages((prev) =>
+                    prev.map((msg) =>
+                      msg.id === assistantId ? { ...msg, truncated: true } : msg,
+                    ),
+                  );
+                }
                 if (parsed.agent_name) {
                   setMessages((prev) =>
                     prev.map((msg) =>
@@ -759,6 +802,135 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
     [isStreaming, agentName, initialContext],
   );
 
+  const continueMessage = useCallback(
+    async (dbMessageId: string, assistantMessageId: string): Promise<void> => {
+      if (isStreaming) return;
+      const token = getToken();
+      setError(null);
+      setIsStreaming(true);
+      abortControllerRef.current = new AbortController();
+
+      bufferRef.current = "";
+      if (rafIdRef.current != null) {
+        cancelFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+
+      // Flush continuation tokens into the existing assistant bubble (don't
+      // create a new one).
+      const flush = (): void => {
+        rafIdRef.current = null;
+        const chunk = bufferRef.current;
+        if (!chunk) return;
+        bufferRef.current = "";
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === assistantMessageId
+              ? { ...msg, content: msg.content + chunk, truncated: false }
+              : msg,
+          ),
+        );
+      };
+      const flushNow = (): void => {
+        if (rafIdRef.current != null) {
+          cancelFrame(rafIdRef.current);
+          rafIdRef.current = null;
+        }
+        flush();
+      };
+      flushNowRef.current = flushNow;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/agents/stream`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            message: "[continue]",
+            conversation_id: conversationIdRef.current,
+            continue_from_message_id: dbMessageId,
+            context: { conversation_history: buildHistoryPayload(messagesRef.current) },
+          }),
+          signal: abortControllerRef.current.signal,
+        });
+        if (!res.ok) return;
+
+        const reader = res.body?.getReader();
+        if (!reader) return;
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith("data: ")) continue;
+            const jsonStr = trimmed.slice(6);
+            if (jsonStr === "[DONE]") continue;
+            try {
+              const parsed = JSON.parse(jsonStr) as {
+                chunk?: string;
+                done?: boolean;
+                meta?: boolean;
+                message_id?: string;
+                truncated?: boolean;
+              };
+              if (parsed.meta === true && parsed.message_id) {
+                const isTruncated = parsed.truncated === true;
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMessageId
+                      ? { ...msg, dbMessageId: parsed.message_id, truncated: isTruncated }
+                      : msg,
+                  ),
+                );
+                continue;
+              }
+              if (parsed.chunk) {
+                bufferRef.current += parsed.chunk;
+                if (rafIdRef.current == null) {
+                  rafIdRef.current = scheduleFrame(flush);
+                }
+              }
+              if (parsed.done === true) {
+                flushNow();
+                if (parsed.truncated) {
+                  setMessages((prev) =>
+                    prev.map((msg) =>
+                      msg.id === assistantMessageId ? { ...msg, truncated: true } : msg,
+                    ),
+                  );
+                }
+                break;
+              }
+            } catch {
+              // skip parse errors
+            }
+          }
+        }
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") return;
+      } finally {
+        if (rafIdRef.current != null) {
+          cancelFrame(rafIdRef.current);
+          rafIdRef.current = null;
+        }
+        bufferRef.current = "";
+        setIsStreaming(false);
+        abortControllerRef.current = null;
+        currentAssistantIdRef.current = null;
+        flushNowRef.current = () => {};
+      }
+    },
+    [isStreaming],
+  );
+
   const clearMessages = useCallback(() => {
     setMessages([]);
     setError(null);
@@ -830,6 +1002,7 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
     isStreaming,
     error,
     sendMessage,
+    continueMessage,
     retry,
     clearMessages,
     cancel,
