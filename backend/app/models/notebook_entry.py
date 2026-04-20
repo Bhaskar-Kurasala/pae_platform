@@ -29,13 +29,22 @@ class NotebookEntry(Base, UUIDMixin):
         nullable=False,
         index=True,
     )
-    # message_id / conversation_id are stored as plain strings because the
-    # chat_messages table may be soft-deleted and we still want to keep the
-    # notebook entry readable.
+    # message_id / conversation_id stored as plain strings — notebook entries
+    # outlive the source chat (no FK, so chat deletion never cascades here).
     message_id: Mapped[str] = mapped_column(String, nullable=False)
     conversation_id: Mapped[str] = mapped_column(String, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Student's own annotation — transforms "AI said X" → "I learned X"
+    user_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Where this note came from: "chat" | "quiz" | "interview" | "career"
+    source_type: Mapped[str | None] = mapped_column(String(50), nullable=True, default="chat")
+    # Topic / course context passed from the UI at save time
+    topic: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Spaced-review tracking — NULL means never reviewed
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

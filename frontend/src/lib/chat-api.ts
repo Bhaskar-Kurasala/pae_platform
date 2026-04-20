@@ -146,6 +146,10 @@ export interface NotebookEntryOut {
   conversation_id: string;
   content: string;
   title: string | null;
+  user_note: string | null;
+  source_type: string | null;
+  topic: string | null;
+  last_reviewed_at: string | null;
   created_at: string;
 }
 
@@ -209,20 +213,30 @@ export const chatApi = {
       `/api/v1/chat/context-suggestions${qs}`,
     );
   },
-  // P3-4 — notebook: save / list / delete bookmarked assistant messages.
+  // P3-4 — notebook: save / list / patch / delete / mark-reviewed bookmarked messages.
   saveToNotebook: (entry: {
     messageId: string;
     conversationId: string;
     content: string;
     title?: string;
+    sourceType?: string;
+    topic?: string;
   }) =>
     api.post<NotebookEntryOut>("/api/v1/chat/notebook", {
       message_id: entry.messageId,
       conversation_id: entry.conversationId,
       content: entry.content,
       title: entry.title ?? null,
+      source_type: entry.sourceType ?? "chat",
+      topic: entry.topic ?? null,
     }),
   listNotebook: () => api.get<NotebookEntryOut[]>("/api/v1/chat/notebook"),
+  patchNotebookEntry: (
+    entryId: string,
+    patch: { user_note?: string | null; title?: string | null; topic?: string | null },
+  ) => api.patch<NotebookEntryOut>(`/api/v1/chat/notebook/${entryId}`, patch),
+  markNotebookReviewed: (entryId: string) =>
+    api.post<NotebookEntryOut>(`/api/v1/chat/notebook/${entryId}/review`, {}),
   deleteNotebookEntry: (entryId: string) =>
     api.del(`/api/v1/chat/notebook/${entryId}`),
   // P3-2 — send an assistant message to the spaced_repetition agent and
