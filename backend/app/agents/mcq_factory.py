@@ -26,7 +26,7 @@ class MCQFactoryAgent(BaseAgent):
     ]
     model = "claude-sonnet-4-6"
 
-    def _build_llm(self, max_tokens: int = 2048):
+    def _build_llm(self, max_tokens: int = 4096):
         from app.agents.llm_factory import build_llm
         return build_llm(max_tokens=max_tokens)
 
