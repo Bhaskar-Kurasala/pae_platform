@@ -59,6 +59,16 @@ function getToken(): string | null {
   }
 }
 
+// P1-7 — one-click context references the user can attach to a turn. The
+// backend resolves each ref server-side (fetching the submission code /
+// lesson title+description / exercise description) and prepends a markdown
+// prefix to the HumanMessage content. Mirrors `ContextRef` in
+// backend/app/schemas/context.py.
+export interface ContextRef {
+  kind: "submission" | "lesson" | "exercise";
+  id: string;
+}
+
 export interface StreamMessage {
   id: string;
   role: "user" | "assistant";
@@ -77,6 +87,25 @@ export interface StreamMessage {
   // never mutates this — page-level code flips it via `setMessages` after
   // a successful regenerate stream.
   siblingIds?: string[];
+  // P2-4 — why the backend picked the agent for this reply. Shape:
+  //   "keyword:<pattern>"  | a fast-path keyword hit (e.g. "keyword:explain")
+  //   "llm_classifier"     | claude-haiku classified the request
+  //   "user_selected"      | student picked a mode chip before sending
+  //   "user_override"      | student used the "change" dropdown on regenerate
+  //   "default_fallback"   | nothing matched and LLM path was unavailable
+  //   "regenerate"         | regenerate kept the original agent
+  // Captured from the first SSE event and rendered under the agent name
+  // in AssistantBubble.
+  routingReason?: string;
+  // P2-5 — hover-panel metadata. Populated by `messageFromServer` when the
+  // bubble is hydrated from a persisted conversation; absent during the
+  // live stream (backend stamps metadata only on persistence). Undefined
+  // renders as a "—" placeholder in the popover.
+  firstTokenMs?: number | null;
+  totalDurationMs?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  model?: string | null;
 }
 
 /**
@@ -100,6 +129,11 @@ export interface StreamError {
   kind: "auth" | "rate_limit" | "server" | "network";
   message: string;
   retryAfterMs?: number;
+  // P2-7 — server-parsed Retry-After in seconds, mirrored from either the
+  // header or the `retry_after_seconds` JSON field on a 429 body. Retained
+  // alongside `retryAfterMs` so the banner can render "retry in 0:42" with
+  // integer seconds without re-dividing by 1000 on every tick.
+  retryAfterSeconds?: number;
 }
 
 interface UseStreamOptions {
@@ -143,8 +177,20 @@ interface UseStreamReturn {
    * rows returned by `POST /api/v1/chat/attachments`; the backend binds each
    * to the persisted user message and injects their bytes into the Claude
    * content blocks.
+   *
+   * P2-10 — `agentOverride` lets the caller override the hook's `agentName`
+   * option for this single turn. Passing `null` explicitly forces "auto"
+   * (keyword routing) even when the hook was constructed with a concrete
+   * agent. Omitting the arg falls back to the hook's `agentName`. This is
+   * what enables mode-switch-without-remount: the page updates a local
+   * `selectedMode` state and passes it into `sendMessage` per-turn.
    */
-  sendMessage: (text: string, attachmentIds?: string[]) => Promise<void>;
+  sendMessage: (
+    text: string,
+    attachmentIds?: string[],
+    agentOverride?: string | null,
+    contextRefs?: ContextRef[],
+  ) => Promise<void>;
   retry: () => Promise<void>;
   clearMessages: () => void;
   /**
@@ -175,6 +221,21 @@ interface UseStreamReturn {
    * an updater function.
    */
   setMessages: React.Dispatch<React.SetStateAction<StreamMessage[]>>;
+  /**
+   * P2-7 — stream rate-limit budget. Server writes
+   * `X-RateLimit-Remaining` on every successful response; this value is
+   * refreshed after each `sendMessage` and stays cached between turns so
+   * the composer pill stays responsive. `null` before the first successful
+   * turn of a session.
+   */
+  rateLimitRemaining: number | null;
+  /**
+   * P2-7 — seconds to wait before retrying a rate-limited request. Set
+   * alongside a `rate_limit` error from either the `Retry-After` header
+   * or the JSON body's `retry_after_seconds` field. Cleared back to
+   * `null` on the next successful send.
+   */
+  retryAfterSeconds: number | null;
 }
 
 // P0-5 — parse Retry-After per RFC 7231 §7.1.3. slowapi doesn't currently set
@@ -229,6 +290,15 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
   const [messages, setMessages] = useState<StreamMessage[]>(initialMessages ?? []);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<StreamError | null>(null);
+  // P2-7 — last-known rate-limit budget. Refreshed from `X-RateLimit-Remaining`
+  // on every successful stream. Persists between turns so the composer pill
+  // can render immediately without waiting for a second response cycle.
+  const [rateLimitRemaining, setRateLimitRemaining] = useState<number | null>(
+    null,
+  );
+  const [retryAfterSeconds, setRetryAfterSeconds] = useState<number | null>(
+    null,
+  );
   // P0-3: conversationId lives in state so callers re-render on change, but
   // sendMessage needs a synchronous read — mirror into a ref the same way
   // messagesRef does for history.
@@ -282,11 +352,29 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
   }, []);
 
   const sendMessage = useCallback(
-    async (text: string, attachmentIds?: string[]): Promise<void> => {
+    async (
+      text: string,
+      attachmentIds?: string[],
+      agentOverride?: string | null,
+      contextRefs?: ContextRef[],
+    ): Promise<void> => {
       if (isStreaming) return;
+
+      // P2-10 — per-turn agent override. `undefined` means "use the hook's
+      // agentName option"; an explicit `null` means "force auto routing" even
+      // when the hook was constructed with a concrete agent.
+      const effectiveAgentName: string | undefined =
+        agentOverride === undefined
+          ? agentName
+          : (agentOverride ?? undefined);
 
       const token = getToken();
       setError(null);
+      // P2-7 — any prior rate-limit countdown only applied to the last
+      // request. Clearing here means a fresh send resets the banner state
+      // the moment the user tries again — the 429 path below will set it
+      // again if the server is still rate-limited.
+      setRetryAfterSeconds(null);
 
       // P0-1: snapshot prior messages BEFORE we append the new user bubble, so
       // the payload's `conversation_history` excludes the message the backend
@@ -313,7 +401,7 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
         id: assistantId,
         role: "assistant",
         content: "",
-        agentName: agentName,
+        agentName: effectiveAgentName,
         isThinking: true,
         timestamp: new Date(),
       };
@@ -338,7 +426,7 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
         cancelFrame(rafIdRef.current);
         rafIdRef.current = null;
       }
-      const detectedAgentNameRef = { current: agentName as string | undefined };
+      const detectedAgentNameRef = { current: effectiveAgentName as string | undefined };
 
       const flush = (): void => {
         rafIdRef.current = null;
@@ -382,7 +470,7 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
           },
           body: JSON.stringify({
             message: text,
-            agent_name: agentName ?? null,
+            agent_name: effectiveAgentName ?? null,
             // P0-3: pass the server-side conversation id once we know it so
             // the backend appends to the existing row instead of creating a
             // new one. First turn on a fresh conversation sends `null` and
@@ -395,6 +483,11 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
             ...(attachmentIds && attachmentIds.length > 0
               ? { attachment_ids: attachmentIds }
               : {}),
+            // P1-7 — optional list of kind-tagged context refs. Capped at
+            // 3 on the backend; we just pass through what the UI picked.
+            ...(contextRefs && contextRefs.length > 0
+              ? { context_refs: contextRefs }
+              : {}),
             context: {
               ...(initialContext ?? {}),
               ...(contextProviderRef.current?.() ?? {}),
@@ -406,6 +499,17 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
           signal: abortControllerRef.current.signal,
         });
         responseReceived = true;
+
+        // P2-7 — refresh the rate-limit budget from response headers. We do
+        // this BEFORE the status branching so a 429 also updates the pill to
+        // "0 left" rather than leaving the stale pre-429 value visible.
+        const remainingHeader = res.headers.get("X-RateLimit-Remaining");
+        if (remainingHeader != null) {
+          const n = Number.parseInt(remainingHeader, 10);
+          if (Number.isFinite(n) && n >= 0) {
+            setRateLimitRemaining(n);
+          }
+        }
 
         if (!res.ok) {
           // P0-5 — branch on status code so the UI can pick the right
@@ -427,12 +531,26 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
           }
 
           if (res.status === 429) {
-            const retryAfterMs = parseRetryAfter(res.headers.get("Retry-After"));
+            // P2-7 — prefer the server's explicit `retry_after_seconds` in
+            // the JSON body (integer, computed from slowapi window stats)
+            // over the raw header parse. Fall back to Retry-After when the
+            // body didn't carry the field (older deploys, proxy-injected
+            // 429s, etc.) so the countdown is always truthful.
+            const serverSeconds = (
+              body as { retry_after_seconds?: number } | null
+            )?.retry_after_seconds;
+            const retryAfterMs =
+              typeof serverSeconds === "number" && serverSeconds >= 0
+                ? serverSeconds * 1000
+                : parseRetryAfter(res.headers.get("Retry-After"));
+            const retryAfterSec = Math.ceil(retryAfterMs / 1000);
+            setRetryAfterSeconds(retryAfterSec);
             setMessages((prev) => prev.filter((m) => m.id !== assistantId));
             setError({
               kind: "rate_limit",
               message: detail ?? "Too many requests — please slow down.",
               retryAfterMs,
+              retryAfterSeconds: retryAfterSec,
             });
             return;
           }
@@ -464,7 +582,7 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
 
         const decoder = new TextDecoder();
         let buffer = "";
-        let detectedAgentName: string | undefined = agentName;
+        let detectedAgentName: string | undefined = effectiveAgentName;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -490,6 +608,7 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
                 done?: boolean;
                 agent_name?: string;
                 conversation_id?: string;
+                routing_reason?: string;
                 error?: string;
               };
 
@@ -518,6 +637,21 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
               if (parsed.agent_name) {
                 detectedAgentName = parsed.agent_name;
                 detectedAgentNameRef.current = parsed.agent_name;
+              }
+
+              // P2-4 — stamp routing_reason on the assistant bubble as
+              // soon as the first event carries it. Done outside the
+              // chunk-dependent branch so the reason shows up even on a
+              // slow LLM where chunks haven't arrived yet.
+              if (parsed.routing_reason) {
+                const reason = parsed.routing_reason;
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantId
+                      ? { ...msg, routingReason: reason }
+                      : msg,
+                  ),
+                );
               }
 
               if (parsed.chunk !== undefined && parsed.chunk !== "") {
@@ -702,6 +836,8 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
     conversationId,
     setConversationId,
     setMessages,
+    rateLimitRemaining,
+    retryAfterSeconds,
   };
 }
 

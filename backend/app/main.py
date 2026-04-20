@@ -40,21 +40,63 @@ def create_app() -> FastAPI:
     app.state.limiter = limiter
 
     async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+        # P2-7 — compute Retry-After + X-RateLimit-Remaining so the client can
+        # drive a live countdown banner instead of guessing a fallback. slowapi
+        # stores the matching RateLimitItem on `request.state.view_rate_limit`
+        # once the pre-flight check runs; `get_window_stats` returns
+        # (reset_epoch, remaining).
+        import time as _time
+
+        retry_after_seconds = 60
+        remaining = 0
+        limit_amount: int | None = None
+        view_limit = getattr(request.state, "view_rate_limit", None)
+        if view_limit is not None:
+            try:
+                item, key_parts = view_limit
+                reset_epoch, rem = limiter.limiter.get_window_stats(item, *key_parts)
+                retry_after_seconds = max(1, int(reset_epoch - _time.time()))
+                remaining = max(0, int(rem))
+                limit_amount = item.amount
+            except Exception:
+                pass
+
+        headers = {
+            "Retry-After": str(retry_after_seconds),
+            "X-RateLimit-Remaining": str(remaining),
+        }
+        if limit_amount is not None:
+            headers["X-RateLimit-Limit"] = str(limit_amount)
+
         return JSONResponse(
             status_code=429,
-            content={"detail": f"Rate limit exceeded: {exc.detail}"},
+            content={
+                "detail": f"Rate limit exceeded: {exc.detail}",
+                "retry_after_seconds": retry_after_seconds,
+            },
+            headers=headers,
         )
 
     app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)  # type: ignore[arg-type]
     app.add_middleware(SlowAPIMiddleware)
 
-    # CORS — only allow configured origins
+    # CORS — only allow configured origins.
+    # P2-7 — expose rate-limit headers so the browser JS can read them
+    # from cross-origin responses; without this, `res.headers.get(
+    # "X-RateLimit-Remaining")` returns null in the browser even though
+    # the header is on the wire.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=[
+            "X-RateLimit-Limit",
+            "X-RateLimit-Remaining",
+            "X-RateLimit-Reset",
+            "Retry-After",
+        ],
     )
 
     # Health (root level)

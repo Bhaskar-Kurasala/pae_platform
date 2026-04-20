@@ -45,6 +45,14 @@ class ChatMessage(Base, UUIDMixin):
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
     agent_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # P2-5 — hover-panel metadata stamped by the stream endpoint. Every
+    # column is nullable so historical rows / stream-error paths / missing
+    # provider usage data render as "—" in the UI instead of breaking.
+    first_token_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # P1-3 forward-compat: nullable self-FK for branching. No relationship
     # defined yet — the tree traversal lands with that ticket.
     parent_id: Mapped[uuid.UUID | None] = mapped_column(

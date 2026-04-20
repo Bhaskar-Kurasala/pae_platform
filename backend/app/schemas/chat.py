@@ -48,6 +48,21 @@ class ChatMessageEditRequest(BaseModel):
     content: str = Field(min_length=1, max_length=10000)
 
 
+class ChatRegenerateRequest(BaseModel):
+    """P2-4 — optional body for POST /chat/messages/{id}/regenerate.
+
+    When the student clicks the routing-reason dropdown and picks a
+    different agent, the UI POSTs ``{agent_override: "socratic_tutor"}``
+    so the regenerate stream runs under that agent instead of re-using
+    the original assistant's `agent_name`. The value is validated against
+    ``ROUTABLE_AGENTS`` at the route layer; unknown names fall back to
+    the default regenerate path (no 422 — we'd rather keep the stream
+    alive than surface a hard error for a stale UI choice).
+    """
+
+    agent_override: str | None = Field(default=None, max_length=100)
+
+
 class ChatFeedbackCreate(BaseModel):
     """P1-5 — body for POST /chat/messages/{id}/feedback.
 
@@ -84,6 +99,15 @@ class ChatMessageRead(BaseModel):
     token_count: int | None = None
     parent_id: uuid.UUID | None = None
     created_at: datetime
+    # P2-5 — hover-panel metadata persisted by the stream endpoint once the
+    # reply completes. Rendered on the assistant bubble as e.g.
+    # `model · 120ms first / 2.3s total · 450 in / 890 out tokens`. All
+    # nullable so historical rows + stream-error paths stay valid.
+    first_token_ms: int | None = None
+    total_duration_ms: int | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    model: str | None = None
     # P1-5 — the current user's own feedback on this message, if any. The
     # service layer joins `chat_message_feedback` for the logged-in user so
     # the chat UI can hydrate thumb state without an N+1 round trip. Remains

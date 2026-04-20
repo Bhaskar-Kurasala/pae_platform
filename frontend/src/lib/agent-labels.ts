@@ -127,3 +127,86 @@ export function getAgentLabel(
     colorClass: AGENT_CATEGORY_COLORS[label.category],
   };
 }
+
+// ── P2-4: grouping for the override dropdown ───────────────────────
+//
+// The routing-override dropdown renders all 20 agents grouped by the 5
+// categories from `AGENT_LABELS`. Keep the category order stable so the
+// dropdown reads the same way every time; within a category, agents are
+// alphabetized by display name for scan-ability.
+
+export interface AgentGroup {
+  category: AgentCategory;
+  /** Title-case category label shown as a dropdown section header. */
+  label: string;
+  agents: Array<{ name: string; displayName: string }>;
+}
+
+const CATEGORY_ORDER: AgentCategory[] = [
+  "learning",
+  "creation",
+  "analytics",
+  "career",
+  "engagement",
+];
+
+const CATEGORY_LABELS: Record<AgentCategory, string> = {
+  creation: "Creation",
+  learning: "Learning",
+  analytics: "Analytics",
+  career: "Career",
+  engagement: "Engagement",
+};
+
+/**
+ * P2-4 — return all 20 agents grouped by category, in a stable order.
+ * Used by the "Routed to X · change" dropdown in AssistantBubble so the
+ * student can pick any agent to regenerate under.
+ */
+export function getAgentGroups(): AgentGroup[] {
+  const buckets: Record<AgentCategory, AgentGroup["agents"]> = {
+    creation: [],
+    learning: [],
+    analytics: [],
+    career: [],
+    engagement: [],
+  };
+  for (const [name, label] of Object.entries(AGENT_LABELS)) {
+    buckets[label.category].push({ name, displayName: label.displayName });
+  }
+  for (const cat of CATEGORY_ORDER) {
+    buckets[cat].sort((a, b) => a.displayName.localeCompare(b.displayName));
+  }
+  return CATEGORY_ORDER.map((cat) => ({
+    category: cat,
+    label: CATEGORY_LABELS[cat],
+    agents: buckets[cat],
+  }));
+}
+
+/**
+ * P2-4 — render the short "reason" snippet shown after the agent name
+ * (e.g. "Routed to Tutor · keyword:explain · change"). The raw backend
+ * value is preserved for the most-informative cases; opinionated shorter
+ * strings replace the less-useful telemetry labels so the UI reads well.
+ */
+export function formatRoutingReason(reason?: string | null): string | null {
+  if (!reason) return null;
+  const r = reason.trim();
+  if (!r) return null;
+  if (r.startsWith("keyword:")) return r;
+  switch (r) {
+    case "llm_classifier":
+      return "classifier";
+    case "user_selected":
+      return "you picked";
+    case "user_override":
+      return "override";
+    case "default_fallback":
+      return "default";
+    case "regenerate":
+      return "regenerate";
+    default:
+      return r;
+  }
+}

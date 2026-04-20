@@ -292,6 +292,11 @@ class ChatService:
         *,
         agent_name: str | None = None,
         parent_id: uuid.UUID | None = None,
+        first_token_ms: int | None = None,
+        total_duration_ms: int | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        model: str | None = None,
     ) -> ChatMessage:
         """Persist a completed assistant turn.
 
@@ -300,6 +305,10 @@ class ChatService:
         regenerate flow trivial (siblings = assistant rows sharing a parent).
         Legacy calls without parent_id continue to work — siblings are
         skipped for those rows.
+
+        P2-5: the five metadata fields are optional hover-panel stats
+        stamped by the stream endpoint. All nullable so historical
+        callers + stream-error paths stay valid.
         """
         return await self.repo.add_message(
             conversation_id=conversation_id,
@@ -308,6 +317,32 @@ class ChatService:
             agent_name=agent_name,
             token_count=estimate_tokens(content),
             parent_id=parent_id,
+            first_token_ms=first_token_ms,
+            total_duration_ms=total_duration_ms,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            model=model,
+        )
+
+    async def stamp_message_metadata(
+        self,
+        message_id: uuid.UUID,
+        *,
+        first_token_ms: int | None = None,
+        total_duration_ms: int | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        model: str | None = None,
+    ) -> ChatMessage | None:
+        """P2-5 — delegate to the repo to update hover-panel metadata on an
+        existing assistant row."""
+        return await self.repo.update_message_metadata(
+            message_id,
+            first_token_ms=first_token_ms,
+            total_duration_ms=total_duration_ms,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            model=model,
         )
 
     async def list_messages_page(
@@ -414,23 +449,31 @@ class ChatService:
         user_id: uuid.UUID,
         payload: ChatMessageEditRequest,
     ) -> ChatMessage:
-        """Rewrite a user turn mid-conversation without losing the audit trail.
+        """P1-3 — fork a user turn into a new branch.
+
+        Rather than overwriting the original (the P1-1 "hard trim"
+        behaviour), we preserve the original user message as the root of a
+        branch tree. Each edit becomes a *sibling* of the original: a new
+        `user` row whose `parent_id` points at the original. The
+        `< 1 / N >` navigator (see `list_user_sibling_map`) lets the
+        student flip between every variant of the turn.
 
         Flow:
           1) Verify ownership (404 on mismatch / missing / foreign).
           2) Reject non-user messages with 400 — editing an assistant reply
-             is the P1-2 "regenerate" flow, not this endpoint.
-          3) Soft-delete every message in the same conversation whose
-             `created_at >= target.created_at` (including the target row
-             itself — we preserve it via `deleted_at`, not by mutating
-             `content`, so the original text stays auditable).
-          4) Insert a new user row with the edited content so the client can
-             resume streaming from it.
+             is the P1-2 "regenerate" flow.
+          3) Soft-delete only the *downstream* rows (assistant reply +
+             anything after) so the new branch can re-stream cleanly. The
+             original user row stays live so the navigator can flip back
+             to it. Soft-deletion starts strictly *after* `msg.created_at`
+             — the target row itself is preserved.
+          4) Insert a new user row with `parent_id = msg.id` (the edit
+             chain root). The canonical-chain renderer picks the latest
+             user-sibling at each level, so this new row replaces the
+             original in the default transcript view.
 
-        The frontend is expected to (a) clear its trailing messages to match
-        the server state, then (b) call the stream endpoint with the returned
-        id's content + the same conversation_id so the backend appends the
-        new assistant turn.
+        The frontend drops trailing messages from local state and calls the
+        stream endpoint to append the new assistant turn.
         """
         msg = await self._message_owned_by(message_id, user_id)
         if msg.role != "user":
@@ -439,14 +482,18 @@ class ChatService:
                 detail="Only user messages can be edited; use regenerate for assistant replies.",
             )
 
-        # Step 3 — soft-delete the target + every downstream row.
-        deleted_count = await self.repo.soft_delete_messages_from(
-            msg.conversation_id, from_created_at=msg.created_at
+        # Step 3 — soft-delete rows strictly *after* the target so the
+        # original user turn is preserved as a navigable sibling. Prior
+        # behaviour (P1-1) soft-deleted the target too; P1-3 keeps it.
+        deleted_count = await self.repo.soft_delete_messages_after(
+            msg.conversation_id, after_created_at=msg.created_at
         )
 
-        # Step 4 — append a fresh user message with the edited content.
-        # `parent_id` points at the original so the (future P1-3) branch
-        # traversal can walk back to the source of the edit.
+        # Step 4 — append a fresh user message as a sibling of the original.
+        # `parent_id=msg.id` makes it a child in the user-edit chain; the
+        # canonical-chain renderer picks the latest chain member per branch
+        # root, so this row becomes the visible turn while the original
+        # remains reachable via the `< 1 / N >` navigator.
         new_msg = await self.repo.add_message(
             conversation_id=msg.conversation_id,
             role="user",

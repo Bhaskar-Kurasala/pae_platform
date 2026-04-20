@@ -1,9 +1,11 @@
 /**
- * P1-1 — frontend tests for the user-message edit flow.
+ * P1-1 / P1-3 — frontend tests for the user-message edit + branch flow.
  *
- * The page hydrates a conversation from `chatApi.getConversation`, the user
- * clicks the Edit pencil on a user bubble, types a replacement, and hits
- * Save. We then verify:
+ * P1-1: the page hydrates a conversation from `chatApi.getConversation`, the
+ * user clicks the Edit pencil on a user bubble, types a replacement, and
+ * hits Save. The original + the edit both persist as sibling rows (P1-3).
+ *
+ * We verify:
  *   1) The bubble renders the inline editor on Edit click
  *   2) Cancel restores the original view without calling the API
  *   3) Save → POST /chat/messages/{id}/edit with the new content → trailing
@@ -12,6 +14,10 @@
  *   4) An empty draft keeps the editor open and shows an inline error
  *      without calling the API
  *   5) Non-persisted (live-streamed) user messages don't expose the pencil
+ *   6) P1-3: edited user bubbles expose a `< k / N >` navigator
+ *   7) P1-3: clicking `<` on a user navigator swaps in the prior branch via
+ *      `chatApi.getMessage`
+ *   8) P1-3: unedited turns keep the navigator hidden
  */
 import {
   afterEach,
@@ -77,6 +83,7 @@ vi.mock("@/lib/chat-api", () => ({
     postFeedback: vi.fn(),
     getFeedback: vi.fn(),
     editMessage: vi.fn(),
+    getMessage: vi.fn(),
   },
 }));
 
@@ -113,6 +120,7 @@ type ChatApiMock = {
   postFeedback: Mock;
   getFeedback: Mock;
   editMessage: Mock;
+  getMessage: Mock;
 };
 
 const mockedChatApi = chatApi as unknown as ChatApiMock;
@@ -204,6 +212,7 @@ describe("Chat page — P1-1 edit user message", () => {
     mockedChatApi.listConversations.mockReset();
     mockedChatApi.getConversation.mockReset();
     mockedChatApi.editMessage.mockReset();
+    mockedChatApi.getMessage.mockReset();
     currentSearchParams = new URLSearchParams();
     for (const cb of searchParamsSubscribers) cb();
     window.localStorage.clear();
@@ -385,5 +394,132 @@ describe("Chat page — P1-1 edit user message", () => {
     // But no Edit pencil is rendered because `isPersisted` is false for
     // client-generated ids (the SSE stream we mocked doesn't carry message ids).
     expect(screen.queryByTestId("edit-open")).not.toBeInTheDocument();
+  });
+
+  // ── P1-3 — user-bubble sibling navigator ──────────────────────────
+  // After a user edits their turn, the original + the edit both persist as
+  // siblings. The bubble surfaces a `< k / N >` navigator next to Edit so
+  // students can flip between branches.
+  it("renders < 1 / N > navigator on a user bubble with sibling ids", async () => {
+    setSearchParamsFromPath("/chat?c=c1");
+    mockedChatApi.listConversations.mockResolvedValue([
+      makeConversation("c1", "Preloaded"),
+    ]);
+    // Seed hydration with a user message that already has two siblings.
+    mockedChatApi.getConversation.mockResolvedValue({
+      id: "c1",
+      user_id: "u1",
+      agent_name: null,
+      title: "Preloaded",
+      archived_at: null,
+      pinned_at: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      messages: [
+        {
+          id: "m-user-edit",
+          conversation_id: "c1",
+          role: "user",
+          content: "second attempt",
+          agent_name: null,
+          token_count: null,
+          parent_id: "m-user-1",
+          created_at: new Date().toISOString(),
+          sibling_ids: ["m-user-1", "m-user-edit"],
+        },
+        {
+          id: "m-asst-2",
+          conversation_id: "c1",
+          role: "assistant",
+          content: "second reply",
+          agent_name: null,
+          token_count: null,
+          parent_id: "m-user-edit",
+          created_at: new Date().toISOString(),
+        },
+      ],
+    });
+
+    render(<ChatPage />);
+
+    // Once hydrated, the user bubble should expose its navigator.
+    await waitFor(() => {
+      expect(screen.getByText("second attempt")).toBeInTheDocument();
+    });
+    const navigators = screen.getAllByTestId("sibling-navigator");
+    expect(navigators.length).toBeGreaterThanOrEqual(1);
+    // `< 2 / 2 >` because `m-user-edit` is the second (current) entry.
+    expect(
+      navigators.some((n) => /2 \/ 2/.test(n.textContent ?? "")),
+    ).toBe(true);
+  });
+
+  it("clicking < on a user bubble fetches the prior sibling via getMessage", async () => {
+    setSearchParamsFromPath("/chat?c=c1");
+    mockedChatApi.listConversations.mockResolvedValue([
+      makeConversation("c1", "Preloaded"),
+    ]);
+    mockedChatApi.getConversation.mockResolvedValue({
+      id: "c1",
+      user_id: "u1",
+      agent_name: null,
+      title: "Preloaded",
+      archived_at: null,
+      pinned_at: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      messages: [
+        {
+          id: "m-user-edit",
+          conversation_id: "c1",
+          role: "user",
+          content: "second attempt",
+          agent_name: null,
+          token_count: null,
+          parent_id: "m-user-1",
+          created_at: new Date().toISOString(),
+          sibling_ids: ["m-user-1", "m-user-edit"],
+        },
+      ],
+    });
+    mockedChatApi.getMessage.mockResolvedValue({
+      id: "m-user-1",
+      conversation_id: "c1",
+      role: "user",
+      content: "first attempt",
+      agent_name: null,
+      token_count: null,
+      parent_id: null,
+      created_at: new Date(Date.now() - 1000).toISOString(),
+      sibling_ids: ["m-user-1", "m-user-edit"],
+    });
+
+    render(<ChatPage />);
+    await waitFor(() => {
+      expect(screen.getByText("second attempt")).toBeInTheDocument();
+    });
+
+    // Click the "Previous response" button inside the navigator.
+    const prevButtons = screen.getAllByRole("button", {
+      name: /previous response/i,
+    });
+    await act(async () => {
+      fireEvent.click(prevButtons[0]);
+    });
+
+    await waitFor(() => {
+      expect(mockedChatApi.getMessage).toHaveBeenCalledWith("m-user-1");
+    });
+    await waitFor(() => {
+      expect(screen.getByText("first attempt")).toBeInTheDocument();
+    });
+  });
+
+  it("does not render the navigator when a user bubble has no siblings", async () => {
+    await renderHydrated();
+    // The seeded conversation has no `sibling_ids` on the user row, so the
+    // navigator stays hidden (only Edit is present).
+    expect(screen.queryByTestId("sibling-navigator")).not.toBeInTheDocument();
+    expect(screen.getByTestId("edit-open")).toBeInTheDocument();
   });
 });

@@ -14,6 +14,7 @@ SSE format:
 
 import contextlib
 import json
+import time
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -24,7 +25,8 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from app.agents.llm_factory import build_llm
-from app.agents.moa import ROUTABLE_AGENTS, _keyword_route
+from app.agents.moa import ROUTABLE_AGENTS, _keyword_route, keyword_route_with_reason
+from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.rate_limit import limiter
 from app.core.security import get_current_user
@@ -34,6 +36,7 @@ from app.services.attachment_service import AttachmentService
 from app.services.attachment_storage import build_default_storage
 from app.services.chat_service import ChatService
 from app.services.confidence_service import CONFIDENCE_CALIBRATION_OVERLAY
+from app.services.context_attach_service import ContextAttachService
 from app.services.disagreement_service import (
     DISAGREEMENT_OVERLAY,
     maybe_log_disagreement,
@@ -90,6 +93,44 @@ def _socratic_overlay_for(level: int) -> str | None:
     return _SOCRATIC_STRICT_OVERLAY
 
 log = structlog.get_logger()
+
+# P2-7 — The stream rate limit is read both for building response headers on
+# the happy path AND by the RateLimitExceeded handler in main.py to compute
+# Retry-After seconds. Centralizing the string keeps the two paths in sync.
+# Keeping the historical 30/minute so existing tests and rate-limiter fixtures
+# (backend/tests/conftest.py:reset_rate_limiter) keep working unchanged.
+STREAM_RATE_LIMIT = "30/minute"
+
+
+def _rate_limit_headers(request: Request) -> dict[str, str]:
+    """Compute ``X-RateLimit-*`` + ``Retry-After`` headers from slowapi state.
+
+    P2-7 — slowapi stores the matching ``RateLimitItem`` + key list on
+    ``request.state.view_rate_limit`` once ``@limiter.limit(...)`` has run its
+    pre-flight check. ``limiter.get_window_stats`` returns ``(reset_epoch,
+    remaining)`` which is exactly what we need to tell the client how many
+    stream calls are left and when the window resets. We build a dict rather
+    than mutating a response directly because ``StreamingResponse`` wants its
+    headers passed at construction time. Defensive — any failure returns an
+    empty dict so the stream response still ships.
+    """
+    view_limit = getattr(request.state, "view_rate_limit", None)
+    if view_limit is None:
+        return {}
+    try:
+        item, key_parts = view_limit
+        reset_epoch, remaining = limiter.limiter.get_window_stats(item, *key_parts)
+    except Exception as exc:  # pragma: no cover — defensive path
+        log.warning("stream.rate_limit_header_compute_failed", error=str(exc))
+        return {}
+    retry_after = max(0, int(reset_epoch - time.time()))
+    return {
+        "X-RateLimit-Limit": str(item.amount),
+        "X-RateLimit-Remaining": str(max(0, int(remaining))),
+        "X-RateLimit-Reset": str(int(reset_epoch)),
+        "Retry-After": str(retry_after),
+    }
+
 
 router = APIRouter(prefix="/agents", tags=["agents-stream"])
 
@@ -194,6 +235,17 @@ async def _token_generator(
     reply_chunks: list[str] = []
     reply_total = 0
     _REPLY_SCAN_CAP = 4000
+    # P2-5 — hover-panel metadata. `start_time` is stamped before the first
+    # yield so latency reflects wall-clock from generator entry; `first_token_ms`
+    # is set on the first non-empty token; `input_tokens` / `output_tokens` are
+    # pulled from the langchain chunk's `usage_metadata` (streaming providers
+    # emit them on the final chunk). `model_id` falls back to the configured
+    # settings value when the chunk doesn't carry `response_metadata.model`.
+    start_time = time.monotonic()
+    first_token_ms: int | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    model_id: str | None = None
     try:
         # Emit agent identity + conversation id immediately so the UI can
         # (a) show who's responding and (b) capture the conv id for follow-up
@@ -314,7 +366,26 @@ async def _token_generator(
                 )
             else:
                 token = str(content)
+            # P2-5 — scrape token usage + model id from each chunk. langchain
+            # streaming providers accumulate counts in `usage_metadata`, usually
+            # stamping final totals on the last chunk. `response_metadata.model`
+            # carries the concrete model id the provider resolved to.
+            chunk_usage = getattr(chunk, "usage_metadata", None)
+            if isinstance(chunk_usage, dict):
+                if chunk_usage.get("input_tokens") is not None:
+                    input_tokens = int(chunk_usage["input_tokens"])
+                if chunk_usage.get("output_tokens") is not None:
+                    output_tokens = int(chunk_usage["output_tokens"])
+            chunk_resp_meta = getattr(chunk, "response_metadata", None)
+            if isinstance(chunk_resp_meta, dict):
+                model_in_meta = chunk_resp_meta.get("model") or chunk_resp_meta.get(
+                    "model_name"
+                )
+                if isinstance(model_in_meta, str) and model_in_meta:
+                    model_id = model_in_meta
             if token:
+                if first_token_ms is None:
+                    first_token_ms = int((time.monotonic() - start_time) * 1000)
                 if reply_total < _REPLY_SCAN_CAP:
                     reply_chunks.append(token)
                     reply_total += len(token)
@@ -362,8 +433,18 @@ async def _token_generator(
         # so the conversation isn't left asymmetric (user msg saved, assistant
         # missing). Best-effort; never raise to the client because the stream
         # has already flushed `done: true`.
+        # P2-5 — compute total duration at the last possible moment so it
+        # reflects wall-clock through stream completion + the finally: hook.
+        # When the provider didn't hand us a concrete model, fall back to the
+        # configured default so the hover panel still has something to show.
         if conversation_id is not None and reply_chunks:
             full_reply = "".join(reply_chunks)
+            total_duration_ms = int((time.monotonic() - start_time) * 1000)
+            resolved_model = model_id or (
+                settings.minimax_model
+                if getattr(settings, "minimax_api_key", None)
+                else "claude-sonnet-4-6"
+            )
             with contextlib.suppress(Exception):
                 async with AsyncSessionLocal() as persist_session:
                     await ChatService(persist_session).record_assistant_message(
@@ -371,12 +452,17 @@ async def _token_generator(
                         full_reply,
                         agent_name=agent_name,
                         parent_id=parent_user_message_id,
+                        first_token_ms=first_token_ms,
+                        total_duration_ms=total_duration_ms,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        model=resolved_model,
                     )
                     await persist_session.commit()
 
 
 @router.post("/stream")
-@limiter.limit("30/minute")
+@limiter.limit(STREAM_RATE_LIMIT)
 async def stream_chat(
     request: Request,
     payload: ChatRequest,
@@ -387,16 +473,28 @@ async def stream_chat(
     Uses keyword routing to classify the request, then streams directly from
     Claude without the full MOA LangGraph pipeline overhead.
 
-    Rate limited to 30/minute per user.
+    Rate limited per ``STREAM_RATE_LIMIT``. Response carries
+    ``X-RateLimit-Remaining`` + ``Retry-After`` so the UI can surface a
+    "messages left" pill and honour backoff without guessing (P2-7).
     """
     message = payload.message
     explicit_agent = payload.agent_name
 
-    # Classify intent (keyword route first, then default)
+    # Classify intent (keyword route first, then default).
+    # P2-4 — capture WHY we picked the agent so the UI can render
+    # "Routed to Tutor · keyword:explain · change" on the first event.
+    routing_reason: str | None
     if explicit_agent and explicit_agent in ROUTABLE_AGENTS:
         agent_name = explicit_agent
+        routing_reason = "user_selected"
     else:
-        agent_name = _keyword_route(message) or "socratic_tutor"
+        kw = keyword_route_with_reason(message)
+        if kw is not None:
+            agent_name = kw[0]
+            routing_reason = f"keyword:{kw[1]}"
+        else:
+            agent_name = "socratic_tutor"
+            routing_reason = "default_fallback"
 
     log.info(
         "stream.request",
@@ -498,6 +596,37 @@ async def stream_chat(
             if isinstance(blocks, list):
                 user_content = blocks
 
+        # P1-7 — resolve context refs (submission / lesson / exercise) into a
+        # markdown prefix and splice it ahead of the user's typed message.
+        # Keeps the attach mechanism independent of P1-6's storage-backed
+        # attachments; ownership is enforced inside the service (404 on a
+        # foreign submission ref).
+        if payload.context_refs:
+            ctx_service = ContextAttachService(session)
+            prefix = await ctx_service.build_prefix(
+                user_id=current_user.id, refs=payload.context_refs
+            )
+            if prefix:
+                if isinstance(user_content, list):
+                    # Splice prefix into the final text block so image blocks
+                    # (if any) still lead the list.
+                    spliced = False
+                    for block in user_content:
+                        if block.get("type") == "text":
+                            block["text"] = (
+                                prefix + "\n\n" + block.get("text", "")
+                            )
+                            spliced = True
+                            break
+                    if not spliced:
+                        user_content.append(
+                            {"type": "text", "text": prefix}
+                        )
+                else:
+                    # No attachments — prepend to the plain message and pass
+                    # through the string path (cheapest, LLM-friendly).
+                    message = prefix + "\n\n" + message
+
         await session.commit()
 
     return StreamingResponse(
@@ -513,7 +642,7 @@ async def stream_chat(
             current_user.id,
             persisted_conversation_id,
             persisted_user_message_id,
-            None,  # extra_first_event
+            {"routing_reason": routing_reason} if routing_reason else None,
             user_content,
         ),
         media_type="text/event-stream",
@@ -525,6 +654,10 @@ async def stream_chat(
             "X-Scaffolding-Level": scaffolding.label if scaffolding else "none",
             "X-Tutor-Mode": tutor_mode,
             "X-Socratic-Level": str(socratic_level),
+            "X-Routing-Reason": routing_reason or "unknown",
+            # P2-7 — rate-limit awareness. Merged last so the computed values
+            # override any accidental duplicate keys above.
+            **_rate_limit_headers(request),
         },
     )
 
@@ -535,7 +668,7 @@ async def stream_chat(
 
 
 @chat_stream_router.post("/messages/{assistant_message_id}/regenerate")
-@limiter.limit("30/minute")
+@limiter.limit(STREAM_RATE_LIMIT)
 async def regenerate_assistant_message(
     request: Request,
     assistant_message_id: uuid.UUID,
@@ -551,13 +684,35 @@ async def regenerate_assistant_message(
     message id — that's what makes the set of assistant messages with the
     same `parent_id` the "siblings" behind the <1/N> navigator.
 
+    P2-4 — accepts an optional JSON body: ``{agent_override: "<agent>"}``.
+    When present AND the name is in ``ROUTABLE_AGENTS``, the regenerate
+    runs under that agent instead of re-using the original assistant's
+    `agent_name`. Unknown overrides are ignored (fall back to the
+    original-agent path) rather than 422 — the UI is authoritative for
+    validation and we prefer a degraded-but-successful regenerate over a
+    hard error from a stale agent list.
+
     Returns 404 on a missing or foreign message; 400 if the target isn't
     an assistant row.
     """
+    # P2-4 — optional body. Read defensively because the legacy client
+    # (pre-P2-4) POSTs with no body at all; FastAPI would 422 if we
+    # required a Pydantic model here.
+    agent_override: str | None = None
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if isinstance(body, dict):
+        raw_override = body.get("agent_override")
+        if isinstance(raw_override, str) and raw_override.strip():
+            agent_override = raw_override.strip()
+
     conversation_history: list[dict[str, Any]] = []
     parent_msg_id: uuid.UUID
     conversation_id: uuid.UUID
     agent_name: str
+    routing_reason: str = "regenerate"
     scaffolding: ScaffoldingLevel | None = None
     tutor_mode = "standard"
     socratic_level = 0
@@ -571,15 +726,20 @@ async def regenerate_assistant_message(
         )
         conversation_id = assistant_msg.conversation_id
         parent_msg_id = parent_msg.id
-        # Resolve the agent: prefer the original assistant's agent_name so
-        # the regenerated reply matches the visual label; fall back to the
-        # conversation's own agent_name or keyword-route on the user prompt.
-        agent_name = (
-            assistant_msg.agent_name
-            or (await chat_service.repo.get_conversation(conversation_id)).agent_name  # type: ignore[union-attr]
-            or _keyword_route(parent_msg.content)
-            or "socratic_tutor"
-        )
+        # P2-4 — user-picked override wins when valid; else fall back to
+        # the original resolution chain (original agent → conversation
+        # agent → keyword route → socratic_tutor default).
+        if agent_override and agent_override in ROUTABLE_AGENTS:
+            agent_name = agent_override
+            routing_reason = "user_override"
+        else:
+            agent_name = (
+                assistant_msg.agent_name
+                or (await chat_service.repo.get_conversation(conversation_id)).agent_name  # type: ignore[union-attr]
+                or _keyword_route(parent_msg.content)
+                or "socratic_tutor"
+            )
+            routing_reason = "regenerate"
         if agent_name not in ROUTABLE_AGENTS and agent_name not in _STREAM_SYSTEM_PROMPTS:
             agent_name = "socratic_tutor"
 
@@ -633,7 +793,10 @@ async def regenerate_assistant_message(
             current_user.id,
             conversation_id,
             parent_msg_id,
-            {"regenerated_from": str(assistant_message_id)},
+            {
+                "regenerated_from": str(assistant_message_id),
+                "routing_reason": routing_reason,
+            },
         ),
         media_type="text/event-stream",
         headers={
@@ -642,5 +805,8 @@ async def regenerate_assistant_message(
             "X-Agent-Name": agent_name,
             "X-Conversation-Id": str(conversation_id),
             "X-Regenerated-From": str(assistant_message_id),
+            "X-Routing-Reason": routing_reason,
+            # P2-7 — same rate-limit awareness as the main stream endpoint.
+            **_rate_limit_headers(request),
         },
     )

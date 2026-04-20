@@ -27,9 +27,11 @@ from app.schemas.chat import (
     ConversationRead,
     ConversationUpdate,
 )
+from app.schemas.context import ContextSuggestionsResponse
 from app.services.attachment_service import AttachmentService
 from app.services.attachment_storage import AttachmentStorage, build_default_storage
 from app.services.chat_service import ChatService
+from app.services.context_attach_service import ContextAttachService
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -100,16 +102,28 @@ def _message_to_read(
     msg: ChatMessageRead | object,
     feedback_map: dict[uuid.UUID, object],
     sibling_map: dict[uuid.UUID, list[uuid.UUID]] | None = None,
+    user_sibling_map: dict[uuid.UUID, list[uuid.UUID]] | None = None,
 ) -> ChatMessageRead:
     """Project a ChatMessage model row to the read schema, inlining the
-    caller's own feedback (P1-5) and assistant sibling ids (P1-2).
+    caller's own feedback (P1-5) and sibling ids (P1-2 for assistants,
+    P1-3 for user turns).
 
     `feedback_map` is keyed by message id; absent entries render
-    `my_feedback=None`. `sibling_map` is keyed by the user parent id; for
+    `my_feedback=None`.
+
+    `sibling_map` (assistants) is keyed by the user parent id; for
     assistant messages whose parent has more than one child we inline the
     full sibling id list so the UI can render the `< 1 / N >` navigator
-    without an extra round-trip. Single-child sets stay empty (ChatGPT-
-    style: no navigator when there's nothing to switch between)."""
+    without an extra round-trip.
+
+    `user_sibling_map` (P1-3) is keyed by the user message id itself and
+    holds the full edit chain `[root, ...edits]`. For user messages with
+    more than one chain member we inline the chain so the UI can render a
+    `< 1 / N >` navigator on user bubbles and let the student flip
+    between edit variants.
+
+    Single-member sets stay empty (ChatGPT-style: no navigator when
+    there's nothing to switch between)."""
     read = ChatMessageRead.model_validate(msg)
     updates: dict[str, object] = {}
     fb = feedback_map.get(read.id)  # type: ignore[arg-type]
@@ -123,6 +137,10 @@ def _message_to_read(
         siblings = sibling_map.get(read.parent_id, [])
         if len(siblings) > 1:
             updates["sibling_ids"] = list(siblings)
+    if user_sibling_map is not None and read.role == "user":
+        chain = user_sibling_map.get(read.id, [])
+        if len(chain) > 1:
+            updates["sibling_ids"] = list(chain)
     if updates:
         read = read.model_copy(update=updates)
     return read
@@ -131,44 +149,91 @@ def _message_to_read(
 def _canonical_messages(
     messages: list[object],
     sibling_map: dict[uuid.UUID, list[uuid.UUID]],
+    user_sibling_map: dict[uuid.UUID, list[uuid.UUID]] | None = None,
 ) -> list[object]:
-    """P1-2 — collapse a flat message list to the "canonical" chain.
+    """P1-2 / P1-3 — collapse a flat message list to the canonical chain.
 
-    For each user parent we keep exactly one assistant reply — the most
-    recent sibling (last element of `sibling_map[parent_id]`). Because a
-    regenerated sibling gets a `created_at` stamped at regen time, a naive
-    `ORDER BY created_at` would float the new variant past subsequent
-    user turns. We fix that here by *positioning* each canonical
-    assistant immediately after its user parent in the output list, so
-    the chat UI still reads top-to-bottom in conversation order even
-    when the user regenerates a mid-conversation turn.
+    Assistant siblings (P1-2): for each user parent we keep exactly one
+    assistant reply — the most recent sibling (last element of
+    `sibling_map[parent_id]`). Because a regenerated sibling gets a
+    `created_at` stamped at regen time, a naive `ORDER BY created_at`
+    would float the new variant past subsequent user turns. We fix that
+    here by *positioning* each canonical assistant immediately after its
+    user parent in the output list, so the chat UI still reads top-to-
+    bottom in conversation order even when the user regenerates a mid-
+    conversation turn.
+
+    User siblings (P1-3): when the student edits a user turn we fork a
+    new user row whose `parent_id` points at the original (chain root).
+    The canonical user per chain is the latest element of
+    `user_sibling_map[root]`. We drop the other chain members from the
+    output so the default transcript shows one user bubble per turn; the
+    `< 1 / N >` navigator can still flip between variants via the ids in
+    `sibling_ids`.
 
     User / system messages keep their original ordering. Assistant rows
     without a parent (legacy rows) also pass through in place — they
     aren't part of any sibling set, so there's nothing to re-anchor.
     """
-    if not sibling_map:
+    if not sibling_map and not user_sibling_map:
         return messages
+
+    # --- user-chain canonicalisation (P1-3) ------------------------------
+    # For each user chain, pick the latest member as the canonical turn and
+    # mark every other chain member as "to drop" so the default transcript
+    # shows one bubble per turn.
+    canonical_user_ids: set[uuid.UUID] = set()
+    dropped_user_ids: set[uuid.UUID] = set()
+    canonical_user_per_root: dict[uuid.UUID, uuid.UUID] = {}
+    if user_sibling_map:
+        # Each chain is shared by every id in it — dedupe by the root (first
+        # element) so we don't recompute the canonical for each chain id.
+        seen_roots: set[uuid.UUID] = set()
+        for chain in user_sibling_map.values():
+            if not chain:
+                continue
+            root_id = chain[0]
+            if root_id in seen_roots:
+                continue
+            seen_roots.add(root_id)
+            latest = chain[-1]
+            canonical_user_per_root[root_id] = latest
+            canonical_user_ids.add(latest)
+            for cid in chain:
+                if cid != latest:
+                    dropped_user_ids.add(cid)
+
+    # --- assistant-sibling canonicalisation (P1-2) -----------------------
     canonical_per_parent: dict[uuid.UUID, uuid.UUID] = {
-        parent_id: ids[-1] for parent_id, ids in sibling_map.items() if ids
+        parent_id: ids[-1] for parent_id, ids in (sibling_map or {}).items() if ids
     }
-    # Index every message by id so we can inline the canonical sibling at
-    # the parent's position even if the DB row wasn't in the passed-in
-    # slice (unlikely at the current 200-msg limit, but defensive).
+    # Also remap: if the canonical user per root differs from the original
+    # root, we want the assistant tied to the *canonical* user (latest edit)
+    # to render right after it. The stream endpoint sets assistant.parent_id
+    # to the user turn that prompted it, so when the new branch is streamed
+    # its assistant will already have parent_id=latest_user_id. We just keep
+    # the parent→canonical-assistant map as-is and rely on the output loop
+    # to position the assistant right after its user parent.
+
     by_id: dict[uuid.UUID, object] = {m.id: m for m in messages}
-    placed_canonical: set[uuid.UUID] = set()
     out: list[object] = []
     for m in messages:
         role = getattr(m, "role", None)
         msg_id = getattr(m, "id", None)
         parent_id = getattr(m, "parent_id", None)
+
+        # Drop non-canonical user chain members so only one user bubble
+        # renders per turn. The `< 1 / N >` navigator still sees the full
+        # chain via `sibling_ids`.
+        if role == "user" and msg_id in dropped_user_ids:
+            continue
+
         if role == "user" and msg_id in canonical_per_parent:
             out.append(m)
             canonical_id = canonical_per_parent[msg_id]
             canonical_msg = by_id.get(canonical_id)
             if canonical_msg is not None:
                 out.append(canonical_msg)
-                placed_canonical.add(canonical_id)
             continue
         if role == "assistant" and parent_id in canonical_per_parent:
             # Drop every assistant sibling here — the canonical one was
@@ -192,7 +257,11 @@ async def get_conversation(
     )
     user_msg_ids = [m.id for m in messages if m.role == "user"]
     sibling_map = await service.repo.list_sibling_map(user_msg_ids)
-    canonical = _canonical_messages(messages, sibling_map)
+    # P1-3 — user-edit chain map so user bubbles can render `< 1 / N >`.
+    user_sibling_map = await service.repo.list_user_sibling_map(
+        conversation_id, user_msg_ids
+    )
+    canonical = _canonical_messages(messages, sibling_map, user_sibling_map)
     return ConversationRead.model_validate(
         {
             "id": conv.id,
@@ -204,7 +273,8 @@ async def get_conversation(
             "created_at": conv.created_at,
             "updated_at": conv.updated_at,
             "messages": [
-                _message_to_read(m, feedback_map, sibling_map) for m in canonical
+                _message_to_read(m, feedback_map, sibling_map, user_sibling_map)
+                for m in canonical
             ],
         }
     )
@@ -229,8 +299,12 @@ async def list_messages(
     )
     user_msg_ids = [m.id for m in messages if m.role == "user"]
     sibling_map = await service.repo.list_sibling_map(user_msg_ids)
+    user_sibling_map = await service.repo.list_user_sibling_map(
+        conversation_id, user_msg_ids
+    )
     return [
-        _message_to_read(m, feedback_map, sibling_map) for m in messages
+        _message_to_read(m, feedback_map, sibling_map, user_sibling_map)
+        for m in messages
     ]
 
 
@@ -310,9 +384,16 @@ async def get_message(
         [msg], current_user.id
     )
     sibling_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+    user_sibling_map: dict[uuid.UUID, list[uuid.UUID]] = {}
     if msg.role == "assistant" and msg.parent_id is not None:
         sibling_map = await service.repo.list_sibling_map([msg.parent_id])
-    return _message_to_read(msg, feedback_map, sibling_map)
+    elif msg.role == "user":
+        # P1-3 — inline the edit chain so the navigator can render `< k / N >`
+        # on a user bubble the moment the UI fetches a specific variant.
+        user_sibling_map = await service.repo.list_user_sibling_map(
+            msg.conversation_id, [msg.id]
+        )
+    return _message_to_read(msg, feedback_map, sibling_map, user_sibling_map)
 
 
 # ---------------------------------------------------------------------------
@@ -331,13 +412,13 @@ async def edit_user_message(
     service: ChatService = Depends(_service),
     current_user: User = Depends(get_current_user),
 ) -> ChatMessageRead:
-    """Rewrite a user turn and truncate downstream history (P1-1).
+    """Fork a user turn into a new branch (P1-3).
 
-    Soft-deletes every message in the same conversation with
-    `created_at >= target.created_at` (preserving the audit trail) and
-    inserts a new user message with `payload.content`. The frontend then
-    fires a new stream request with `conversation_id` so the backend
-    appends the new assistant reply.
+    Preserves the original user message as the branch root and inserts a
+    new user row with `parent_id = original.id` so the `< 1 / N >`
+    navigator can flip between edit variants. Downstream rows (assistant
+    reply + anything after) are soft-deleted — the new branch re-streams
+    cleanly while the original text remains reachable via the navigator.
 
     Returns the newly-inserted user row so the client can key it as the
     latest user turn in local state without re-fetching the conversation.
@@ -502,3 +583,33 @@ async def upload_attachment(
         data=data,
     )
     return ChatAttachmentRead.model_validate(row)
+
+
+# ---------------------------------------------------------------------------
+# Context suggestions (P1-7)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/context-suggestions",
+    response_model=ContextSuggestionsResponse,
+)
+async def context_suggestions(
+    lesson_id: uuid.UUID | None = Query(
+        default=None,
+        description="Optional — scope the 'current lesson' suggestion explicitly.",
+    ),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ContextSuggestionsResponse:
+    """Assemble the one-click context picker payload (P1-7).
+
+    Returns the caller's last 5 exercise submissions, their current lesson
+    (most-recently-updated `student_progress` row, or the row for
+    `lesson_id` when passed), and any exercises attached to that lesson. The
+    UI renders these as three grouped sections in the composer's `+` popover.
+    """
+    service = ContextAttachService(db)
+    return await service.suggestions(
+        user_id=current_user.id, lesson_id=lesson_id
+    )

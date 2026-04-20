@@ -303,17 +303,24 @@
   suite 188/188 green.
 
 ### P1-3 — Branch from any turn
-- **Status:** todo
-- **Owner:** —
-- **Claimed:** —
-- **Completed:** —
+- **Status:** done
+- **Owner:** agent-P1-3
+- **Claimed:** 2026-04-20
+- **Completed:** 2026-04-20
 - **Depends-on:** P0-2, P1-1
 - **Problem:** No way to explore alternative directions without losing the current path.
 - **Acceptance criteria:**
   - Schema: `chat_messages.parent_id` enables a tree of turns.
   - Editing a user message forks a new branch instead of overwriting.
   - UI: breadcrumb-style "<1/3>" navigator on branched nodes.
-- **Implementation note:** —
+- **Implementation note:** `POST /chat/messages/{id}/edit` now forks via
+  `chat.py:415` — keeps original user row, inserts sibling with new content +
+  `parent_id` pointing at the original's parent, soft-deletes trailing assistant
+  replies. `GET /conversations/{id}` already returns `sibling_ids` for user
+  messages via the canonical-chain logic. User `AssistantBubble` sibling
+  navigator generalized to `SiblingNavigator` and rendered on `UserBubble`
+  too (page.tsx). Backend `test_chat_edit.py` extended with fork + navigate
+  round-trip cases; frontend `edit.test.tsx` asserts the `<1/2>` counter.
 
 ### P1-4 — Copy message + copy code buttons
 - **Status:** done
@@ -438,10 +445,10 @@
   adding `conversationId` to the `useStream()` destructure.
 
 ### P1-7 — One-click context attach (submission / lesson / exercise)
-- **Status:** todo
-- **Owner:** —
-- **Claimed:** —
-- **Completed:** —
+- **Status:** done
+- **Owner:** agent-P1-7
+- **Claimed:** 2026-04-20
+- **Completed:** 2026-04-20
 - **Depends-on:** P1-6
 - **Problem:** `?submission_id=` prefill at `chat/page.tsx:496-519` is a
   one-shot drive-by. Students can't attach context mid-conversation.
@@ -451,7 +458,14 @@
   - Selected context becomes a pinned "chip" above the composer for the turn;
     sent as structured context in `ChatRequest`.
   - Multiple chips can coexist.
-- **Implementation note:** —
+- **Implementation note:** New `GET /api/v1/chat/context-suggestions` endpoint
+  returns last-5 submissions, recent lessons, and exercises. `StreamRequest`
+  extended with `context_refs: list[{kind, id}]` (cap 3). `context_attach_service.py`
+  resolves each ref to a human-readable block prepended to the `HumanMessage`.
+  Frontend: `ContextPickerPopover` at page.tsx:1509 triggered by `+` button;
+  chips row shares the attachment chips container; `sendMessage` extended with
+  `contextRefs` arg. Backend `test_chat_context.py` (12 tests); frontend
+  `context.test.tsx` (5 tests).
 
 ### P1-8 — Search, rename, pin, archive, delete conversations
 - **Status:** done
@@ -635,10 +649,10 @@
   unrelated.
 
 ### P2-4 — Show routing reason + allow override
-- **Status:** todo
-- **Owner:** —
-- **Claimed:** —
-- **Completed:** —
+- **Status:** done
+- **Owner:** agent-P2-4
+- **Claimed:** 2026-04-20
+- **Completed:** 2026-04-20
 - **Depends-on:** P2-3
 - **Problem:** Auto-routing is opaque. When it picks wrong, students have no recourse.
 - **Acceptance criteria:**
@@ -646,46 +660,76 @@
   - Assistant bubble shows a subtle "Routed to Tutor · change" affordance.
   - Clicking "change" offers a dropdown of all 20 agents; regenerates the reply
     under the chosen one (via P1-2).
-- **Implementation note:** —
+- **Implementation note:** MOA `moa.py` now returns `routing_reason` alongside
+  agent name ("keyword:<pattern>" on keyword hit, "llm_classifier" on fallback).
+  `stream.py` emits it in the first SSE event. `use-stream.ts` captures it on
+  `StreamMessage.routingReason`. `RoutingReasonBadge` component (page.tsx:1192)
+  renders "Routed to X · reason · change" under the agent caption. "change"
+  opens a grouped 20-agent dropdown; selection calls `regenerateMessage(id,
+  {agentOverride})`. Regenerate backend extended with `agent_override` body
+  param. Tests: `test_chat_regenerate.py` + `regenerate.test.tsx`.
 
 ### P2-5 — Message metadata on hover
-- **Status:** todo
-- **Owner:** —
-- **Claimed:** —
-- **Completed:** —
+- **Status:** done
+- **Owner:** agent-P2-5
+- **Claimed:** 2026-04-20
+- **Completed:** 2026-04-20
 - **Depends-on:** P0-2
 - **Problem:** No visibility into latency / tokens / agent per message.
 - **Acceptance criteria:**
   - Hover shows: first-token latency, total duration, token count, agent,
     model version.
   - Backend persists these on `chat_messages` when stream completes.
-- **Implementation note:** —
+- **Implementation note:** Migration `0033_chat_messages_metadata.py` adds
+  `first_token_ms`, `total_duration_ms`, `input_tokens`, `output_tokens`,
+  `model` nullable columns to `chat_messages`. `stream.py` tracks
+  `start_time` and stamps these on the assistant row on stream done. Schemas
+  extended in `chat.py`. Frontend `MessageMetadataPopover` (page.tsx) shows
+  on hover of assistant bubble agent-name caption. Tests: `test_chat_metadata.py`
+  (backend) + `metadata.test.tsx` (frontend).
 
 ### P2-6 — Mobile sidebar drawer
-- **Status:** todo
-- **Owner:** —
-- **Claimed:** —
-- **Completed:** —
+- **Status:** done
+- **Owner:** agent-P2-6
+- **Claimed:** 2026-04-20
+- **Completed:** 2026-04-20
 - **Depends-on:** P0-3
 - **Problem:** Sidebar is `hidden lg:flex`. Mobile has no conversation access.
 - **Acceptance criteria:**
   - Hamburger on mobile header opens a full-height slide-in drawer with the
     conversation list.
   - Closes on selection + on backdrop tap. Swipe-to-close.
-- **Implementation note:** —
+- **Implementation note:** Extracted the conversations list into a pure
+  `ChatSidebar` component (no outer `<aside>`) rendered inside the existing
+  `hidden lg:flex` desktop `<aside>` and, below `lg:`, inside a fixed
+  `w-80 max-w-[85vw]` drawer overlay with a `bg-black/50` backdrop button
+  and `translate-x-0` slide-in. Mobile header now leads with a
+  `aria-label="Open conversations"` hamburger. Drawer unmounts on close to
+  avoid duplicating sidebar DOM (other chat tests grep by the shared
+  labels). Swipe-left >60px on the drawer closes via a tiny
+  touchstart/touchend handler — no lib. New `mobile-drawer.test.tsx`
+  covers hamburger render, open, backdrop close, and row-selection close;
+  swipe path skipped (jsdom).
 
 ### P2-7 — Rate-limit + budget awareness
-- **Status:** todo
-- **Owner:** —
-- **Claimed:** —
-- **Completed:** —
+- **Status:** done
+- **Owner:** agent-P2-7
+- **Claimed:** 2026-04-20
+- **Completed:** 2026-04-20
 - **Depends-on:** P0-5
 - **Problem:** 429s are invisible as 429s; no daily-budget surface.
 - **Acceptance criteria:**
   - Backend returns `X-RateLimit-Remaining` + `Retry-After` on stream endpoint.
   - UI shows a compact pill "X messages left this hour" when remaining < 5.
   - 429 banner counts down in real time.
-- **Implementation note:** —
+- **Implementation note:** `app/core/rate_limit.py` + `stream.py:_rate_limit_headers()`
+  compute `X-RateLimit-Remaining` and `Retry-After` from slowapi window stats on
+  every response; `RateLimitExceeded` handler in `main.py` returns 429 JSON with
+  `retry_after_seconds`. `use-stream.ts` reads these headers on 200/429, exposing
+  `rateLimitRemaining` + `retryAfterSeconds`. `chat/page.tsx`: pill above composer
+  when remaining < 5; `ErrorBanner` (P0-5) extended with mm:ss countdown for
+  `rate_limit` kind. Tests: `test_stream_rate_limit.py` (backend) + `rate-limit.test.tsx`
+  (4 frontend tests, including pill, quiet-state, singular copy, and 429 banner).
 
 ### P2-8 — Slash commands + keyboard shortcuts
 - **Status:** todo
@@ -724,10 +768,10 @@
   and adding the import.
 
 ### P2-10 — Warn on mode switch that would lose context
-- **Status:** todo
-- **Owner:** —
-- **Claimed:** —
-- **Completed:** —
+- **Status:** done
+- **Owner:** agent-P2-10
+- **Claimed:** 2026-04-20
+- **Completed:** 2026-04-20
 - **Depends-on:** P0-2
 - **Problem:** `chat/page.tsx:547-550` silently wipes messages on mode switch.
 - **Acceptance criteria:**
@@ -735,7 +779,24 @@
     `agent_name` per-turn instead of remounting.
   - If a remount is genuinely needed, show a confirm dialog with "Start new
     conversation" + "Cancel".
-- **Implementation note:** —
+- **Implementation note:** Extended `useStream.sendMessage` with a 3rd
+  `agentOverride?: string | null` arg; when provided it wins over the hook's
+  `agentName` option for both the request body and the in-memory assistant
+  bubble (null = force auto routing). `handleModeChange` in `ChatPageInner`
+  is now a one-liner `setActiveMode(m)` — no more remount, convId wipe, or
+  URL reset. `ChatArea.handleSend` + `handleEditUserMessage` thread
+  `mode.agentName` per-turn so a mid-conversation switch takes effect on
+  the next send without losing transcript. Added a ⊕ "Start new
+  conversation" button to the composer (visible only when
+  `messages.length > 0`) that opens a new `ConfirmStartNewDialog` (hand-
+  rolled modal matching the delete-confirm style — shadcn's AlertDialog
+  isn't installed); Cancel keeps state, Confirm runs the full reset
+  (messages/convId cleared, `?c=` dropped, `chatKey` bumped). New test
+  file `frontend/src/app/(portal)/chat/__tests__/mode-switch.test.tsx`
+  with 4 cases: mid-conversation mode switch preserves transcript +
+  convId, next send carries the new `agent_name`, first-turn send
+  respects pre-selected mode, and the Cancel/Confirm dialog behavior.
+  Full suite: 27 files, 196 passing, 1 skipped.
 
 ---
 

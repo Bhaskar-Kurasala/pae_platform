@@ -3,6 +3,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.schemas.context import ContextRef
+
 
 class ChatRequest(BaseModel):
     agent_name: str | None = None  # None → MOA auto-routes
@@ -17,6 +19,10 @@ class ChatRequest(BaseModel):
     # P1-6 — optional list of pending attachment ids to bind to this user
     # turn. Capped at the same value the service enforces (4 per message).
     attachment_ids: list[uuid.UUID] | None = Field(default=None, max_length=4)
+    # P1-7 — optional list of kind-tagged context refs (submission / lesson /
+    # exercise). Server-resolved and prepended to the user turn; capped at 3
+    # so a chatty client can't flood the prompt.
+    context_refs: list[ContextRef] | None = Field(default=None, max_length=3)
 
 
 class ChatResponse(BaseModel):

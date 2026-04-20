@@ -311,7 +311,7 @@ describe("Chat page — P1-2 regenerate assistant message", () => {
 
     // The regenerate fetch was called with the source assistant id.
     await waitFor(() => {
-      expect(mockedRegenerate).toHaveBeenCalledWith("m-asst-1");
+      expect(mockedRegenerate).toHaveBeenCalledWith("m-asst-1", expect.any(Object));
     });
 
     // Bubble swaps to the new content after the stream + hydrate.

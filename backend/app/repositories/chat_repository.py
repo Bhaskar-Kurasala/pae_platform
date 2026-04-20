@@ -172,6 +172,11 @@ class ChatRepository:
         agent_name: str | None = None,
         token_count: int | None = None,
         parent_id: uuid.UUID | None = None,
+        first_token_ms: int | None = None,
+        total_duration_ms: int | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        model: str | None = None,
     ) -> ChatMessage:
         msg = ChatMessage(
             conversation_id=conversation_id,
@@ -180,8 +185,44 @@ class ChatRepository:
             agent_name=agent_name,
             token_count=token_count,
             parent_id=parent_id,
+            first_token_ms=first_token_ms,
+            total_duration_ms=total_duration_ms,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            model=model,
         )
         self.db.add(msg)
+        await self.db.flush()
+        await self.db.refresh(msg)
+        return msg
+
+    async def update_message_metadata(
+        self,
+        message_id: uuid.UUID,
+        *,
+        first_token_ms: int | None = None,
+        total_duration_ms: int | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        model: str | None = None,
+    ) -> ChatMessage | None:
+        """P2-5 — stamp the five hover-panel metadata fields on an existing
+        row. Used by the stream endpoint to update the assistant turn after
+        `done:true` has been flushed to the client. Any field left `None`
+        is ignored (leaves the prior value intact)."""
+        msg = await self.get_message(message_id, include_deleted=True)
+        if msg is None:
+            return None
+        if first_token_ms is not None:
+            msg.first_token_ms = first_token_ms
+        if total_duration_ms is not None:
+            msg.total_duration_ms = total_duration_ms
+        if input_tokens is not None:
+            msg.input_tokens = input_tokens
+        if output_tokens is not None:
+            msg.output_tokens = output_tokens
+        if model is not None:
+            msg.model = model
         await self.db.flush()
         await self.db.refresh(msg)
         return msg
@@ -381,6 +422,128 @@ class ChatRepository:
             row.deleted_at = now
         await self.db.flush()
         return len(rows)
+
+    async def soft_delete_messages_after(
+        self,
+        conversation_id: uuid.UUID,
+        *,
+        after_created_at: datetime,
+    ) -> int:
+        """P1-3 — like `soft_delete_messages_from` but strictly *after* the
+        cutoff (`created_at > after_created_at`). Used by the edit-fork flow
+        to hide downstream rows of the old branch while preserving the
+        original user message itself, so the `< 1 / N >` navigator can flip
+        back to it.
+        """
+        now = datetime.now(UTC)
+        stmt = select(ChatMessage).where(
+            and_(
+                ChatMessage.conversation_id == conversation_id,
+                ChatMessage.created_at > after_created_at,
+                ChatMessage.deleted_at.is_(None),
+            )
+        )
+        result = await self.db.execute(stmt)
+        rows = list(result.scalars().all())
+        for row in rows:
+            row.deleted_at = now
+        await self.db.flush()
+        return len(rows)
+
+    async def list_user_sibling_map(
+        self,
+        conversation_id: uuid.UUID,
+        user_msg_ids: list[uuid.UUID],
+    ) -> dict[uuid.UUID, list[uuid.UUID]]:
+        """P1-3 — bulk-resolve `{user_msg_id: [chain_root, ...edits]}` for a
+        set of user message ids in the same conversation.
+
+        The "chain" for a user message U is the maximal linear set of user
+        rows reachable by walking `parent_id` edges where every hop is a
+        user → user link:
+          - `root`: the first user ancestor of U whose `parent_id` is NOT a
+            live user message (i.e. None, an assistant id, or a deleted
+            row). The chain starts here.
+          - `edits`: every live user descendant reachable from `root` via
+            user→user parent links, in `created_at` ascending order so the
+            navigator counts variants in the order the student created
+            them.
+
+        Returns an empty dict when `user_msg_ids` is empty. Each input id
+        maps to the same list if the inputs share a chain — callers can
+        de-dupe via the root (first element of the list).
+        """
+        if not user_msg_ids:
+            return {}
+        # One pass over every live user row in the conversation; the chain
+        # is bounded by the conversation size, so a single fetch avoids
+        # chatty walks.
+        result = await self.db.execute(
+            select(ChatMessage)
+            .where(
+                and_(
+                    ChatMessage.conversation_id == conversation_id,
+                    ChatMessage.role == "user",
+                    ChatMessage.deleted_at.is_(None),
+                )
+            )
+            .order_by(ChatMessage.created_at.asc())
+        )
+        user_rows = list(result.scalars().all())
+        live_user_by_id: dict[uuid.UUID, ChatMessage] = {
+            r.id: r for r in user_rows
+        }
+
+        # Build a user→children adjacency across user→user parent edges only.
+        user_children: dict[uuid.UUID, list[ChatMessage]] = {}
+        for row in user_rows:
+            pid = row.parent_id
+            if pid is not None and pid in live_user_by_id:
+                user_children.setdefault(pid, []).append(row)
+        for children in user_children.values():
+            children.sort(key=lambda r: r.created_at)
+
+        def _find_root(row: ChatMessage) -> ChatMessage:
+            current = row
+            # Walk up until we find a user row whose parent_id is not a live
+            # user message (None / assistant / deleted → chain root).
+            while (
+                current.parent_id is not None
+                and current.parent_id in live_user_by_id
+            ):
+                current = live_user_by_id[current.parent_id]
+            return current
+
+        def _collect_chain(root: ChatMessage) -> list[uuid.UUID]:
+            # BFS to collect all user descendants reachable via user→user
+            # parent edges, then a single chronological sort keeps the
+            # navigator order stable across concurrent edits.
+            seen: set[uuid.UUID] = {root.id}
+            all_nodes: list[ChatMessage] = [root]
+            queue: list[ChatMessage] = list(user_children.get(root.id, []))
+            while queue:
+                node = queue.pop(0)
+                if node.id in seen:
+                    continue
+                seen.add(node.id)
+                all_nodes.append(node)
+                queue.extend(user_children.get(node.id, []))
+            all_nodes.sort(key=lambda r: r.created_at)
+            return [r.id for r in all_nodes]
+
+        chain_by_root: dict[uuid.UUID, list[uuid.UUID]] = {}
+        out: dict[uuid.UUID, list[uuid.UUID]] = {}
+        for msg_id in user_msg_ids:
+            row = live_user_by_id.get(msg_id)
+            if row is None:
+                continue
+            root = _find_root(row)
+            chain = chain_by_root.get(root.id)
+            if chain is None:
+                chain = _collect_chain(root)
+                chain_by_root[root.id] = chain
+            out[msg_id] = chain
+        return out
 
     # --- feedback (P1-5) --------------------------------------------------
 

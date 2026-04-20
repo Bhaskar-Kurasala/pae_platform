@@ -113,10 +113,15 @@ _KEYWORD_MAP: list[tuple[list[str], str]] = [
 ]
 
 
-class MOAGraphState(TypedDict):
+class MOAGraphState(TypedDict, total=False):
     messages: Annotated[list[Any], add_messages]
     agent_state: AgentState
     routed_to: str
+    # P2-4 — why the router picked that agent. One of:
+    #   "keyword:<pattern>"  for a hit in _KEYWORD_MAP
+    #   "llm_classifier"     for the claude-haiku fallback
+    #   "default_fallback"   when nothing matched and LLM was unavailable
+    routing_reason: str | None
     final_response: str
     evaluation_score: float
 
@@ -127,10 +132,30 @@ def _build_classifier():
 
 
 def _keyword_route(task: str) -> str | None:
+    """Back-compat wrapper that returns just the routed agent name.
+
+    Callers that want the matched pattern for telemetry / UI should use
+    :func:`keyword_route_with_reason` instead — it returns the first
+    matched keyword alongside the agent so the UI can render something
+    like "Routed to Tutor · keyword:explain · change" (P2-4).
+    """
+    match = keyword_route_with_reason(task)
+    return match[0] if match else None
+
+
+def keyword_route_with_reason(task: str) -> tuple[str, str] | None:
+    """Return (agent, matched_keyword) or None if no keyword pattern hit.
+
+    The matched keyword doubles as a human-readable reason — we just
+    prefix it with ``keyword:`` at the call site so consumers can tell a
+    keyword hit apart from an LLM classification (``llm_classifier``) or
+    the default fallback (``default_fallback``).
+    """
     lowered = task.lower()
     for keywords, agent in _KEYWORD_MAP:
-        if any(kw in lowered for kw in keywords):
-            return agent
+        for kw in keywords:
+            if kw in lowered:
+                return agent, kw.strip()
     return None
 
 
@@ -139,7 +164,9 @@ async def classify_intent(state: MOAGraphState) -> dict[str, Any]:
     task = state["agent_state"].task
 
     # 1. Fast keyword check
-    routed = _keyword_route(task)
+    match = keyword_route_with_reason(task)
+    routed: str | None = match[0] if match else None
+    reason: str | None = f"keyword:{match[1]}" if match else None
 
     # 2. LLM classification for nuanced cases
     if not routed and (settings.minimax_api_key or settings.anthropic_api_key):
@@ -149,15 +176,19 @@ async def classify_intent(state: MOAGraphState) -> dict[str, Any]:
                 [HumanMessage(content=_CLASSIFIER_PROMPT.format(message=task))]
             )
             candidate = str(resp.content).strip().lower().split()[0]
-            routed = candidate if candidate in ROUTABLE_AGENTS else None
+            if candidate in ROUTABLE_AGENTS:
+                routed = candidate
+                reason = "llm_classifier"
         except Exception as exc:
             log.warning("moa.classify.llm_failed", error=str(exc))
 
     # 3. Default fallback
-    routed = routed or "socratic_tutor"
+    if routed is None:
+        routed = "socratic_tutor"
+        reason = reason or "default_fallback"
 
-    log.info("moa.classify", routed_to=routed, task_preview=task[:60])
-    return {"routed_to": routed}
+    log.info("moa.classify", routed_to=routed, reason=reason, task_preview=task[:60])
+    return {"routed_to": routed, "routing_reason": reason}
 
 
 async def _run_any_agent(state: MOAGraphState) -> dict[str, Any]:

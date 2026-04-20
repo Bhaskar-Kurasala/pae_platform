@@ -36,6 +36,35 @@ export interface ChatAttachmentRead {
   size_bytes: number;
 }
 
+// P1-7 — context picker types. Mirror the schemas in
+// backend/app/schemas/context.py.
+export interface ContextSuggestionSubmission {
+  id: string;
+  exercise_title: string;
+  submitted_at: string;
+}
+
+export interface ContextSuggestionLesson {
+  id: string;
+  title: string;
+}
+
+export interface ContextSuggestionExercise {
+  id: string;
+  title: string;
+}
+
+export interface ContextSuggestionsResponse {
+  submissions: ContextSuggestionSubmission[];
+  lessons: ContextSuggestionLesson[];
+  exercises: ContextSuggestionExercise[];
+}
+
+export interface ChatContextRef {
+  kind: "submission" | "lesson" | "exercise";
+  id: string;
+}
+
 export interface ChatMessageRead {
   id: string;
   conversation_id: string;
@@ -45,13 +74,23 @@ export interface ChatMessageRead {
   token_count: number | null;
   parent_id: string | null;
   created_at: string;
+  // P2-5 — hover-panel metadata. All nullable: historical rows + stream
+  // error paths render as "—" in the popover.
+  first_token_ms?: number | null;
+  total_duration_ms?: number | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  model?: string | null;
   // P1-5 — inlined by the backend on `GET /conversations/{id}` so the UI can
   // hydrate thumb state without an N+1 round trip.
   my_feedback?: ChatFeedbackRead | null;
-  // P1-2 — assistant sibling ids for the <1/N> regenerate navigator.
+  // P1-2 / P1-3 — sibling ids for the <1/N> navigator.
+  //  · Assistant rows: regenerated variants of a reply.
+  //  · User rows: branches created by editing the turn (P1-3); the original
+  //    user row + each subsequent edit are siblings of each other.
   // Empty (or absent) when the message has no siblings; populated (length
-  // >= 2) when the student has regenerated this turn. Includes the current
-  // message's own id, ordered by created_at ascending.
+  // >= 2) when the row belongs to a chain. Includes the current message's
+  // own id, ordered by created_at ascending.
   sibling_ids?: string[];
 }
 
@@ -113,9 +152,11 @@ export const chatApi = {
     api.get<ChatFeedbackRead | null>(
       `/api/v1/chat/messages/${messageId}/feedback`,
     ),
-  // P1-1 — rewrite a user turn. Server soft-deletes the target + every
-  // downstream message and returns the freshly-inserted user row. Caller is
-  // expected to drop trailing messages from local state and re-stream.
+  // P1-1 / P1-3 — rewrite a user turn. Server forks a new user row (the
+  // original is preserved for the branch navigator) and soft-deletes every
+  // message strictly downstream. Response is the freshly-inserted row with
+  // `sibling_ids` populated with the full edit chain. Caller is expected to
+  // drop trailing messages from local state and re-stream.
   editMessage: (messageId: string, payload: ChatMessageEditRequest) =>
     api.post<ChatMessageRead>(
       `/api/v1/chat/messages/${messageId}/edit`,
@@ -125,6 +166,19 @@ export const chatApi = {
   // load a specific variant when the student clicks `< / >`.
   getMessage: (messageId: string) =>
     api.get<ChatMessageRead>(`/api/v1/chat/messages/${messageId}`),
+  // P1-7 — payload for the one-click context picker. Returns the caller's
+  // recent submissions, their current lesson (heuristic), and any exercises
+  // attached to that lesson. `lessonId` is an explicit override so the
+  // Studio / lesson pages can scope the picker to what the user is looking
+  // at; omit for the default heuristic.
+  getContextSuggestions: (lessonId?: string) => {
+    const qs = lessonId
+      ? `?lesson_id=${encodeURIComponent(lessonId)}`
+      : "";
+    return api.get<ContextSuggestionsResponse>(
+      `/api/v1/chat/context-suggestions${qs}`,
+    );
+  },
 };
 
 // ---------- Export (P1-9) ----------
@@ -165,18 +219,44 @@ function readAccessToken(): string | null {
  * are surfaced by the caller via the response status — we don't throw here
  * because the caller needs to distinguish 401/404/429/5xx for UX.
  */
+export interface RegenerateOptions {
+  /**
+   * P2-4 — override the agent chosen by the original routing. When set,
+   * the backend runs this regenerate under the named agent instead of
+   * re-using the original assistant's `agent_name`. Validated server-
+   * side; unknown names are ignored (fall back to original behavior).
+   */
+  agentOverride?: string;
+  signal?: AbortSignal;
+}
+
 export async function regenerateMessage(
   messageId: string,
-  signal?: AbortSignal,
+  options: RegenerateOptions | AbortSignal = {},
 ): Promise<Response> {
+  // Back-compat: the original signature was `(id, signal?)`. Preserve
+  // that by branching on whether the second arg is an AbortSignal or a
+  // structured options object.
+  const opts: RegenerateOptions =
+    typeof AbortSignal !== "undefined" && options instanceof AbortSignal
+      ? { signal: options }
+      : (options as RegenerateOptions);
   const token = readAccessToken();
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  return fetch(`${API_BASE}/api/v1/chat/messages/${messageId}/regenerate`, {
+  const init: RequestInit = {
     method: "POST",
     headers,
-    signal,
-  });
+    signal: opts.signal,
+  };
+  if (opts.agentOverride) {
+    headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify({ agent_override: opts.agentOverride });
+  }
+  return fetch(
+    `${API_BASE}/api/v1/chat/messages/${messageId}/regenerate`,
+    init,
+  );
 }
 
 // ---------- Attachments (P1-6) ----------

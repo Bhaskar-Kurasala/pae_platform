@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Archive, ArchiveRestore, ArrowDown, ArrowUp, Bot, BriefcaseBusiness, Check, ChevronLeft, ChevronRight, Clock, Code2, Copy, Download, FileText, GraduationCap, ImageIcon, Lock, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCw, Search, Sparkles, Square, Timer, Trash2, User, X } from "lucide-react";
+import { AlertTriangle, Archive, ArchiveRestore, ArrowDown, ArrowUp, AtSign, BookOpen, Bot, BriefcaseBusiness, Check, ChevronLeft, ChevronRight, Clock, Code2, Copy, Download, FileCode, FileText, GraduationCap, ImageIcon, Lock, Menu, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Puzzle, RefreshCw, RotateCw, Search, Sparkles, Square, Timer, Trash2, User, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MarkdownRenderer } from "@/components/features/markdown-renderer";
 import {
@@ -20,14 +20,20 @@ import {
   regenerateMessage,
   uploadAttachment,
   type ChatAttachmentRead,
+  type ChatContextRef,
   type ChatFeedbackCreate,
   type ChatFeedbackRead,
   type ChatMessageRead,
+  type ContextSuggestionsResponse,
   type ConversationListItem,
 } from "@/lib/chat-api";
 import { ChatSkeleton } from "./chat-skeleton";
 import { FeedbackControls } from "./feedback-controls";
-import { getAgentLabel } from "@/lib/agent-labels";
+import {
+  getAgentLabel,
+  getAgentGroups,
+  formatRoutingReason,
+} from "@/lib/agent-labels";
 
 // ── Mode chips ───────────────────────────────────────────────────
 const MODES = [
@@ -94,6 +100,13 @@ function messageFromServer(m: ChatMessageRead): StreamMessage | null {
     // undefined on the hook side so the navigator component can render
     // via a simple length check.
     siblingIds: m.sibling_ids && m.sibling_ids.length > 0 ? m.sibling_ids : undefined,
+    // P2-5 — hover-panel metadata. Null/absent fields flow through as
+    // `null`; the popover formatter renders missing values as "—".
+    firstTokenMs: m.first_token_ms ?? null,
+    totalDurationMs: m.total_duration_ms ?? null,
+    inputTokens: m.input_tokens ?? null,
+    outputTokens: m.output_tokens ?? null,
+    model: m.model ?? null,
   };
 }
 
@@ -477,7 +490,13 @@ function DeleteConfirmDialog({
 // toggle at the bottom, and a Pinned section rendered above a divider
 // when any row is pinned. Search + archived toggle both trigger a
 // refetch via the parent (`onQueryChange`, `onToggleArchived`).
-function Sidebar({
+//
+// P2-6 — extracted as a pure component so it can be rendered inside
+// either the desktop `<aside>` (hidden on mobile) or the mobile slide-in
+// drawer overlay. The parent owns the breakpoint wrappers; this component
+// only renders the header, search input, conversation list, and the
+// show-archived toggle.
+function ChatSidebar({
   conversations,
   activeId,
   onSelect,
@@ -514,7 +533,7 @@ function Sidebar({
   const hasQuery = query.trim().length > 0;
 
   return (
-    <aside className="hidden lg:flex flex-col w-64 xl:w-72 border-r bg-card/50 shrink-0">
+    <div className="flex flex-col h-full w-full">
       <div className="flex items-center justify-between px-4 h-16 border-b shrink-0">
         <div className="flex items-center gap-2">
           <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
@@ -642,7 +661,7 @@ function Sidebar({
           <span>Show archived</span>
         </label>
       </div>
-    </aside>
+    </div>
   );
 }
 
@@ -703,16 +722,27 @@ function WelcomeScreen({ mode, onPrompt }: { mode: typeof MODES[number]; onPromp
 // provided when the row is a persisted (server-side) message id AND the
 // transcript isn't currently streaming; otherwise the pencil is hidden. The
 // textarea reuses the bubble's width and autosizes to content.
+// P1-3 — when a user turn has been edited, the original + each edit persist
+// as a chain of `chat_messages` rows (forked via `parent_id`). The server
+// returns the full chain in `sibling_ids`; we render the same `< k / N >`
+// navigator component used on assistant bubbles so students can step
+// between the branches without losing prior drafts.
 function UserBubble({
   messageId,
   content,
   onEdit,
   canEdit,
+  siblingIds,
+  onSelectSibling,
 }: {
   messageId: string;
   content: string;
   canEdit: boolean;
   onEdit?: (messageId: string, nextContent: string) => Promise<void>;
+  // P1-3 — user-side sibling list (edit branches). Only rendered when the
+  // chain has more than one entry. The parent owns the fetch + id swap.
+  siblingIds?: string[];
+  onSelectSibling?: (messageId: string, targetId: string) => Promise<void>;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(content);
@@ -848,23 +878,48 @@ function UserBubble({
             <div className="rounded-3xl rounded-tr-lg bg-primary px-5 py-3.5 text-sm text-primary-foreground leading-relaxed shadow-sm whitespace-pre-wrap">
               {content}
             </div>
-            {canEdit && onEdit ? (
-              <div
-                className="mt-1 mr-1 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity"
-                aria-label="Message actions"
-              >
-                <button
-                  type="button"
-                  onClick={openEditor}
-                  aria-label="Edit message"
-                  data-testid="edit-open"
-                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            {(() => {
+              // P1-3 — the chain navigator appears alongside Edit whenever the
+              // user has more than one branch on this turn (i.e. they've edited
+              // at least once). It's always visible (not hover-gated) because
+              // it's how students discover/recover prior drafts; Edit stays
+              // hover-gated per P1-1.
+              const hasUserSiblings = (siblingIds?.length ?? 0) > 1;
+              const showEdit = canEdit && !!onEdit;
+              if (!showEdit && !hasUserSiblings) return null;
+              return (
+                <div
+                  className="mt-1 mr-1 flex items-center gap-1"
+                  aria-label="Message actions"
                 >
-                  <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
-                  Edit
-                </button>
-              </div>
-            ) : null}
+                  {hasUserSiblings && onSelectSibling && siblingIds && (
+                    <SiblingNavigator
+                      siblingIds={siblingIds}
+                      currentId={messageId}
+                      onSelect={(targetId) =>
+                        void onSelectSibling(messageId, targetId)
+                      }
+                    />
+                  )}
+                  {showEdit && (
+                    <div
+                      className="opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity"
+                    >
+                      <button
+                        type="button"
+                        onClick={openEditor}
+                        aria-label="Edit message"
+                        data-testid="edit-open"
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                      >
+                        <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                        Edit
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </>
         )}
       </div>
@@ -1050,10 +1105,209 @@ function SiblingNavigator({
   );
 }
 
+// P2-5 — hover-panel metadata popover. Rendered on the agent-label caption
+// above each assistant bubble; shows `model · first / total · in / out tokens`
+// so students can reason about latency + cost without leaving the thread.
+// All fields are optional: rows that pre-date the feature or hit a stream
+// error persist with NULL metadata and render as an em-dash.
+function formatMs(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined) return "—";
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function formatTokens(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "—";
+  return n.toLocaleString();
+}
+
+function MessageMetadataPopover({
+  agentName,
+  model,
+  firstTokenMs,
+  totalDurationMs,
+  inputTokens,
+  outputTokens,
+  children,
+}: {
+  agentName?: string;
+  model?: string | null;
+  firstTokenMs?: number | null;
+  totalDurationMs?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  children: React.ReactNode;
+}) {
+  const modelLabel = model ?? "—";
+  const firstLabel = formatMs(firstTokenMs);
+  const totalLabel = formatMs(totalDurationMs);
+  const inLabel = formatTokens(inputTokens);
+  const outLabel = formatTokens(outputTokens);
+  // Single-line summary used by accessibility tools (aria-label on the
+  // trigger) and assertable in tests — matches the tracker's spec format:
+  // `model · 123ms first / 2.3s total · 450 in / 890 out tokens`.
+  const summary = `${modelLabel} · ${firstLabel} first / ${totalLabel} total · ${inLabel} in / ${outLabel} out tokens`;
+
+  return (
+    <span className="relative inline-block group/meta" data-testid="message-metadata">
+      <button
+        type="button"
+        tabIndex={0}
+        aria-label={`Message metadata: ${summary}`}
+        className="inline-flex items-center gap-1 rounded px-0.5 -mx-0.5 outline-none focus-visible:ring-1 focus-visible:ring-primary/50 cursor-default"
+        data-testid="message-metadata-trigger"
+      >
+        {children}
+      </button>
+      <span
+        role="tooltip"
+        data-testid="message-metadata-popover"
+        className={cn(
+          "pointer-events-none absolute left-0 top-full z-50 mt-1 min-w-[18rem] rounded-lg border border-border/60 bg-popover px-3 py-2 text-[11px] text-popover-foreground shadow-lg",
+          "opacity-0 translate-y-0.5 transition-[opacity,transform] duration-150",
+          "group-hover/meta:opacity-100 group-hover/meta:translate-y-0",
+          "group-focus-within/meta:opacity-100 group-focus-within/meta:translate-y-0",
+        )}
+      >
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-normal normal-case tracking-normal">
+          <dt className="text-muted-foreground">Agent</dt>
+          <dd className="font-medium">{agentName ?? "—"}</dd>
+          <dt className="text-muted-foreground">Model</dt>
+          <dd className="font-mono text-[10px]">{modelLabel}</dd>
+          <dt className="text-muted-foreground">First token</dt>
+          <dd className="tabular-nums">{firstLabel}</dd>
+          <dt className="text-muted-foreground">Total</dt>
+          <dd className="tabular-nums">{totalLabel}</dd>
+          <dt className="text-muted-foreground">Tokens in</dt>
+          <dd className="tabular-nums">{inLabel}</dd>
+          <dt className="text-muted-foreground">Tokens out</dt>
+          <dd className="tabular-nums">{outLabel}</dd>
+        </dl>
+      </span>
+    </span>
+  );
+}
+
+// ── P2-4 — routing affordance ────────────────────────────────────
+// Renders "Routed to {agent} · {reason} · change" under the agent name.
+// Clicking "change" opens a dropdown of all 20 agents grouped by the 5
+// categories; picking one dispatches to the parent's `onChange` which
+// funnels into the P1-2 regenerate flow with an agent_override payload.
+function RoutingAffordance({
+  messageId,
+  agentName,
+  routingReason,
+  onChange,
+  disabled,
+}: {
+  messageId: string;
+  agentName: string;
+  routingReason?: string;
+  onChange: (
+    messageId: string,
+    options: { agentOverride: string },
+  ) => Promise<void>;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const resolved = getAgentLabel(agentName);
+  const reasonLabel = formatRoutingReason(routingReason);
+  const groups = getAgentGroups();
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const onPick = (name: string) => {
+    setOpen(false);
+    if (name === agentName) return;
+    void onChange(messageId, { agentOverride: name });
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      data-testid="routing-affordance"
+      className="relative ml-1 mb-1.5 text-[11px] leading-4 text-muted-foreground/70"
+    >
+      <span>Routed to </span>
+      <span className="font-medium text-muted-foreground">{resolved.displayName}</span>
+      {reasonLabel && (
+        <>
+          <span aria-hidden="true"> · </span>
+          <span className="font-mono">{reasonLabel}</span>
+        </>
+      )}
+      <span aria-hidden="true"> · </span>
+      <button
+        type="button"
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label="Change routed agent"
+        onClick={() => setOpen((v) => !v)}
+        className="underline-offset-2 hover:underline focus:underline text-primary/80 hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        change
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          aria-label="Pick an agent to regenerate under"
+          data-testid="routing-override-dropdown"
+          className="absolute left-0 top-5 z-20 w-64 max-h-80 overflow-y-auto rounded-xl border bg-popover shadow-xl text-xs"
+        >
+          {groups.map((group) => (
+            <div key={group.category} className="py-1">
+              <div className="px-3 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {group.label}
+              </div>
+              {group.agents.map((a) => {
+                const selected = a.name === agentName;
+                return (
+                  <button
+                    key={a.name}
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    onClick={() => onPick(a.name)}
+                    className={cn(
+                      "w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-muted",
+                      selected && "bg-muted/60 font-medium",
+                    )}
+                  >
+                    <span className="flex-1 truncate">{a.displayName}</span>
+                    {selected && <Check className="h-3 w-3 text-primary" aria-hidden="true" />}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AssistantBubble({
   messageId,
   content,
   agentName,
+  routingReason,
   isStreaming,
   isLast,
   isThinking,
@@ -1063,10 +1317,17 @@ function AssistantBubble({
   onSelectSibling,
   onRegenerate,
   isRegenerating,
+  model,
+  firstTokenMs,
+  totalDurationMs,
+  inputTokens,
+  outputTokens,
 }: {
   messageId: string;
   content: string;
   agentName?: string;
+  // P2-4 — backend-supplied routing decision rendered under the agent name.
+  routingReason?: string;
   isStreaming: boolean;
   isLast: boolean;
   isThinking?: boolean;
@@ -1082,14 +1343,42 @@ function AssistantBubble({
   // live-streaming bubble (persisted-only actions).
   siblingIds?: string[];
   onSelectSibling?: (messageId: string, targetId: string) => Promise<void>;
-  onRegenerate?: (messageId: string) => Promise<void>;
+  // P2-4 — `onRegenerate` accepts an optional `agentOverride` so the
+  // routing-override dropdown can regenerate under a specific agent.
+  onRegenerate?: (
+    messageId: string,
+    options?: { agentOverride?: string },
+  ) => Promise<void>;
   isRegenerating?: boolean;
+  // P2-5 — hover-panel metadata. Populated only for persisted assistant
+  // rows; the live-streaming bubble renders without a popover.
+  model?: string | null;
+  firstTokenMs?: number | null;
+  totalDurationMs?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
 }) {
   const modeLabel = MODES.find((m) => m.agentName === agentName)?.label;
   const showActions = !isThinking && !(isStreaming && isLast) && content.length > 0;
   const canRate = showActions && onSubmitFeedback !== undefined;
   const canRegenerate = showActions && onRegenerate !== undefined;
   const hasSiblings = (siblingIds?.length ?? 0) > 1;
+  // P2-5 — only surface the metadata popover on bubbles with at least one
+  // non-null metadata field. Historical rows + live-streaming rows fall
+  // through to the plain caption so we don't show a useless "— — —".
+  const hasMetadata =
+    !isThinking &&
+    !(isStreaming && isLast) &&
+    (model != null ||
+      firstTokenMs != null ||
+      totalDurationMs != null ||
+      inputTokens != null ||
+      outputTokens != null);
+  // P2-4 — only show the routing affordance on persisted, fully-rendered
+  // bubbles where the user can actually trigger a regenerate. Hidden
+  // during streaming / thinking / on the live-streaming placeholder.
+  const canShowRouting =
+    showActions && canRegenerate && !!agentName && agentName !== "system";
 
   return (
     <div className="group/msg flex gap-3">
@@ -1103,7 +1392,20 @@ function AssistantBubble({
       <div className="flex-1 min-w-0">
         {agentName && agentName !== "system" && (
           <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/60 mb-1.5 ml-1">
-            {modeLabel ?? agentName.split("_").join(" ")}
+            {hasMetadata ? (
+              <MessageMetadataPopover
+                agentName={agentName}
+                model={model}
+                firstTokenMs={firstTokenMs}
+                totalDurationMs={totalDurationMs}
+                inputTokens={inputTokens}
+                outputTokens={outputTokens}
+              >
+                {modeLabel ?? agentName.split("_").join(" ")}
+              </MessageMetadataPopover>
+            ) : (
+              modeLabel ?? agentName.split("_").join(" ")
+            )}
           </p>
         )}
         <div className="rounded-3xl rounded-tl-lg bg-card border border-border/50 px-5 py-4 shadow-sm">
@@ -1193,6 +1495,174 @@ function formatBytes(n: number): string {
   return `${n} B`;
 }
 
+// ── Context picker (P1-7) ───────────────────────────────────────
+// One-click attach for a submission / lesson / exercise. The popover opens
+// on the "+" button, fetches suggestions lazily on first open, and dispatches
+// a selected ContextRef to the parent. We dedupe by (kind,id) so a second
+// click on the same row is a no-op rather than growing the chip list.
+function ContextPickerIcon({ kind }: { kind: ChatContextRef["kind"] }) {
+  const Icon =
+    kind === "submission" ? FileCode : kind === "lesson" ? BookOpen : Puzzle;
+  return <Icon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />;
+}
+
+function ContextPickerPopover({
+  onSelect,
+  selectedRefs,
+  onClose,
+}: {
+  onSelect: (ref: ChatContextRef, label: string) => void;
+  selectedRefs: ChatContextRef[];
+  onClose: () => void;
+}) {
+  const [data, setData] = useState<ContextSuggestionsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await chatApi.getContextSuggestions();
+        if (!alive) return;
+        setData(res);
+      } catch (err) {
+        if (!alive) return;
+        setError(err instanceof Error ? err.message : "Failed to load");
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Click-outside dismiss.
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [onClose]);
+
+  const isSelected = (kind: ChatContextRef["kind"], id: string): boolean =>
+    selectedRefs.some((r) => r.kind === kind && r.id === id);
+
+  return (
+    <div
+      ref={containerRef}
+      role="dialog"
+      aria-label="Attach context"
+      data-testid="context-picker"
+      className="absolute bottom-12 left-0 z-20 w-80 max-h-96 overflow-y-auto rounded-xl border bg-popover shadow-xl text-sm"
+    >
+      {loading ? (
+        <div className="p-4 text-muted-foreground">Loading…</div>
+      ) : error ? (
+        <div className="p-4 text-destructive">{error}</div>
+      ) : data ? (
+        <div className="py-2">
+          {data.submissions.length > 0 && (
+            <>
+              <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Recent submissions
+              </div>
+              {data.submissions.map((s) => {
+                const selected = isSelected("submission", s.id);
+                return (
+                  <button
+                    key={`sub-${s.id}`}
+                    type="button"
+                    disabled={selected}
+                    onClick={() =>
+                      onSelect(
+                        { kind: "submission", id: s.id },
+                        s.exercise_title,
+                      )
+                    }
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <ContextPickerIcon kind="submission" />
+                    <span className="flex-1 truncate">{s.exercise_title}</span>
+                    {selected && <Check className="h-3 w-3 text-primary" aria-hidden="true" />}
+                  </button>
+                );
+              })}
+            </>
+          )}
+          {data.lessons.length > 0 && (
+            <>
+              <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Current lesson
+              </div>
+              {data.lessons.map((l) => {
+                const selected = isSelected("lesson", l.id);
+                return (
+                  <button
+                    key={`les-${l.id}`}
+                    type="button"
+                    disabled={selected}
+                    onClick={() =>
+                      onSelect({ kind: "lesson", id: l.id }, l.title)
+                    }
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <ContextPickerIcon kind="lesson" />
+                    <span className="flex-1 truncate">{l.title}</span>
+                    {selected && <Check className="h-3 w-3 text-primary" aria-hidden="true" />}
+                  </button>
+                );
+              })}
+            </>
+          )}
+          {data.exercises.length > 0 && (
+            <>
+              <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Exercises
+              </div>
+              {data.exercises.map((x) => {
+                const selected = isSelected("exercise", x.id);
+                return (
+                  <button
+                    key={`ex-${x.id}`}
+                    type="button"
+                    disabled={selected}
+                    onClick={() =>
+                      onSelect({ kind: "exercise", id: x.id }, x.title)
+                    }
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <ContextPickerIcon kind="exercise" />
+                    <span className="flex-1 truncate">{x.title}</span>
+                    {selected && <Check className="h-3 w-3 text-primary" aria-hidden="true" />}
+                  </button>
+                );
+              })}
+            </>
+          )}
+          {data.submissions.length === 0 &&
+            data.lessons.length === 0 &&
+            data.exercises.length === 0 && (
+              <div className="p-4 text-muted-foreground text-center">
+                No context available yet.
+              </div>
+            )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// Labeled context ref we carry in local state — server only cares about
+// (kind,id) but the chip needs a display label we already paid to fetch.
+interface LabeledContextRef extends ChatContextRef {
+  label: string;
+}
+
 // ── Input bar ────────────────────────────────────────────────────
 function InputBar({
   value,
@@ -1202,10 +1672,15 @@ function InputBar({
   isStreaming,
   activeMode,
   onModeChange,
+  onStartNew,
+  canStartNew,
   attachments,
   onUploadFiles,
   onRemoveAttachment,
   uploadError,
+  contextRefs,
+  onAddContextRef,
+  onRemoveContextRef,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -1216,6 +1691,11 @@ function InputBar({
   isStreaming: boolean;
   activeMode: ModeAgent;
   onModeChange: (m: ModeAgent) => void;
+  // P2-10 — "Start new conversation" affordance. Clicking opens a confirm
+  // dialog (parent-owned) so an accidental click doesn't lose transcript.
+  // Disabled when there is nothing to lose (empty transcript).
+  onStartNew: () => void;
+  canStartNew: boolean;
   // P1-6 — attachments API. `attachments` is the list of already-uploaded
   // pending rows (slim projection from the backend); `onUploadFiles` accepts
   // any `FileList | File[]` from the three entry points (picker / paste /
@@ -1224,10 +1704,22 @@ function InputBar({
   onUploadFiles: (files: FileList | File[]) => void;
   onRemoveAttachment: (id: string) => void;
   uploadError: string | null;
+  // P1-7 — context-refs API. Chips rendered in a dedicated row above the
+  // attachment chips; picker opened via an "@" button next to the paperclip.
+  contextRefs: LabeledContextRef[];
+  onAddContextRef: (ref: ChatContextRef, label: string) => void;
+  onRemoveContextRef: (kind: ChatContextRef["kind"], id: string) => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
+  // P1-7 — picker popover visibility. Lazy-mount keeps us from paying the
+  // network cost until the student actually clicks the "@" button.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // Backend caps `context_refs` at 3 via Pydantic `max_length=3`; mirror
+  // here so we never POST a payload that will 422.
+  const MAX_CONTEXT_REFS = 3;
+  const atContextLimit = contextRefs.length >= MAX_CONTEXT_REFS;
 
   useEffect(() => {
     const ta = textareaRef.current;
@@ -1301,6 +1793,41 @@ function InputBar({
         }}
         onDrop={handleDrop}
       >
+        {/* P1-7 — pending-context chip row. Visually distinct from attachment
+            chips (tinted primary background) so the student can tell at a
+            glance which rows will be prepended as structured context vs.
+            which will ride along as raw files. */}
+        {contextRefs.length > 0 && (
+          <div
+            className="flex flex-wrap gap-2 px-4 pt-3"
+            aria-label="Pending context references"
+            data-testid="context-chips"
+          >
+            {contextRefs.map((ref) => (
+              <div
+                key={`${ref.kind}-${ref.id}`}
+                className="flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 pl-2 pr-1 py-1 text-xs"
+                data-testid={`context-chip-${ref.kind}`}
+              >
+                <ContextPickerIcon kind={ref.kind} />
+                <span className="max-w-[200px] truncate font-medium">
+                  {ref.label}
+                </span>
+                <span className="text-muted-foreground/70 capitalize">
+                  {ref.kind}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onRemoveContextRef(ref.kind, ref.id)}
+                  aria-label={`Remove ${ref.label}`}
+                  className="h-5 w-5 rounded-full flex items-center justify-center hover:bg-muted"
+                >
+                  <X className="h-3 w-3" aria-hidden="true" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         {/* P1-6 — pending-attachments chip row. Rendered above the textarea so
             the student always sees what they're about to send. Each chip
             shows an icon (image vs file), filename, size, and a × button. */}
@@ -1385,7 +1912,57 @@ function InputBar({
                 e.target.value = "";
               }}
             />
+            {/* P1-7 — context picker. Sibling to the paperclip so the two
+                attach-affordances live next to each other. The popover
+                absolutely-positions upward from this button; its parent div
+                is `relative` so `bottom-12 left-0` anchors to the button. */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setPickerOpen((o) => !o)}
+                disabled={isStreaming || atContextLimit}
+                aria-label="Attach context"
+                aria-expanded={pickerOpen}
+                aria-haspopup="dialog"
+                title={
+                  atContextLimit
+                    ? `Max ${MAX_CONTEXT_REFS} context items per message`
+                    : "Attach submission, lesson, or exercise context"
+                }
+                data-testid="context-picker-trigger"
+                className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <AtSign className="h-4 w-4" aria-hidden="true" />
+              </button>
+              {pickerOpen && (
+                <ContextPickerPopover
+                  selectedRefs={contextRefs}
+                  onClose={() => setPickerOpen(false)}
+                  onSelect={(ref, label) => {
+                    onAddContextRef(ref, label);
+                    setPickerOpen(false);
+                  }}
+                />
+              )}
+            </div>
             <ModeChips active={activeMode} onChange={onModeChange} />
+            {/* P2-10 — "Start new conversation" affordance. Opens a confirm
+                dialog (owned by the page) before clearing messages so an
+                accidental click doesn't wipe a long transcript. Hidden when
+                there's nothing to start fresh from, which keeps the composer
+                clean on a brand-new conversation. */}
+            {canStartNew && (
+              <button
+                type="button"
+                onClick={onStartNew}
+                disabled={isStreaming}
+                aria-label="Start new conversation"
+                title="Start new conversation"
+                className="h-7 w-7 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <span className="hidden sm:block text-[11px] text-muted-foreground/50">
@@ -1462,13 +2039,20 @@ function ErrorBanner({ error, isStreaming, onRetry }: {
     : error.kind === "rate_limit" ? Timer
     : AlertTriangle;
 
+  // P2-7 — format the countdown as mm:ss so long windows ("retry in 1m 05s")
+  // stay legible. Single-digit seconds get zero-padded so the text doesn't
+  // shift width on every tick.
+  const mm = Math.floor(secondsRemaining / 60);
+  const ss = secondsRemaining % 60;
+  const mmss = `${mm}:${ss.toString().padStart(2, "0")}`;
+
   const copy =
     error.kind === "auth"
       ? "Session expired — please sign in again."
     : error.kind === "rate_limit"
       ? secondsRemaining > 0
-        ? `Too many requests — try again in ${secondsRemaining}s.`
-        : "Too many requests — you can try again now."
+        ? `Rate limited — retry in ${mmss}`
+        : "Rate limited — you can try again now."
     : error.kind === "server"
       ? error.message
     : "Connection lost — your last message didn\u2019t get a response.";
@@ -1524,6 +2108,7 @@ function ChatArea({
   onFirstMessage,
   onConversationId,
   onModeChange,
+  onRequestStartNew,
   prefill,
   initialMessages,
   initialConversationId,
@@ -1534,6 +2119,10 @@ function ChatArea({
   onFirstMessage: (preview: string, agent: string | undefined) => void;
   onConversationId: (id: string) => void;
   onModeChange: (m: ModeAgent) => void;
+  // P2-10 — fired when the user clicks the "Start new conversation" button.
+  // The page decides whether to show the confirm dialog or fire straight
+  // through (empty transcript case).
+  onRequestStartNew: () => void;
   prefill?: string;
   initialMessages?: StreamMessage[];
   initialConversationId?: string;
@@ -1549,6 +2138,7 @@ function ChatArea({
     cancel,
     setMessages,
     conversationId,
+    rateLimitRemaining,
   } = useStream({
     agentName: mode.agentName ?? undefined,
     initialMessages,
@@ -1577,32 +2167,6 @@ function ChatArea({
     [setMessages],
   );
 
-  // P1-1 — edit a persisted user turn.
-  //  1) POST /chat/messages/{id}/edit → server soft-deletes the target +
-  //     downstream rows, returns the freshly-inserted user row.
-  //  2) Trim local state to every message with `created_at` strictly older
-  //     than the edited one (we use array index since hook state is already
-  //     chronological).
-  //  3) Call sendMessage(new content) so `useStream` appends the new user
-  //     bubble + streams a fresh assistant reply — identical to a normal send
-  //     from the UI's perspective. The hook keeps the same conversationId so
-  //     the backend appends rather than creating a new conversation.
-  // Throws on failure so the bubble can display the error inline.
-  const handleEditUserMessage = useCallback(
-    async (messageId: string, nextContent: string): Promise<void> => {
-      await chatApi.editMessage(messageId, { content: nextContent });
-      setMessages((prev) => {
-        const idx = prev.findIndex((m) => m.id === messageId);
-        if (idx < 0) return prev;
-        // Drop the edited message and everything after it; sendMessage will
-        // append the new user bubble + the streaming assistant reply.
-        return prev.slice(0, idx);
-      });
-      await sendMessage(nextContent);
-    },
-    [sendMessage, setMessages],
-  );
-
   // P1-1 — server-known ids snapshot. Used by the render map to decide which
   // messages expose the pencil / thumbs / regenerate / sibling-navigator
   // affordances. Seeded at mount from `initialMessages` AND any sibling ids
@@ -1610,14 +2174,90 @@ function ChatArea({
   // are still real server rows — see P1-2). The set is mutable: new sibling
   // ids minted by a successful regenerate / sibling-swap get added here so
   // the bubble can flip between them without losing its affordances.
-  // Declared ABOVE the regenerate/sibling callbacks so closures capture it
-  // without hitting the TDZ when React re-runs the function body.
+  // Declared ABOVE the edit / regenerate / sibling callbacks so closures
+  // capture it without hitting the TDZ when React re-runs the function body.
   const persistedIdSet = useRef<Set<string>>(
     new Set([
       ...(initialMessages ?? []).map((m) => m.id),
       ...(initialMessages ?? []).flatMap((m) => m.siblingIds ?? []),
     ]),
   ).current;
+
+  // P1-1 — edit a persisted user turn.
+  //  1) POST /chat/messages/{id}/edit → server forks a new row (P1-3) while
+  //     preserving the original turn + soft-deletes every message strictly
+  //     after it; the response carries the new row + its sibling chain.
+  //  2) Trim local state to every message with `created_at` strictly older
+  //     than the edited one (we use array index since hook state is already
+  //     chronological).
+  //  3) Call sendMessage(new content) so `useStream` appends the new user
+  //     bubble + streams a fresh assistant reply — identical to a normal send
+  //     from the UI's perspective. The hook keeps the same conversationId so
+  //     the backend appends rather than creating a new conversation.
+  //  4) Re-hydrate the tail once the stream completes so the new user bubble
+  //     carries its `sibling_ids` chain; without this the `< k / N >`
+  //     navigator wouldn't render until the next full page load.
+  // Throws on failure so the bubble can display the error inline.
+  const handleEditUserMessage = useCallback(
+    async (messageId: string, nextContent: string): Promise<void> => {
+      const editResult = await chatApi.editMessage(messageId, {
+        content: nextContent,
+      });
+      setMessages((prev) => {
+        const idx = prev.findIndex((m) => m.id === messageId);
+        if (idx < 0) return prev;
+        // Drop the edited message and everything after it; sendMessage will
+        // append the new user bubble + the streaming assistant reply.
+        return prev.slice(0, idx);
+      });
+      // P1-3 — the edit response carries the freshly-forked user row's id +
+      // the full user-side sibling chain. Seed `persistedIdSet` with every id
+      // in the chain so the navigator + edit controls stay live after the
+      // stream completes.
+      persistedIdSet.add(editResult.id);
+      for (const sid of editResult.sibling_ids ?? []) {
+        persistedIdSet.add(sid);
+      }
+      // P2-10 — honor the currently-selected mode on edit-regenerate too.
+      await sendMessage(nextContent, undefined, mode.agentName);
+      // P1-3 — after the stream completes, re-hydrate the tail so the newly
+      // minted user bubble carries its `sibling_ids` (= full edit chain).
+      // Without this step the navigator wouldn't appear until the next full
+      // page load.
+      if (conversationId) {
+        try {
+          const fresh = await chatApi.getConversation(conversationId);
+          const siblings = editResult.sibling_ids ?? [];
+          const siblingsKey = [...siblings].sort().join(",");
+          setMessages((prev) => {
+            if (prev.length === 0) return prev;
+            return prev.map((m) => {
+              if (m.role !== "user") return m;
+              const fromServer = fresh.messages.find(
+                (fm) => fm.id === m.id && fm.role === "user",
+              );
+              if (!fromServer) return m;
+              const serverSiblings = fromServer.sibling_ids ?? [];
+              // Only overwrite when the server advertises the same chain;
+              // this keeps earlier untouched turns from being clobbered.
+              if (
+                [...serverSiblings].sort().join(",") === siblingsKey &&
+                serverSiblings.length > 1
+              ) {
+                for (const sid of serverSiblings) persistedIdSet.add(sid);
+                return { ...m, siblingIds: serverSiblings };
+              }
+              return m;
+            });
+          });
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn("Edit hydrate failed", err);
+        }
+      }
+    },
+    [sendMessage, setMessages, mode.agentName, conversationId, persistedIdSet],
+  );
 
   // P1-2 — regenerate an assistant reply. We stream a fresh variant via
   // `POST /chat/messages/{id}/regenerate` and replace the source bubble's
@@ -1631,11 +2271,17 @@ function ChatArea({
   // UX). If the backend rejects ownership, the handler logs and returns.
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const handleRegenerate = useCallback(
-    async (messageId: string): Promise<void> => {
+    async (
+      messageId: string,
+      options?: { agentOverride?: string },
+    ): Promise<void> => {
       if (regeneratingId !== null) return;
       setRegeneratingId(messageId);
       try {
-        const res = await regenerateMessage(messageId);
+        const res = await regenerateMessage(
+          messageId,
+          options?.agentOverride ? { agentOverride: options.agentOverride } : {},
+        );
         if (!res.ok) {
           // Surface the backend's detail if present (401/404/400/429/5xx) so
           // the console points at the failure class while the bubble reverts
@@ -1825,6 +2471,8 @@ function ChatArea({
   // the backend's 415/413 detail inline under the composer.
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachmentRead[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  // P1-7 — pending context-refs. Backend caps at 3; we enforce at add-time.
+  const [pendingContextRefs, setPendingContextRefs] = useState<LabeledContextRef[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const lastReportedLength = useRef(initialMessages?.length ?? 0);
@@ -1923,6 +2571,30 @@ function ChatArea({
     setPendingAttachments((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
+  // P1-7 — context-refs handlers. Dedupe by (kind,id) so a second click from
+  // the picker is a no-op rather than growing the chip row with duplicates.
+  const handleAddContextRef = useCallback(
+    (ref: ChatContextRef, label: string) => {
+      setPendingContextRefs((prev) => {
+        if (prev.some((r) => r.kind === ref.kind && r.id === ref.id)) {
+          return prev;
+        }
+        if (prev.length >= 3) return prev;
+        return [...prev, { ...ref, label }];
+      });
+    },
+    [],
+  );
+
+  const handleRemoveContextRef = useCallback(
+    (kind: ChatContextRef["kind"], id: string) => {
+      setPendingContextRefs((prev) =>
+        prev.filter((r) => !(r.kind === kind && r.id === id)),
+      );
+    },
+    [],
+  );
+
   const handleSend = useCallback(async () => {
     const text = input.trim();
     if (!text || isStreaming) return;
@@ -1933,8 +2605,32 @@ function ChatArea({
     const ids = pendingAttachments.map((a) => a.id);
     setPendingAttachments([]);
     setUploadError(null);
-    await sendMessage(text, ids.length > 0 ? ids : undefined);
-  }, [input, isStreaming, sendMessage, pendingAttachments]);
+    // P1-7 — same deal for context-refs. Strip the `label` (display-only) so
+    // the payload matches the backend's `ChatContextRef` schema exactly.
+    const refs: ChatContextRef[] = pendingContextRefs.map((r) => ({
+      kind: r.kind,
+      id: r.id,
+    }));
+    setPendingContextRefs([]);
+    // P2-10 — pass the currently-selected mode as a per-turn override so a
+    // mid-conversation mode switch immediately takes effect on the NEXT send
+    // without remounting the component or wiping the transcript. `mode` is a
+    // fresh prop on every render, so the closure always captures the latest
+    // agentName the user picked.
+    await sendMessage(
+      text,
+      ids.length > 0 ? ids : undefined,
+      mode.agentName,
+      refs.length > 0 ? refs : undefined,
+    );
+  }, [
+    input,
+    isStreaming,
+    sendMessage,
+    pendingAttachments,
+    pendingContextRefs,
+    mode.agentName,
+  ]);
 
   // P0-4 — Esc cancels the in-flight stream from anywhere on the page.
   // Attached to `window`, not the textarea, because the student may have
@@ -1983,6 +2679,11 @@ function ChatArea({
                     content={msg.content}
                     canEdit={canEdit}
                     onEdit={handleEditUserMessage}
+                    // P1-3 — edited user turns grow a sibling chain. Surface
+                    // the `< k / N >` navigator + wire the shared swap
+                    // callback so the bubble can flip between branches.
+                    siblingIds={msg.siblingIds}
+                    onSelectSibling={isPersisted ? handleSelectSibling : undefined}
                   />
                 : <AssistantBubble
                     key={msg.id}
@@ -1998,6 +2699,12 @@ function ChatArea({
                     onSelectSibling={isPersisted ? handleSelectSibling : undefined}
                     onRegenerate={isPersisted ? handleRegenerate : undefined}
                     isRegenerating={regeneratingId === msg.id}
+                    // P2-5 — hover-panel metadata (model / latency / tokens).
+                    model={msg.model}
+                    firstTokenMs={msg.firstTokenMs}
+                    totalDurationMs={msg.totalDurationMs}
+                    inputTokens={msg.inputTokens}
+                    outputTokens={msg.outputTokens}
                   />;
             })}
             <div ref={messagesEndRef} className="h-4" />
@@ -2020,6 +2727,23 @@ function ChatArea({
         <ErrorBanner error={error} isStreaming={isStreaming} onRetry={retry} />
       ) : null}
 
+      {/* P2-7 — compact budget pill. Only when the server has volunteered a
+          remaining count AND the user is near the limit, so it doesn't
+          distract during normal use. Non-interactive — purely informational. */}
+      {rateLimitRemaining != null && rateLimitRemaining < 5 ? (
+        <div className="mx-auto w-full max-w-5xl px-6 pt-2" aria-live="polite">
+          <span
+            data-testid="rate-limit-pill"
+            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-3 py-1 text-xs text-muted-foreground"
+          >
+            <Timer className="h-3 w-3" aria-hidden />
+            {rateLimitRemaining === 1
+              ? "1 message left this hour"
+              : `${rateLimitRemaining} messages left this hour`}
+          </span>
+        </div>
+      ) : null}
+
       <InputBar
         value={input}
         onChange={setInput}
@@ -2028,11 +2752,99 @@ function ChatArea({
         isStreaming={isStreaming}
         activeMode={mode.agentName}
         onModeChange={onModeChange}
+        onStartNew={onRequestStartNew}
+        // P2-10 — only surface the affordance when there's an active
+        // conversation to leave behind. Brand-new (empty) chats don't
+        // need the button since there's nothing to lose.
+        canStartNew={messages.length > 0}
         attachments={pendingAttachments}
         onUploadFiles={(files) => void handleUploadFiles(files)}
         onRemoveAttachment={handleRemoveAttachment}
         uploadError={uploadError}
+        contextRefs={pendingContextRefs}
+        onAddContextRef={handleAddContextRef}
+        onRemoveContextRef={handleRemoveContextRef}
       />
+    </div>
+  );
+}
+
+// ── Start-new confirm dialog (P2-10) ─────────────────────────────
+// Minimal hand-rolled modal matching the Delete-confirm style elsewhere in
+// this file — shadcn's AlertDialog isn't installed, and pulling it in just
+// for this one surface would be overkill. Focus lands on Cancel by default
+// so an errant Enter keypress doesn't irreversibly blow away the transcript.
+// Dialog is fully keyboard-accessible: Esc = cancel, Tab cycles within the
+// two buttons, and the backdrop click also cancels.
+function ConfirmStartNewDialog({
+  open,
+  onConfirm,
+  onCancel,
+}: {
+  open: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  // Focus Cancel when opened + Esc closes. The listener is scoped to `open`
+  // so we don't attach global handlers while the dialog is off-screen.
+  useEffect(() => {
+    if (!open) return;
+    cancelRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCancel();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onCancel]);
+
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="start-new-dialog-title"
+    >
+      <button
+        type="button"
+        aria-label="Cancel"
+        onClick={onCancel}
+        className="absolute inset-0 bg-black/50"
+        tabIndex={-1}
+      />
+      <div className="relative z-10 w-full max-w-sm rounded-xl border bg-card p-5 shadow-2xl">
+        <h2
+          id="start-new-dialog-title"
+          className="text-sm font-semibold"
+        >
+          Start a new conversation?
+        </h2>
+        <p className="mt-2 text-xs text-muted-foreground">
+          The current chat will move to the sidebar.
+        </p>
+        <div className="mt-4 flex items-center justify-end gap-2">
+          <button
+            ref={cancelRef}
+            type="button"
+            onClick={onCancel}
+            className="rounded-md border border-border/60 bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            Start new
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2071,6 +2883,13 @@ function ChatPageInner() {
   const [query, setQuery] = useState<string>("");
   const [debouncedQuery, setDebouncedQuery] = useState<string>("");
   const [showArchived, setShowArchived] = useState<boolean>(false);
+  // P2-6 — mobile slide-in drawer visibility. Only relevant below the
+  // `lg` breakpoint; on desktop the sidebar is permanently mounted.
+  const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
+  // P2-10 — "Start new conversation" confirm dialog visibility. Opened from
+  // the composer's ⊕ affordance; confirming fires `handleNew` which clears
+  // messages, drops `?c=`, and remounts the chat area.
+  const [startNewOpen, setStartNewOpen] = useState<boolean>(false);
   const prefillLoadedFor = useRef<string | null>(null);
   const initialConvApplied = useRef(false);
   // Same-tick cache for the first-message preview/agent so we can synthesize
@@ -2202,17 +3021,22 @@ function ChatPageInner() {
 
   const currentMode = MODES.find((m) => m.agentName === activeMode) ?? MODES[0];
 
+  // P2-10 — mode switch stays within the same conversation. The hook receives
+  // `agent_name` per-turn via `sendMessage(text, ids, mode.agentName)` so the
+  // user's context is preserved across the chip change; the only visible
+  // effect is the active-chip highlight and the gradient/label on the next
+  // assistant bubble. To start a fresh conversation use the "Start new
+  // conversation" button, which routes through `handleNew` with a confirm
+  // dialog when there's existing transcript to lose.
   const handleModeChange = (m: ModeAgent) => {
     setActiveMode(m);
-    // Mode switch wipes the conversation for now (P2-10 keeps context).
-    setActiveConvId(null);
-    setHydratedMessages(undefined);
-    writeLastViewedId(null);
-    router.replace("/chat");
-    setChatKey((k) => k + 1);
   };
 
   const handleNew = () => {
+    // P2-6 — ensure the mobile drawer is dismissed when starting a new
+    // conversation (whether triggered from inside the drawer or the
+    // mobile header's `+` button).
+    setDrawerOpen(false);
     setActiveMode(null);
     setActiveConvId(null);
     setHydratedMessages(undefined);
@@ -2222,7 +3046,34 @@ function ChatPageInner() {
     setChatKey((k) => k + 1);
   };
 
+  // P2-10 — open the confirm dialog. ChatArea only surfaces the ⊕ button when
+  // it has transcript, so by the time this fires there is genuinely something
+  // to lose. Cancel keeps all current state; Confirm inlines the same reset
+  // as `handleNew` — duplicating avoids closing over the non-memoized
+  // `handleNew`, which would cause the callback identity to churn every
+  // render.
+  const handleRequestStartNew = useCallback(() => {
+    setStartNewOpen(true);
+  }, []);
+  const handleConfirmStartNew = useCallback(() => {
+    setStartNewOpen(false);
+    setDrawerOpen(false);
+    setActiveMode(null);
+    setActiveConvId(null);
+    setHydratedMessages(undefined);
+    setComposerInput("");
+    writeLastViewedId(null);
+    router.replace("/chat");
+    setChatKey((k) => k + 1);
+  }, [router]);
+  const handleCancelStartNew = useCallback(() => {
+    setStartNewOpen(false);
+  }, []);
+
   const handleSelectConversation = (id: string) => {
+    // P2-6 — close the mobile drawer whenever a row is selected. Harmless
+    // on desktop since the drawer isn't rendered there.
+    setDrawerOpen(false);
     if (id === activeConvId) return;
     void openConversation(id, { pushUrl: true });
   };
@@ -2384,28 +3235,99 @@ function ChatPageInner() {
     [activeConvId, router],
   );
 
+  // P2-6 — shared sidebar props so we can mount `<ChatSidebar />` in both
+  // the desktop `<aside>` and the mobile drawer without repeating the wiring.
+  const sidebarProps = {
+    conversations,
+    activeId: activeConvId,
+    onSelect: handleSelectConversation,
+    onNew: handleNew,
+    loading: conversationsLoading,
+    query,
+    onQueryChange: setQuery,
+    showArchived,
+    onToggleArchived: setShowArchived,
+    onRename: handleRenameConversation,
+    onTogglePin: handleTogglePinConversation,
+    onToggleArchive: handleToggleArchiveConversation,
+    onDelete: handleDeleteConversation,
+  };
+
+  // P2-6 — swipe-to-close handlers for the mobile drawer. We only react
+  // to mostly-horizontal swipes with a > 60px leftward delta; anything
+  // else (vertical scroll, tiny drags) is ignored so normal list scrolling
+  // inside the drawer is unaffected.
+  const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const handleDrawerTouchStart = (e: React.TouchEvent<HTMLElement>) => {
+    const t = e.touches[0];
+    if (!t) return;
+    swipeStartRef.current = { x: t.clientX, y: t.clientY };
+  };
+  const handleDrawerTouchEnd = (e: React.TouchEvent<HTMLElement>) => {
+    const start = swipeStartRef.current;
+    swipeStartRef.current = null;
+    if (!start) return;
+    const t = e.changedTouches[0];
+    if (!t) return;
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (dx < -60 && Math.abs(dx) > Math.abs(dy)) {
+      setDrawerOpen(false);
+    }
+  };
+
   return (
     <div className="flex h-full overflow-hidden bg-background">
-      <Sidebar
-        conversations={conversations}
-        activeId={activeConvId}
-        onSelect={handleSelectConversation}
-        onNew={handleNew}
-        loading={conversationsLoading}
-        query={query}
-        onQueryChange={setQuery}
-        showArchived={showArchived}
-        onToggleArchived={setShowArchived}
-        onRename={handleRenameConversation}
-        onTogglePin={handleTogglePinConversation}
-        onToggleArchive={handleToggleArchiveConversation}
-        onDelete={handleDeleteConversation}
-      />
+      {/* Desktop sidebar — unchanged visual layout */}
+      <aside className="hidden lg:flex flex-col w-64 xl:w-72 border-r bg-card/50 shrink-0">
+        <ChatSidebar {...sidebarProps} />
+      </aside>
+
+      {/* P2-6 — mobile drawer overlay. Only mounted while open so we
+          don't duplicate the sidebar DOM (the desktop `<aside>` above is
+          `hidden lg:flex` via CSS only — it is still in the DOM). The
+          `translate-x-*` classes drive the slide-in animation; hidden
+          entirely on desktop via `lg:hidden`. */}
+      {drawerOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-40"
+          data-testid="mobile-drawer-overlay"
+        >
+          {/* Backdrop — tap to close */}
+          <button
+            type="button"
+            aria-label="Close conversations"
+            onClick={() => setDrawerOpen(false)}
+            className="absolute inset-0 bg-black/50 transition-opacity duration-200"
+          />
+          {/* Slide-in drawer */}
+          <aside
+            data-testid="mobile-conversations-drawer"
+            onTouchStart={handleDrawerTouchStart}
+            onTouchEnd={handleDrawerTouchEnd}
+            className={cn(
+              "absolute left-0 top-0 h-full w-80 max-w-[85vw] border-r bg-card shadow-xl",
+              "transition-transform duration-200 ease-out will-change-transform translate-x-0",
+            )}
+          >
+            <ChatSidebar {...sidebarProps} />
+          </aside>
+        </div>
+      )}
 
       <div className="flex flex-col flex-1 overflow-hidden min-w-0">
         {/* Mobile top bar */}
         <header className="lg:hidden flex items-center justify-between h-14 px-4 border-b bg-card/80 backdrop-blur shrink-0">
           <div className="flex items-center gap-2">
+            {/* P2-6 — hamburger opens the conversations drawer */}
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(true)}
+              aria-label="Open conversations"
+              className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground"
+            >
+              <Menu className="h-4 w-4" aria-hidden="true" />
+            </button>
             <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
               <Bot className="h-4 w-4 text-white" aria-hidden="true" />
             </div>
@@ -2423,6 +3345,7 @@ function ChatPageInner() {
             onFirstMessage={handleFirstMessage}
             onConversationId={handleConversationId}
             onModeChange={handleModeChange}
+            onRequestStartNew={handleRequestStartNew}
             prefill={prefill}
             initialMessages={hydratedMessages}
             initialConversationId={activeConvId ?? undefined}
@@ -2431,6 +3354,15 @@ function ChatPageInner() {
           />
         </div>
       </div>
+
+      {/* P2-10 — confirm dialog for the composer's ⊕ "Start new conversation"
+          affordance. Rendered at the page root so it overlays the sidebar + the
+          transcript regardless of scroll position. */}
+      <ConfirmStartNewDialog
+        open={startNewOpen}
+        onConfirm={handleConfirmStartNew}
+        onCancel={handleCancelStartNew}
+      />
     </div>
   );
 }
