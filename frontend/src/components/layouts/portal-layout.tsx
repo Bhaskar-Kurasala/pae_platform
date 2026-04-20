@@ -30,6 +30,7 @@ import { UserAvatar } from "@/components/features/user-avatar";
 import { Separator } from "@/components/ui/separator";
 import { Kbd } from "@/components/ui/kbd";
 import { useMyNotifications } from "@/lib/hooks/use-notifications";
+import { useDueCards } from "@/lib/hooks/use-srs";
 import { SocraticSlider } from "@/components/features/socratic-slider";
 
 function ThemeToggle() {
@@ -70,12 +71,11 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
   const router = useRouter();
   const { user, logout } = useAuthStore();
   const { data: unread } = useMyNotifications({ unreadOnly: true, limit: 50 });
-  // DISC-49 — surface the unread COUNT (not just a dot) so the sidebar
-  // reflects the real `useMyNotifications` feed. We scope to weekly-letter
-  // notifications to keep the badge specific to Receipts.
   const unreadLetterCount = (unread ?? []).filter(
     (n) => n.notification_type === "weekly_letter",
   ).length;
+  const { data: dueCards } = useDueCards(50);
+  const dueCount = dueCards?.length ?? 0;
 
   function handleLogout() {
     logout();
@@ -138,6 +138,19 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
                   aria-label={`${unreadLetterCount} unread ${unreadLetterCount === 1 ? "letter" : "letters"}`}
                 >
                   {unreadLetterCount > 9 ? "9+" : unreadLetterCount}
+                </span>
+              )}
+              {href === "/today" && dueCount > 0 && (
+                <span
+                  className={cn(
+                    "inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+                    active
+                      ? "bg-primary-foreground/20 text-primary-foreground"
+                      : "bg-amber-500 text-white",
+                  )}
+                  aria-label={`${dueCount} card${dueCount !== 1 ? "s" : ""} due for review`}
+                >
+                  {dueCount > 9 ? "9+" : dueCount}
                 </span>
               )}
               {active && <ChevronRight className="h-3 w-3 opacity-60" aria-hidden="true" />}
