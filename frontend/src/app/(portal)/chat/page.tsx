@@ -1,8 +1,10 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { AlertTriangle, Archive, ArchiveRestore, ArrowDown, ArrowUp, AtSign, Bookmark, BookmarkCheck, BookOpen, Bot, BriefcaseBusiness, Check, ChevronLeft, ChevronRight, Clock, Code2, Copy, Download, FileCode, FileText, GraduationCap, ImageIcon, ListChecks, Lock, Menu, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Puzzle, RefreshCw, RotateCw, Search, Sparkles, Square, Timer, Trash2, User, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MarkdownRenderer } from "@/components/features/markdown-renderer";
@@ -13,7 +15,8 @@ import {
   type StreamMessage,
 } from "@/hooks/use-stream";
 import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
-import { exercisesApi } from "@/lib/api-client";
+import { exercisesApi, srsApi } from "@/lib/api-client";
+import { useDueCards } from "@/lib/hooks/use-srs";
 import {
   chatApi,
   exportConversationMarkdown,
@@ -533,6 +536,8 @@ function ChatSidebar({
   const pinned = conversations.filter((c) => c.pinned_at);
   const rest = conversations.filter((c) => !c.pinned_at);
   const hasQuery = query.trim().length > 0;
+  const { data: dueCards } = useDueCards(50);
+  const dueCount = dueCards?.length ?? 0;
 
   return (
     <div className="flex flex-col h-full w-full">
@@ -542,6 +547,16 @@ function ChatSidebar({
             <Bot className="h-4 w-4 text-white" aria-hidden="true" />
           </div>
           <span className="font-semibold text-sm">AI Tutor</span>
+          {dueCount > 0 && (
+            <Link
+              href="/today"
+              className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-600 hover:bg-amber-500/20 transition-colors"
+              aria-label={`${dueCount} card${dueCount !== 1 ? "s" : ""} due for review — go to Today`}
+            >
+              <BookOpen className="h-3 w-3" aria-hidden="true" />
+              {dueCount} due
+            </Link>
+          )}
         </div>
         <button
           onClick={onNew}
@@ -1445,13 +1460,21 @@ function FlashcardButton({
   messageId: string;
   content: string;
 }) {
+  const router = useRouter();
+  const qc = useQueryClient();
   const [loading, setLoading] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   const handleClick = async () => {
     setLoading(true);
     try {
       const result = await chatApi.addFlashcards(messageId, content);
-      toast.success(`${result.cards_added} cards added to review`);
+      setSaved(true);
+      void qc.invalidateQueries({ queryKey: ["srs", "due"] });
+      toast.success(
+        `${result.cards_added} card${result.cards_added !== 1 ? "s" : ""} saved to review queue`,
+        { action: { label: "Review now →", onClick: () => router.push("/today") } },
+      );
     } catch {
       toast.error("Could not add flashcards — try again.");
     } finally {
@@ -1463,21 +1486,25 @@ function FlashcardButton({
     <button
       type="button"
       onClick={() => void handleClick()}
-      disabled={loading}
+      disabled={loading || saved}
       aria-label="Add flashcards from this message"
       data-testid="flashcard-button"
       className={cn(
         "inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
-        "text-muted-foreground hover:bg-muted hover:text-foreground",
-        "disabled:opacity-50 disabled:cursor-not-allowed",
+        saved
+          ? "text-green-600 cursor-default"
+          : "text-muted-foreground hover:bg-muted hover:text-foreground",
+        "disabled:opacity-50",
       )}
     >
       {loading ? (
         <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+      ) : saved ? (
+        <Check className="h-3.5 w-3.5" aria-hidden="true" />
       ) : (
         <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
       )}
-      Flashcards
+      {saved ? "Saved" : "Flashcards"}
     </button>
   );
 }
@@ -1612,16 +1639,12 @@ function AssistantBubble({
           )}
         </div>
         {truncated && !isStreaming && dbMessageId && onContinue && (
-          <button
-            type="button"
-            onClick={() => onContinue(dbMessageId, messageId)}
-            aria-label="Continue writing"
-            data-testid="continue-writing-button"
-            className="mt-2 ml-1 inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-primary border border-primary/30 hover:bg-primary/10 transition-colors"
-          >
-            <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
-            Continue writing
-          </button>
+          <div className="mt-2 ml-1 flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground animate-pulse">
+              <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
+              Continuing…
+            </span>
+          </div>
         )}
         {showActions && (
           <div
@@ -2517,8 +2540,16 @@ function ChatArea({
     initialMessages,
     conversationId: initialConversationId,
     onConversationId,
-    onMessagePersisted: (_ephemeralId, dbId) => {
+    onMessagePersisted: (ephemeralId, dbId) => {
       persistedIdSet.add(dbId);
+      // Fire-and-forget: pre-generate 3 quiz versions for every persisted
+      // assistant message so Quiz Me is instant on the first click.
+      const msg = messages.find(
+        (m) => m.id === ephemeralId && m.role === "assistant",
+      );
+      if (msg) {
+        chatApi.triggerQuizPregenerate(dbId, msg.content);
+      }
     },
   });
 
@@ -2876,7 +2907,16 @@ function ChatArea({
       if (quizLoading) return;
       setQuizLoading(true);
       try {
-        const result = await chatApi.generateQuiz(messageId, content);
+        // Try cache first — gives instant feel with a brief shimmer.
+        // On cache miss (404 or error), fall back to live generation.
+        const [cached] = await Promise.all([
+          chatApi.getCachedQuiz(messageId),
+          // Minimum 1s shimmer so "Generating quiz…" doesn't flash for <100ms
+          new Promise<void>((r) => setTimeout(r, 1000)),
+        ]);
+
+        const result = cached ?? await chatApi.generateQuiz(messageId, content);
+
         setQuizPanel({
           messageId,
           questions: result.questions,
@@ -2972,6 +3012,20 @@ function ChatArea({
       lastReportedLength.current = messages.length;
     }
   }, [messages, mode.agentName, onFirstMessage, initialConversationId, initialMessages]);
+
+  // Auto-continue: when the last assistant message is truncated and streaming
+  // has just finished, fire continueMessage automatically after a short pause
+  // so the student never has to manually type "continue".
+  useEffect(() => {
+    if (isStreaming) return;
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== "assistant" || !last.truncated || !last.dbMessageId) return;
+    const timer = setTimeout(() => {
+      void continueMessage(last.dbMessageId!, last.id);
+    }, 800);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStreaming, messages]);
 
   // P1-6 — attachment handlers. Uploading happens eagerly on drop/paste/pick
   // so the user sees the chip immediately; the server-assigned id goes into
@@ -3289,6 +3343,8 @@ function QuizPanel({
   onClose: () => void;
   onUpdatePanel: (p: { messageId: string; questions: QuizQuestion[]; concepts_covered?: string[] }) => void;
 }) {
+  const router = useRouter();
+  const qc = useQueryClient();
   // Local layer: track pending selection + confidence before reveal
   const [localQuestions, setLocalQuestions] = useState<LocalQuestion[]>(
     () => panel.questions.map((q) => ({ ...q })),
@@ -3328,19 +3384,28 @@ function QuizPanel({
     onUpdatePanel({ ...panel, questions: updated });
   };
 
-  // Flashcard button: save each wrong question to /api/v1/chat/flashcards
+  // Flashcard button: persist each wrong question directly to SRS review queue
   const handleAddFlashcards = async () => {
     setFlashcardLoading(true);
     try {
       const wrongOnes = localQuestions.filter(
         (q, qi) => q.selected_index !== undefined && !pendingReveal.has(qi) && q.selected_index !== q.correct_index,
       );
-      for (const q of wrongOnes) {
-        const content = `Q: ${q.question}\nCorrect answer: ${q.options[q.correct_index]}\nExplanation: ${q.explanation}`;
-        await chatApi.addFlashcards(panel.messageId, content);
-      }
+      await Promise.all(
+        wrongOnes.map((q) => {
+          const slug = q.question.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 80).replace(/-+$/g, "");
+          return srsApi.create({
+            concept_key: `quiz:${slug}`,
+            prompt: `${q.question}\n\nAnswer: ${q.options[q.correct_index]}\n\n${q.explanation}`,
+          });
+        }),
+      );
       setFlashcardsDone(true);
-      toast.success(`Added ${wrongOnes.length} question${wrongOnes.length !== 1 ? "s" : ""} to flashcards`);
+      void qc.invalidateQueries({ queryKey: ["srs", "due"] });
+      toast.success(
+        `${wrongOnes.length} missed question${wrongOnes.length !== 1 ? "s" : ""} added to review queue`,
+        { action: { label: "Review now →", onClick: () => router.push("/today") } },
+      );
     } catch {
       toast.error("Could not save flashcards — try again");
     } finally {

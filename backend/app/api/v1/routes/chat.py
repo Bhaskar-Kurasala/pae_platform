@@ -682,15 +682,17 @@ def _parse_flashcards(text: str) -> list[FlashcardItem]:
 async def extract_flashcards(
     payload: FlashcardExtractRequest,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> FlashcardExtractResponse:
-    """Invoke the spaced_repetition agent to extract Q/A cards from content.
+    """Extract Q/A cards from content and persist them to the SRS table.
 
-    The agent is called with ``task = "Extract flashcards from: <content>"``
-    and ``context = {"source_message_id": message_id}``.  Cards are parsed
-    from the response and returned so the UI can show "N cards added to review".
+    Calls the spaced_repetition agent to identify Q/A pairs, then writes each
+    card via SRSService.upsert_card so it appears in the student's review queue.
     """
     from app.agents.registry import get_agent, _ensure_registered
     from app.agents.base_agent import AgentState
+    from app.services.srs_service import SRSService
+    import re as _re_slug
 
     _ensure_registered()
     try:
@@ -732,6 +734,29 @@ async def extract_flashcards(
         snippet = payload.content.strip()[:200]
         cards = [FlashcardItem(question=snippet, answer="Review this material.")]
 
+    # Persist each extracted card to the SRS table so it enters the review queue.
+    srs = SRSService(db)
+    for card in cards:
+        slug = _re_slug.sub(r"[^a-z0-9]+", "-", card.question.lower())[:80].strip("-")
+        concept_key = f"chat:{slug}"
+        try:
+            await srs.upsert_card(
+                user_id=current_user.id,
+                concept_key=concept_key,
+                prompt=card.question,
+            )
+        except Exception as exc:
+            _flash_log.warning(
+                "flashcard_extract.srs_persist_failed",
+                concept_key=concept_key,
+                error=str(exc),
+            )
+
+    _flash_log.info(
+        "flashcard_extract.persisted",
+        user_id=str(current_user.id),
+        cards=len(cards),
+    )
     return FlashcardExtractResponse(cards_added=len(cards), cards=cards)
 
 
@@ -912,3 +937,106 @@ async def generate_quiz(
         ]
 
     return QuizGenerateResponse(questions=questions, concepts_covered=concepts_covered)
+
+
+# ---------------------------------------------------------------------------
+# Cached quiz — pre-generated versions served instantly
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/quiz/{message_id}",
+    response_model=QuizGenerateResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def get_cached_quiz(
+    message_id: str,
+    current_user: User = Depends(get_current_user),
+) -> QuizGenerateResponse:
+    """Serve a pre-generated quiz from Redis cache with round-robin version rotation.
+
+    On first click: serves version 1.
+    On second click: serves version 2.
+    On third click: serves version 3.
+    On fourth click: wraps back to version 1.
+
+    Returns 404 if no cache exists yet (client falls back to live generation).
+    """
+    import json as _json
+
+    from app.core.redis import get_redis, namespaced_key
+    from app.schemas.chat import QuizQuestion as QQ
+
+    redis = await get_redis()
+    key = namespaced_key("quiz", message_id)
+    raw = await redis.get(key)
+    if not raw:
+        raise HTTPException(status_code=404, detail="Quiz cache miss")
+
+    data = _json.loads(raw)
+    versions: list[list[dict]] = data.get("versions", [])
+    counter: int = data.get("counter", 0)
+
+    # Filter to non-empty versions
+    valid_versions = [v for v in versions if v]
+    if not valid_versions:
+        raise HTTPException(status_code=404, detail="Quiz cache empty")
+
+    version_idx = counter % len(valid_versions)
+    chosen = valid_versions[version_idx]
+
+    # Increment counter for next call
+    data["counter"] = counter + 1
+    await redis.setex(key, 86_400, _json.dumps(data))
+
+    questions = []
+    concepts_covered: list[str] = []
+    for item in chosen:
+        questions.append(QQ(
+            question=item["question"],
+            options=item["options"],
+            correct_index=item["correct_index"],
+            explanation=item["explanation"],
+            bloom_level=item.get("bloom_level", "application"),
+            concept=item.get("concept", ""),
+            question_type=item.get("question_type", "application"),
+            distractor_rationales=item.get("distractor_rationales", []),
+            misconception_tag=item.get("misconception_tag"),
+        ))
+        c = item.get("_concepts_covered", [])
+        if isinstance(c, list):
+            concepts_covered.extend(c)
+
+    _quiz_log.info(
+        "quiz_cache.served",
+        message_id=message_id,
+        version=version_idx + 1,
+        question_count=len(questions),
+    )
+    return QuizGenerateResponse(questions=questions, concepts_covered=list(set(concepts_covered)))
+
+
+@router.post(
+    "/quiz/{message_id}/pregenerate",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def trigger_quiz_pregeneration(
+    message_id: str,
+    payload: QuizGenerateRequest,
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """Enqueue background pre-generation of 3 quiz versions for a message.
+
+    Called by the frontend immediately after an assistant message is persisted.
+    Returns 202 immediately; generation happens async in Celery.
+    """
+    from app.tasks.quiz_pregenerate import pregenerate_quiz_for_message
+    from app.core.redis import get_redis, namespaced_key
+
+    redis = await get_redis()
+    key = namespaced_key("quiz", message_id)
+    already = await redis.exists(key)
+    if not already:
+        pregenerate_quiz_for_message.delay(message_id, payload.content)
+        _quiz_log.info("quiz_pregenerate.enqueued", message_id=message_id)
+
+    return {"status": "accepted"}

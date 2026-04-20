@@ -14,6 +14,7 @@ _KEY_CATEGORIES = frozenset(
         "conv",  # MOA conversation history (1h TTL)
         "courses",  # published course list cache
         "interview",  # mock-interview session store
+        "quiz",  # pre-generated quiz versions keyed by message_id
     }
 )
 

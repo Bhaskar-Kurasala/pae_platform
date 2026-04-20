@@ -260,6 +260,22 @@ export const chatApi = {
       message_id: messageId,
       content,
     }),
+  // Serve a pre-generated quiz from Redis cache (rotates v1→v2→v3→v1).
+  // Returns null on cache miss (404) so the caller falls back to live generation.
+  getCachedQuiz: async (messageId: string): Promise<QuizGenerateResponse | null> => {
+    try {
+      return await api.get<QuizGenerateResponse>(`/api/v1/chat/quiz/${messageId}`);
+    } catch {
+      return null;
+    }
+  },
+  // Enqueue background pre-generation of 3 quiz versions for a message (fire-and-forget).
+  triggerQuizPregenerate: (messageId: string, content: string): void => {
+    void api.post(`/api/v1/chat/quiz/${messageId}/pregenerate`, {
+      message_id: messageId,
+      content,
+    }).catch(() => {/* non-critical, swallow silently */});
+  },
 };
 
 // ---------- Export (P1-9) ----------
