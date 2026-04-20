@@ -3394,9 +3394,10 @@ function QuizPanel({
       await Promise.all(
         wrongOnes.map((q) => {
           const slug = q.question.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 80).replace(/-+$/g, "");
+          const prompt = `${q.question}\n\nAnswer: ${q.options[q.correct_index]}\n\n${q.explanation}`.slice(0, 2000);
           return srsApi.create({
             concept_key: `quiz:${slug}`,
-            prompt: `${q.question}\n\nAnswer: ${q.options[q.correct_index]}\n\n${q.explanation}`,
+            prompt,
           });
         }),
       );

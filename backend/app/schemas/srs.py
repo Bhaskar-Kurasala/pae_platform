@@ -31,4 +31,4 @@ class SRSReviewRequest(BaseModel):
 
 class SRSUpsertRequest(BaseModel):
     concept_key: str = Field(min_length=1, max_length=128)
-    prompt: str = Field(default="", max_length=512)
+    prompt: str = Field(default="", max_length=2000)
