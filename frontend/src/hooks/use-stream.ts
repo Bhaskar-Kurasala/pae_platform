@@ -174,6 +174,14 @@ interface UseStreamOptions {
    * (b) push `/chat?c={id}` onto the URL.
    */
   onConversationId?: (id: string) => void;
+  /**
+   * Fired when the backend's meta SSE event arrives after persistence,
+   * carrying the real DB message id. The page uses this to add the id to
+   * `persistedIdSet` so action buttons (Quiz me, Regenerate, etc.) appear
+   * on the bubble without a page reload.
+   * Args: ephemeralId (the client UUID used during streaming), dbId (server row id).
+   */
+  onMessagePersisted?: (ephemeralId: string, dbId: string) => void;
 }
 
 interface UseStreamReturn {
@@ -297,6 +305,7 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
     initialMessages,
     conversationId: initialConversationId,
     onConversationId,
+    onMessagePersisted,
   } = options;
   const contextProviderRef = useRef(contextProvider);
   contextProviderRef.current = contextProvider;
@@ -327,6 +336,8 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
   }, [conversationId]);
   const onConversationIdRef = useRef(onConversationId);
   onConversationIdRef.current = onConversationId;
+  const onMessagePersistedRef = useRef(onMessagePersisted);
+  onMessagePersistedRef.current = onMessagePersisted;
   const setConversationId = useCallback((id: string | null) => {
     conversationIdRef.current = id;
     setConversationIdState(id);
@@ -695,16 +706,19 @@ export function useStream(options: UseStreamOptions = {}): UseStreamReturn {
 
               // Meta event: carries the server-assigned DB message id and
               // truncated flag after persistence (emitted after done: true).
+              // Swap the ephemeral client UUID for the real DB id so that
+              // isPersisted checks in the page work immediately without reload.
               if (parsed.meta === true && parsed.message_id) {
                 const dbMsgId = parsed.message_id;
                 const isTruncated = parsed.truncated === true;
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === assistantId
-                      ? { ...msg, dbMessageId: dbMsgId, truncated: isTruncated }
+                      ? { ...msg, id: dbMsgId, dbMessageId: dbMsgId, truncated: isTruncated }
                       : msg,
                   ),
                 );
+                onMessagePersistedRef.current?.(assistantId, dbMsgId);
                 continue;
               }
 

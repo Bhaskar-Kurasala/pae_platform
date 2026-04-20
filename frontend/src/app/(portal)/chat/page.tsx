@@ -2517,6 +2517,9 @@ function ChatArea({
     initialMessages,
     conversationId: initialConversationId,
     onConversationId,
+    onMessagePersisted: (_ephemeralId, dbId) => {
+      persistedIdSet.add(dbId);
+    },
   });
 
   // P1-5 — POST the rating then patch `myFeedback` on the message in-place.
