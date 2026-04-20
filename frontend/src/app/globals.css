@@ -279,6 +279,13 @@
   }
 }
 
+@keyframes skill-pulse {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.1); }
+  70%  { transform: scale(0.97); }
+  100% { transform: scale(1); }
+}
+
 /* Respect reduced motion — disable all keyframe animations */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -301,6 +308,9 @@
   }
   .animate-blink-cursor {
     animation: blink-cursor 1s step-end infinite;
+  }
+  .animate-skill-pulse {
+    animation: skill-pulse 600ms var(--ease-spring) both;
   }
 
   /* Elevation utilities (tokens consumed via shadow) */

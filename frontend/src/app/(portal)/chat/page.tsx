@@ -1581,9 +1581,22 @@ function AssistantBubble({
   dbMessageId?: string;
   onContinue?: (dbMessageId: string, assistantMessageId: string) => void;
 }) {
+  const router = useRouter();
   const modeLabel = MODES.find((m) => m.agentName === agentName)?.label;
   const showActions = !isThinking && !(isStreaming && isLast) && content.length > 0;
   const canRate = showActions && onSubmitFeedback !== undefined;
+
+  // P0-3 — detect a fenced code block so we can surface "Try in Studio"
+  const CODE_BLOCK_RE = /```[\s\S]*?```/;
+  const hasCodeBlock = CODE_BLOCK_RE.test(content);
+
+  function handleTryInStudio() {
+    // Extract first code block content (strip the fences + optional language tag)
+    const match = /```(?:\w+)?\n?([\s\S]*?)```/.exec(content);
+    const codeContent = match ? match[1] : content;
+    const encoded = btoa(unescape(encodeURIComponent(codeContent)));
+    router.push(`/studio?code=${encoded}`);
+  }
   const canRegenerate = showActions && onRegenerate !== undefined;
   const hasSiblings = (siblingIds?.length ?? 0) > 1;
   // P2-5 — only surface the metadata popover on bubbles with at least one
@@ -1696,6 +1709,17 @@ function AssistantBubble({
             )}
             {onSaveToNotebook && (
               <BookmarkButton onClick={onSaveToNotebook} isSaved={isSaved} />
+            )}
+            {hasCodeBlock && showActions && (
+              <button
+                type="button"
+                onClick={handleTryInStudio}
+                aria-label="Try this code in Studio"
+                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              >
+                <Code2 className="h-3.5 w-3.5" aria-hidden="true" />
+                Try in Studio
+              </button>
             )}
           </div>
         )}

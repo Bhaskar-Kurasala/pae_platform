@@ -1,4 +1,7 @@
+import { Suspense } from "react";
 import { StudioLayout } from "@/components/features/studio/studio-layout";
+import { StudioPageInner } from "./studio-page-inner";
+import { StudioPageHeader } from "./studio-page-header";
 
 export const metadata = {
   title: "Studio · PAE Platform",
@@ -7,16 +10,21 @@ export const metadata = {
 export default function StudioPage() {
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-border bg-card px-4 py-3">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Studio
-          </p>
-          <h1 className="text-lg font-semibold leading-tight">Code · Tutor · Trace</h1>
-        </div>
-      </div>
+      {/*
+        StudioPageHeader is a client component that owns the challenge-drawer
+        toggle state while keeping this server component boundary intact.
+      */}
+      <StudioPageHeader />
       <div className="flex-1 overflow-hidden">
-        <StudioLayout />
+        {/*
+          StudioPageInner reads useSearchParams() to handle the optional
+          ?code= deep-link param from "Try in Studio" buttons in chat.
+          Suspense is required by Next.js around useSearchParams() calls.
+          The fallback renders a plain StudioLayout with no initial code.
+        */}
+        <Suspense fallback={<StudioLayout />}>
+          <StudioPageInner />
+        </Suspense>
       </div>
     </div>
   );

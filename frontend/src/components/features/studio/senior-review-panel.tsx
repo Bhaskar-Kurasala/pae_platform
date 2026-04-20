@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
@@ -69,6 +69,10 @@ const VERDICT_STYLE: Record<
   },
 };
 
+/** Typewriter interval in ms per character. Capped so total < 1500ms. */
+const CHAR_INTERVAL_MS = 25;
+const MAX_TYPEWRITER_MS = 1500;
+
 function CommentRow({ comment }: { comment: SeniorReviewComment }) {
   const style = SEVERITY_STYLE[comment.severity];
   const Icon = style.Icon;
@@ -115,6 +119,73 @@ export function SeniorReviewPanel({
   review,
   onClose,
 }: Props) {
+  // Reveal animation state
+  const [verdictVisible, setVerdictVisible] = useState(false);
+  const [displayedHeadline, setDisplayedHeadline] = useState("");
+  const [headlineDone, setHeadlineDone] = useState(false);
+  const [bodyVisible, setBodyVisible] = useState(false);
+  const [nextStepVisible, setNextStepVisible] = useState(false);
+
+  // Track which review we last animated so we don't re-animate on re-renders
+  const animatedReviewRef = useRef<SeniorReview | null>(null);
+
+  // Reset all reveal state when panel closes or a new request starts
+  useEffect(() => {
+    if (!open || loading) {
+      setVerdictVisible(false);
+      setDisplayedHeadline("");
+      setHeadlineDone(false);
+      setBodyVisible(false);
+      setNextStepVisible(false);
+      animatedReviewRef.current = null;
+    }
+  }, [open, loading]);
+
+  // Trigger reveal sequence when review data arrives
+  useEffect(() => {
+    if (!review || animatedReviewRef.current === review) return;
+    animatedReviewRef.current = review;
+
+    // Phase 1: fade-in verdict pill (100ms delay)
+    const verdictTimer = window.setTimeout(() => {
+      setVerdictVisible(true);
+    }, 100);
+
+    // Phase 2: typewriter for headline, starting after verdict fades in
+    const headline = review.headline;
+    const charInterval = Math.min(
+      CHAR_INTERVAL_MS,
+      MAX_TYPEWRITER_MS / Math.max(headline.length, 1),
+    );
+    let charIndex = 0;
+
+    const typewriterStart = window.setTimeout(() => {
+      const interval = window.setInterval(() => {
+        charIndex += 1;
+        setDisplayedHeadline(headline.slice(0, charIndex));
+        if (charIndex >= headline.length) {
+          window.clearInterval(interval);
+          setHeadlineDone(true);
+        }
+      }, charInterval);
+    }, 300); // start typewriter 300ms after mount (after verdict begins fading in)
+
+    // Phase 3 & 4: strengths + comments, then next step, timed off max typewriter duration
+    const bodyDelay = 300 + Math.min(headline.length * charInterval, MAX_TYPEWRITER_MS) + 150;
+    const nextStepDelay = bodyDelay + 300;
+
+    const bodyTimer = window.setTimeout(() => setBodyVisible(true), bodyDelay);
+    const nextStepTimer = window.setTimeout(() => setNextStepVisible(true), nextStepDelay);
+
+    return () => {
+      window.clearTimeout(verdictTimer);
+      window.clearTimeout(typewriterStart);
+      window.clearTimeout(bodyTimer);
+      window.clearTimeout(nextStepTimer);
+    };
+  }, [review]);
+
+  // Escape key closes panel
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
@@ -177,60 +248,87 @@ export function SeniorReviewPanel({
 
           {review && verdict && (
             <div className="space-y-5">
+              {/* Phase 1: verdict pill fades in */}
               <div
                 className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium",
+                  "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-opacity duration-300",
                   verdict.pill,
+                  verdictVisible ? "opacity-100" : "opacity-0",
                 )}
               >
                 <verdict.Icon className="h-3.5 w-3.5" aria-hidden="true" />
                 {verdict.label}
               </div>
 
-              <p className="text-base font-medium text-foreground">
-                {review.headline}
+              {/* Phase 2: headline typewriter */}
+              <p
+                className="text-base font-medium text-foreground"
+                aria-live="polite"
+                aria-label={headlineDone ? review.headline : undefined}
+              >
+                {displayedHeadline}
+                {!headlineDone && (
+                  <span
+                    className="ml-px inline-block w-0.5 h-[1em] align-middle bg-foreground animate-pulse"
+                    aria-hidden="true"
+                  />
+                )}
               </p>
 
-              {review.strengths.length > 0 && (
+              {/* Phase 3: strengths + comments fade in after headline */}
+              <div
+                className={cn(
+                  "space-y-5 transition-opacity duration-500",
+                  bodyVisible ? "opacity-100" : "opacity-0",
+                )}
+              >
+                {review.strengths.length > 0 && (
+                  <section>
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Strengths
+                    </h3>
+                    <ul className="mt-2 space-y-1.5">
+                      {review.strengths.map((s, i) => (
+                        <li
+                          key={i}
+                          className="flex gap-2 text-sm text-foreground/90"
+                        >
+                          <Check
+                            className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+                            aria-hidden="true"
+                          />
+                          <span>{s}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+
                 <section>
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Strengths
+                    Comments ({review.comments.length})
                   </h3>
-                  <ul className="mt-2 space-y-1.5">
-                    {review.strengths.map((s, i) => (
-                      <li
-                        key={i}
-                        className="flex gap-2 text-sm text-foreground/90"
-                      >
-                        <Check
-                          className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
-                          aria-hidden="true"
-                        />
-                        <span>{s}</span>
-                      </li>
-                    ))}
-                  </ul>
+                  {review.comments.length === 0 ? (
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      No line-level comments.
+                    </p>
+                  ) : (
+                    <ul className="mt-2 space-y-2">
+                      {review.comments.map((c, i) => (
+                        <CommentRow key={i} comment={c} />
+                      ))}
+                    </ul>
+                  )}
                 </section>
-              )}
+              </div>
 
-              <section>
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Comments ({review.comments.length})
-                </h3>
-                {review.comments.length === 0 ? (
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    No line-level comments.
-                  </p>
-                ) : (
-                  <ul className="mt-2 space-y-2">
-                    {review.comments.map((c, i) => (
-                      <CommentRow key={i} comment={c} />
-                    ))}
-                  </ul>
+              {/* Phase 4: next step fades in last */}
+              <section
+                className={cn(
+                  "rounded-lg border border-primary/30 bg-primary/5 p-3 transition-opacity duration-500",
+                  nextStepVisible ? "opacity-100" : "opacity-0",
                 )}
-              </section>
-
-              <section className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+              >
                 <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
                   <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
                   Next step

@@ -91,6 +91,21 @@ export function StudioChat() {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // P1-4 — listen for studio:ask custom events from ExecutionTrace "Why did this break?" button
+  useEffect(() => {
+    function handleStudioAsk(event: Event) {
+      const e = event as CustomEvent<{ question: string }>;
+      const question = e.detail?.question;
+      if (!question || isStreaming) return;
+      const contextualMessage = buildMessageWithContext(question);
+      void sendMessage(contextualMessage);
+    }
+    window.addEventListener("studio:ask", handleStudioAsk);
+    return () => {
+      window.removeEventListener("studio:ask", handleStudioAsk);
+    };
+  }, [isStreaming, sendMessage, buildMessageWithContext]);
+
   // #40 — after a message is sent, parse tutor response for line pins
   const prevMessagesLength = useRef(messages.length);
   useEffect(() => {

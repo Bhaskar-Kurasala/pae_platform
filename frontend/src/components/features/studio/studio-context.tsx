@@ -39,6 +39,8 @@ interface StudioContextValue {
   setStepIndex: (i: number) => void;
   run: () => Promise<void>;
   hasRunOnce: boolean;
+  // P3-1 — session run count for percentile toast
+  runCount: number;
 
   // #39 — Diff view
   previousCode: string | null;
@@ -103,13 +105,21 @@ const GLOBAL_EXERCISE_ID = "studio-global";
 
 const StudioContext = createContext<StudioContextValue | null>(null);
 
-export function StudioProvider({ children }: { children: React.ReactNode }) {
-  const [code, setCodeState] = useState<string>("");
+export function StudioProvider({
+  children,
+  initialCode,
+}: {
+  children: React.ReactNode;
+  initialCode?: string;
+}) {
+  const [code, setCodeState] = useState<string>(initialCode ?? "");
   const [result, setResult] = useState<ExecuteResponse | null>(null);
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [stepIndex, setStepIndex] = useState<number>(0);
   const [hasRunOnce, setHasRunOnce] = useState(false);
+  // P3-1 — session run count (resets on page reload, incrementing on each successful run)
+  const [runCount, setRunCount] = useState(0);
 
   // #39
   const [previousCode, setPreviousCode] = useState<string | null>(null);
@@ -134,14 +144,18 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ---------------------------------------------------------------------------
-  // #42 — restore draft on mount
+  // #42 — restore draft on mount (skip if a deep-link initialCode was provided)
   // ---------------------------------------------------------------------------
   useEffect(() => {
     if (typeof window === "undefined") return;
+    // If caller injected code via a deep-link, use that and don't overwrite
+    // it with the stale local draft so the "Try in Studio" experience is clean.
+    if (initialCode) return;
     const draft = localStorage.getItem(draftKey(GLOBAL_EXERCISE_ID));
     if (draft) {
       setCodeState(draft);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -193,6 +207,13 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         saveHistory(GLOBAL_EXERCISE_ID, updated);
         return updated;
       });
+
+      // P2-2 — notify skill graph and social reward features of a successful run
+      window.dispatchEvent(
+        new CustomEvent("studio:run-success", { detail: { code: codeRef.current } }),
+      );
+      // P3-1 — increment session run count for percentile toast
+      setRunCount((n) => n + 1);
     } catch (err) {
       setRunError(err instanceof Error ? err.message : "Run failed");
       setResult(null);
@@ -238,6 +259,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
       setStepIndex,
       run,
       hasRunOnce,
+      runCount,
       previousCode,
       showDiff,
       setShowDiff,
@@ -258,6 +280,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
       stepIndex,
       run,
       hasRunOnce,
+      runCount,
       previousCode,
       showDiff,
       tutorPins,

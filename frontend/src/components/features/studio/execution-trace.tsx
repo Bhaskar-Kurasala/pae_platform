@@ -1,7 +1,7 @@
 "use client";
 
-import { Fragment, useMemo } from "react";
-import { AlertCircle, Clock, Loader2 } from "lucide-react";
+import { Fragment, useCallback, useMemo } from "react";
+import { AlertCircle, Clock, HelpCircle, Loader2 } from "lucide-react";
 import { useStudio } from "./studio-context";
 
 const TENSOR_SHAPE_RE = /\b(?:shape|size)=?\s*\(([^)]+)\)|torch\.Size\(\[([^\]]+)\]\)/i;
@@ -60,8 +60,25 @@ function parseTraceback(input: string): TracebackSegment[] {
   return segments;
 }
 
+function dispatchAsk(question: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new CustomEvent("studio:ask", { detail: { question } }));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function ExecutionTrace() {
-  const { result, running, runError, stepIndex, setStepIndex } = useStudio();
+  const { result, running, runError, stepIndex, setStepIndex, code } = useStudio();
+
+  const handleExplainError = useCallback(
+    (errorText: string) => {
+      const question = `Explain this error:\n\`\`\`\n${errorText}\n\`\`\`\nMy code:\n\`\`\`python\n${code}\n\`\`\``;
+      dispatchAsk(question);
+    },
+    [code],
+  );
 
   const events = result?.events ?? [];
   const currentEvent = events[stepIndex] ?? null;
@@ -123,25 +140,36 @@ export function ExecutionTrace() {
       {result.error && (
         <div className="flex items-start gap-2 rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <pre className="whitespace-pre-wrap break-words font-mono">
-            {errorSegments.length > 0
-              ? errorSegments.map((seg, i) =>
-                  seg.kind === "text" ? (
-                    <Fragment key={i}>{seg.value}</Fragment>
-                  ) : (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => revealLine(seg.line)}
-                      title={`Jump to line ${seg.line}`}
-                      className="inline rounded px-1 text-destructive underline decoration-destructive/40 underline-offset-2 hover:bg-destructive/15 hover:decoration-destructive focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
-                    >
-                      {seg.raw}
-                    </button>
-                  ),
-                )
-              : result.error}
-          </pre>
+          <div className="min-w-0 flex-1">
+            <pre className="whitespace-pre-wrap break-words font-mono">
+              {errorSegments.length > 0
+                ? errorSegments.map((seg, i) =>
+                    seg.kind === "text" ? (
+                      <Fragment key={i}>{seg.value}</Fragment>
+                    ) : (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => revealLine(seg.line)}
+                        title={`Jump to line ${seg.line}`}
+                        className="inline rounded px-1 text-destructive underline decoration-destructive/40 underline-offset-2 hover:bg-destructive/15 hover:decoration-destructive focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+                      >
+                        {seg.raw}
+                      </button>
+                    ),
+                  )
+                : result.error}
+            </pre>
+            <button
+              type="button"
+              onClick={() => handleExplainError(result.error ?? "")}
+              aria-label="Ask the tutor to explain this error"
+              className="mt-1.5 inline-flex items-center gap-1 rounded-md border border-destructive/30 bg-background px-2 py-0.5 text-[11px] font-medium text-destructive hover:bg-destructive/10 transition"
+            >
+              <HelpCircle className="h-3 w-3" aria-hidden="true" />
+              Why did this break?
+            </button>
+          </div>
         </div>
       )}
 
@@ -239,6 +267,16 @@ export function ExecutionTrace() {
                       )
                     : result.stderr}
                 </span>
+                {"\n"}
+                <button
+                  type="button"
+                  onClick={() => handleExplainError(result.stderr ?? "")}
+                  aria-label="Ask the tutor to explain this stderr output"
+                  className="mt-1 inline-flex items-center gap-1 rounded-md border border-destructive/30 bg-background px-2 py-0.5 text-[11px] font-medium text-destructive hover:bg-destructive/10 transition not-italic"
+                >
+                  <HelpCircle className="h-3 w-3" aria-hidden="true" />
+                  Why did this break?
+                </button>
               </>
             )}
           </pre>

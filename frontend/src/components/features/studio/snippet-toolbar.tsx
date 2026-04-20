@@ -1,6 +1,6 @@
 "use client";
 
-import { Tooltip } from "@/components/ui/tooltip";
+import { useRef } from "react";
 
 const SNIPPETS = [
   {
@@ -38,32 +38,43 @@ interface SnippetToolbarProps {
 }
 
 export function SnippetToolbar({ onInsert }: SnippetToolbarProps) {
+  const selectRef = useRef<HTMLSelectElement>(null);
+
+  function handleChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const value = e.target.value;
+    if (!value) return;
+    const snippet = SNIPPETS.find((s) => s.label === value);
+    if (snippet) {
+      onInsert(snippet.code);
+    }
+    // Reset to placeholder after insertion
+    if (selectRef.current) {
+      selectRef.current.value = "";
+    }
+  }
+
   return (
     <div
-      className="flex flex-wrap gap-1 border-b border-border bg-muted/30 px-2 py-1"
+      className="flex items-center gap-2 border-b border-border bg-muted/30 px-2 py-1"
       role="toolbar"
       aria-label="Code snippets"
     >
-      {SNIPPETS.map((s) => (
-        <Tooltip
-          key={s.label}
-          side="bottom"
-          content={
-            <pre className="text-[10px] leading-tight whitespace-pre-wrap">
-              {s.code.length > 80 ? s.code.slice(0, 80) + "…" : s.code}
-            </pre>
-          }
-        >
-          <button
-            type="button"
-            className="inline-flex h-6 items-center rounded px-2 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={() => onInsert(s.code)}
-            aria-label={`Insert ${s.label} snippet`}
-          >
+      <select
+        ref={selectRef}
+        defaultValue=""
+        onChange={handleChange}
+        aria-label="Insert template snippet"
+        className="h-7 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer hover:text-foreground"
+      >
+        <option value="" disabled>
+          Insert template…
+        </option>
+        {SNIPPETS.map((s) => (
+          <option key={s.label} value={s.label}>
             {s.label}
-          </button>
-        </Tooltip>
-      ))}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
