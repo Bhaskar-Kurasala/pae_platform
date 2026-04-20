@@ -1,8 +1,12 @@
-"""Interview simulation endpoints (P2-10).
+"""Interview simulation endpoints (P2-10) + Interview Prep v2 (sessions, rubric, story bank).
 
 Thin controller around InterviewSessionStore + the interviewer system prompt.
 Streaming shares the SSE format used elsewhere in the app so the frontend can
 reuse its token-reader.
+
+v2 endpoints added below the existing routes (prefix /interview/sessions and
+/interview/stories) are backed by the PostgreSQL-persisted InterviewSession and
+StoryBank models via interview_service_v2.
 """
 
 from __future__ import annotations
@@ -13,22 +17,42 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.llm_factory import build_llm
+from app.core.database import get_db
 from app.core.rate_limit import limiter
 from app.core.redis import get_redis
 from app.core.security import get_current_user
 from app.models.user import User
+from app.schemas.interview import (
+    AnswerEvaluation,
+    AnswerSubmitRequest,
+    SessionListItem,
+    SessionResponse,
+    StartSessionRequest,
+    StoryBankCreateRequest,
+    StoryBankItem,
+)
 from app.services.interview_service import (
     INTERVIEWER_SYSTEM_PROMPT,
     InterviewSessionStore,
     PROBLEM_BANK,
     debrief_system_prompt,
     pick_problem,
+)
+from app.services.interview_service_v2 import (
+    complete_session,
+    create_story,
+    delete_story,
+    evaluate_answer,
+    get_stories,
+    list_sessions,
+    start_interview_session,
 )
 
 log = structlog.get_logger()
@@ -307,3 +331,168 @@ async def abandon(
     if session is None or session.user_id != str(current_user.id):
         return
     await store.delete(session_id)
+
+
+# ===========================================================================
+# Interview Prep v2 — persisted sessions, rubric scoring, story bank
+# ===========================================================================
+
+
+@router.post("/sessions/start", response_model=SessionResponse, status_code=201)
+async def start_session(
+    payload: StartSessionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SessionResponse:
+    """Start a new mock interview session and receive the opening question."""
+    session, first_question = await start_interview_session(
+        db,
+        user_id=current_user.id,
+        mode=payload.mode,
+        topic=payload.topic,
+    )
+    return SessionResponse(
+        id=session.id,
+        mode=session.mode,
+        status=session.status,
+        first_question=first_question,
+        overall_score=session.overall_score,
+    )
+
+
+@router.post("/sessions/answer", response_model=AnswerEvaluation)
+async def submit_answer(
+    payload: AnswerSubmitRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AnswerEvaluation:
+    """Submit an answer to a question; receive rubric scores and the next question."""
+    from sqlalchemy import select as sa_select
+
+    from app.models.interview_session import InterviewSession as _IS
+
+    # Verify session ownership before evaluating
+    result = await db.execute(sa_select(_IS).where(_IS.id == payload.session_id))
+    session_obj = result.scalar_one_or_none()
+    if session_obj is None or session_obj.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session_obj.status == "completed":
+        raise HTTPException(status_code=400, detail="Session already completed")
+
+    return await evaluate_answer(
+        db,
+        session_id=payload.session_id,
+        question=payload.question,
+        answer=payload.answer,
+        mode=session_obj.mode,
+    )
+
+
+@router.post("/sessions/{session_id}/complete")
+async def complete_interview_session(
+    session_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Mark a session as completed and compute the overall score."""
+    from sqlalchemy import select as sa_select
+
+    from app.models.interview_session import InterviewSession as _IS
+
+    result = await db.execute(sa_select(_IS).where(_IS.id == session_id))
+    session_obj = result.scalar_one_or_none()
+    if session_obj is None or session_obj.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    completed = await complete_session(db, session_id=session_id)
+    return {
+        "id": str(completed.id),
+        "status": completed.status,
+        "overall_score": completed.overall_score,
+        "answers_count": len(completed.scores or []),
+    }
+
+
+@router.get("/sessions", response_model=list[SessionListItem])
+async def list_interview_sessions(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[SessionListItem]:
+    """Return the last 10 sessions for the authenticated user."""
+    sessions = await list_sessions(db, user_id=current_user.id, limit=10)
+    return [
+        SessionListItem(
+            id=s.id,
+            mode=s.mode,
+            status=s.status,
+            overall_score=s.overall_score,
+            questions_count=len(s.questions_asked or []),
+        )
+        for s in sessions
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Story bank CRUD
+# ---------------------------------------------------------------------------
+
+
+@router.post("/stories", response_model=StoryBankItem, status_code=201)
+async def create_story_entry(
+    payload: StoryBankCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> StoryBankItem:
+    """Save a new STAR story to the story bank."""
+    story = await create_story(
+        db,
+        user_id=current_user.id,
+        title=payload.title,
+        situation=payload.situation,
+        task=payload.task,
+        action=payload.action,
+        result=payload.result,
+        tags=payload.tags,
+    )
+    return StoryBankItem(
+        id=story.id,
+        title=story.title,
+        situation=story.situation,
+        task=story.task,
+        action=story.action,
+        result=story.result,
+        tags=story.tags or [],
+    )
+
+
+@router.get("/stories", response_model=list[StoryBankItem])
+async def list_stories(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[StoryBankItem]:
+    """Return all STAR stories for the authenticated user."""
+    stories = await get_stories(db, user_id=current_user.id)
+    return [
+        StoryBankItem(
+            id=s.id,
+            title=s.title,
+            situation=s.situation,
+            task=s.task,
+            action=s.action,
+            result=s.result,
+            tags=s.tags or [],
+        )
+        for s in stories
+    ]
+
+
+@router.delete("/stories/{story_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_story_entry(
+    story_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete a story from the story bank."""
+    deleted = await delete_story(db, user_id=current_user.id, story_id=story_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Story not found")

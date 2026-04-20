@@ -7,7 +7,9 @@ from app.models.conversation import Conversation
 from app.models.feedback import Feedback  # noqa: F401
 from app.models.conversation_memory import ConversationMemory
 from app.models.interview_question import InterviewQuestion  # noqa: F401
+from app.models.interview_session import InterviewSession  # noqa: F401
 from app.models.resume import Resume  # noqa: F401
+from app.models.story_bank import StoryBank  # noqa: F401
 from app.models.course import Course
 from app.models.daily_intention import DailyIntention
 from app.models.enrollment import Enrollment
@@ -35,6 +37,7 @@ from app.models.saved_skill_path import SavedSkillPath
 from app.models.user_skill_state import UserSkillState
 from app.models.notebook_entry import NotebookEntry
 from app.models.weekly_intention import WeeklyIntention
+from app.models.jd_library import JdLibrary  # noqa: F401
 
 __all__ = [
     "User",
@@ -73,6 +76,9 @@ __all__ = [
     "Feedback",
     "Resume",
     "InterviewQuestion",
+    "InterviewSession",
+    "StoryBank",
     "NotebookEntry",
     "WeeklyIntention",
+    "JdLibrary",
 ]

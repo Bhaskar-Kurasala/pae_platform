@@ -34,6 +34,14 @@ async def _get_token(client: AsyncClient) -> str:
     return str(resp.json()["access_token"])
 
 
+_RESUME_JSON_RESPONSE = (
+    '{"summary": "Experienced AI engineer.", '
+    '"bullets": [{"text": "Built FastAPI service.", "evidence_id": "fastapi", "ats_keywords": ["FastAPI"]}], '
+    '"linkedin_blurb": "AI engineer with FastAPI experience.", '
+    '"ats_keywords": ["FastAPI", "Python", "LLM"]}'
+)
+
+
 def _mock_anthropic_response(text: str) -> Any:
     """Return a mock AsyncAnthropic.messages.create response."""
     content_block = MagicMock()
@@ -43,6 +51,11 @@ def _mock_anthropic_response(text: str) -> Any:
     return mock_response
 
 
+def _mock_resume_response() -> Any:
+    """Return a mock Anthropic response containing valid resume JSON."""
+    return _mock_anthropic_response(_RESUME_JSON_RESPONSE)
+
+
 # ---------------------------------------------------------------------------
 # Resume tests (#168)
 # ---------------------------------------------------------------------------
@@ -50,17 +63,14 @@ def _mock_anthropic_response(text: str) -> Any:
 
 @pytest.mark.asyncio
 async def test_get_resume_creates_row(client: AsyncClient) -> None:
-    """GET /career/resume creates a resume row on first call (no summary yet)."""
+    """GET /career/resume creates a resume row on first call and returns full structure."""
     token = await _get_token(client)
     headers = {"Authorization": f"Bearer {token}"}
 
-    mock_resp = _mock_anthropic_response("Experienced AI engineer.")
-    with patch(
-        "app.services.career_service.AsyncAnthropic"
-    ) as mock_cls:
+    with patch("app.services.career_service.AsyncAnthropic") as mock_cls:
         mock_instance = AsyncMock()
         mock_cls.return_value = mock_instance
-        mock_instance.messages.create = AsyncMock(return_value=mock_resp)
+        mock_instance.messages.create = AsyncMock(return_value=_mock_resume_response())
 
         resp = await client.get("/api/v1/career/resume", headers=headers)
 
@@ -68,28 +78,57 @@ async def test_get_resume_creates_row(client: AsyncClient) -> None:
     data = resp.json()
     assert "id" in data
     assert "title" in data
+    assert "bullets" in data
+    assert "ats_keywords" in data
+    assert isinstance(data["bullets"], list)
+    assert isinstance(data["ats_keywords"], list)
 
 
 @pytest.mark.asyncio
 async def test_get_resume_returns_existing(client: AsyncClient) -> None:
-    """GET /career/resume returns cached summary on second call."""
+    """GET /career/resume returns cached data on second call (same resume id)."""
     token = await _get_token(client)
     headers = {"Authorization": f"Bearer {token}"}
 
-    mock_resp = _mock_anthropic_response("Experienced AI engineer.")
     with patch("app.services.career_service.AsyncAnthropic") as mock_cls:
         mock_instance = AsyncMock()
         mock_cls.return_value = mock_instance
-        mock_instance.messages.create = AsyncMock(return_value=mock_resp)
+        mock_instance.messages.create = AsyncMock(return_value=_mock_resume_response())
 
-        # First call — generates summary
+        # First call — generates full resume content
         r1 = await client.get("/api/v1/career/resume", headers=headers)
         assert r1.status_code == 200
 
-        # Second call — should return same data (create not called again)
+        # Second call — should return same row (same id)
         r2 = await client.get("/api/v1/career/resume", headers=headers)
         assert r2.status_code == 200
         assert r1.json()["id"] == r2.json()["id"]
+
+
+@pytest.mark.asyncio
+async def test_resume_regenerate_endpoint(client: AsyncClient) -> None:
+    """POST /career/resume/regenerate force-regenerates and returns ResumeResponse."""
+    token = await _get_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    with patch("app.services.career_service.AsyncAnthropic") as mock_cls:
+        mock_instance = AsyncMock()
+        mock_cls.return_value = mock_instance
+        mock_instance.messages.create = AsyncMock(return_value=_mock_resume_response())
+
+        resp = await client.post(
+            "/api/v1/career/resume/regenerate",
+            json={"force": True},
+            headers=headers,
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "id" in data
+    assert "bullets" in data
+    assert "ats_keywords" in data
+    assert isinstance(data["bullets"], list)
+    assert isinstance(data["ats_keywords"], list)
 
 
 # ---------------------------------------------------------------------------
