@@ -57,17 +57,36 @@ class MCQFactoryAgent(BaseAgent):
         ]
 
         response = await llm.ainvoke(messages)
-        raw = str(response.content)
+        # Extended thinking: content may be a list of blocks — extract text only
+        content_raw = response.content
+        if isinstance(content_raw, list):
+            raw = "".join(
+                block.get("text", "") if isinstance(block, dict) else str(block)
+                for block in content_raw
+                if not (isinstance(block, dict) and block.get("type") == "thinking")
+            )
+        else:
+            raw = str(content_raw)
+
+        log.info("mcq_factory.raw_response", length=len(raw), preview=raw[:200])
 
         try:
-            if "```json" in raw:
-                raw = raw.split("```json")[1].split("```")[0].strip()
-            elif "```" in raw:
-                raw = raw.split("```")[1].split("```")[0].strip()
-            mcqs: list[Any] = json.loads(raw)
+            # Strip code fences if the LLM added them despite instructions
+            text = raw.strip()
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0].strip()
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0].strip()
+            # Find the outermost JSON array even if there's leading/trailing text
+            start = text.find("[")
+            end = text.rfind("]")
+            if start != -1 and end != -1 and end > start:
+                text = text[start:end + 1]
+            mcqs: list[Any] = json.loads(text)
             if not isinstance(mcqs, list):
                 mcqs = [mcqs]
-        except (json.JSONDecodeError, IndexError):
+        except (json.JSONDecodeError, IndexError, ValueError) as exc:
+            log.warning("mcq_factory.parse_failed", error=str(exc), raw_preview=raw[:500])
             mcqs = [{"raw_response": raw}]
 
         return state.model_copy(

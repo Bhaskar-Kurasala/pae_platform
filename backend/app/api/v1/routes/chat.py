@@ -763,10 +763,16 @@ def _parse_quiz_questions(raw: str) -> tuple[list[QuizQuestion], list[str]]:
         text = text.split("```json")[1].split("```")[0].strip()
     elif "```" in text:
         text = text.split("```")[1].split("```")[0].strip()
+    # Bracket-extract: find the outermost JSON array even with surrounding text
+    start = text.find("[")
+    end = text.rfind("]")
+    if start != -1 and end != -1 and end > start:
+        text = text[start:end + 1]
 
     try:
         data = json.loads(text)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
+        _quiz_log.warning("quiz.parse_failed", error=str(exc), raw_preview=raw[:300])
         return [], []
 
     if not isinstance(data, list):
@@ -886,6 +892,7 @@ async def generate_quiz(
 
     # Fallback: if parsing yielded nothing, return a single placeholder so
     # the panel never shows empty (tests without a real LLM hit this path).
+    _quiz_log.info("quiz_generate.parsed", question_count=len(questions), concepts=concepts_covered)
     if not questions:
         questions = [
             QuizQuestion(

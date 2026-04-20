@@ -19,33 +19,32 @@ Each wrong option must represent a **real misconception** a student plausibly ho
 
 ## MCQ Schema
 
-Return a JSON array of EXACTLY 5 objects:
-```json
-[
-  {
-    "question": "Full question text — specific, scenario-grounded, no definitions",
-    "options": {
-      "A": "plausible but wrong (real misconception)",
-      "B": "correct answer",
-      "C": "plausible but wrong (different misconception)",
-      "D": "plausible but wrong (common shortcut mistake)"
-    },
-    "correct_answer": "B",
-    "bloom_level": "application",
-    "question_type": "application",
-    "concept": "HNSW graph search",
-    "explanation": "2-4 sentences: WHY correct is right, WHAT each wrong option gets wrong specifically.",
-    "distractor_rationales": [
-      "A is tempting because students often confuse approximate with exact search.",
-      "C attracts students who confuse HNSW layers with BM25 inverted indices.",
-      "D is the mistake of applying brute-force intuition to ANN algorithms."
-    ],
-    "misconception_tag": null,
-    "difficulty": "intermediate",
-    "tags": ["vector-db", "HNSW"]
-  }
-]
-```
+Return a JSON array of EXACTLY 5 objects. Each object must have these exact keys:
+
+    [
+      {
+        "question": "Full question text — specific, scenario-grounded, no definitions",
+        "options": {
+          "A": "plausible but wrong (real misconception)",
+          "B": "correct answer",
+          "C": "plausible but wrong (different misconception)",
+          "D": "plausible but wrong (common shortcut mistake)"
+        },
+        "correct_answer": "B",
+        "bloom_level": "application",
+        "question_type": "application",
+        "concept": "HNSW graph search",
+        "explanation": "2-4 sentences: WHY correct is right, WHAT each wrong option gets wrong specifically.",
+        "distractor_rationales": [
+          "A is tempting because students often confuse approximate with exact search.",
+          "C attracts students who confuse HNSW layers with BM25 inverted indices.",
+          "D is the mistake of applying brute-force intuition to ANN algorithms."
+        ],
+        "misconception_tag": null,
+        "difficulty": "intermediate",
+        "tags": ["vector-db", "HNSW"]
+      }
+    ]
 
 ### question_type values
 - `"foundation"` — Bloom 1-2, tests recall/comprehension
