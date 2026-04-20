@@ -689,9 +689,10 @@ async def extract_flashcards(
     and ``context = {"source_message_id": message_id}``.  Cards are parsed
     from the response and returned so the UI can show "N cards added to review".
     """
-    from app.agents.registry import get_agent
+    from app.agents.registry import get_agent, _ensure_registered
     from app.agents.base_agent import AgentState
 
+    _ensure_registered()
     try:
         agent = get_agent("spaced_repetition")
     except KeyError:
