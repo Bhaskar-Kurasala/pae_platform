@@ -187,25 +187,65 @@ class QuizGenerateRequest(BaseModel):
 
     `message_id` is stored for audit/tracing; `content` is the assistant
     message text passed as `focus_topic` to the adaptive_quiz agent.
+    `conversation_context` is the optional student question that prompted
+    the assistant message — passed to the MCQ factory to anchor question
+    scenarios to the student's actual learning gap.
     """
 
     message_id: str = Field(min_length=1, max_length=100)
     content: str = Field(min_length=1, max_length=20000)
+    conversation_context: str | None = Field(
+        default=None,
+        max_length=5000,
+        description="The student's question that prompted this answer (optional).",
+    )
 
 
 class QuizQuestion(BaseModel):
-    """A single MCQ item returned by the quiz endpoint."""
+    """A single MCQ item returned by the quiz endpoint.
+
+    Legacy fields (`question`, `options`, `correct_index`, `explanation`) are
+    required and match the original schema.  All neuroscience-metadata fields
+    are optional with safe defaults so existing parsers that omit them remain
+    fully compatible.
+    """
 
     question: str
     options: list[str]
     correct_index: int
     explanation: str
 
+    # --- neuroscience metadata (all optional with safe defaults) ----------
+    bloom_level: str = Field(
+        default="application",
+        description="Bloom's taxonomy level: recall | comprehension | application | analysis",
+    )
+    concept: str = Field(
+        default="",
+        description="The atomic concept this question tests (e.g. 'HNSW graph search').",
+    )
+    question_type: str = Field(
+        default="application",
+        description="MCQ type: foundation | application | analysis | misconception_trap",
+    )
+    distractor_rationales: list[str] = Field(
+        default_factory=list,
+        description="One sentence per wrong option explaining WHY it is tempting, in left-to-right order of wrong options.",
+    )
+    misconception_tag: str | None = Field(
+        default=None,
+        description="Slug identifying the misconception targeted (set only on misconception_trap questions).",
+    )
+
 
 class QuizGenerateResponse(BaseModel):
     """P3-3 — response for POST /chat/quiz."""
 
     questions: list[QuizQuestion]
+    concepts_covered: list[str] = Field(
+        default_factory=list,
+        description="Unique atomic concepts across all returned questions (e.g. ['HNSW', 'quantization']).",
+    )
 
 
 # P1-6 — attachments ---------------------------------------------------------

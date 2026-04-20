@@ -744,14 +744,18 @@ _quiz_log = structlog.get_logger().bind(route="quiz_generate")
 _LETTER_TO_INDEX = {"A": 0, "B": 1, "C": 2, "D": 3}
 
 
-def _parse_quiz_questions(raw: str) -> list[QuizQuestion]:
+def _parse_quiz_questions(raw: str) -> tuple[list[QuizQuestion], list[str]]:
     """Parse the MCQ factory agent's JSON array response into QuizQuestion objects.
 
     The agent returns a JSON array of objects with the shape:
       {question, options: {A, B, C, D}, correct_answer: "A"|"B"|"C"|"D",
-       explanation, difficulty, tags}
+       bloom_level, question_type, concept, explanation, distractor_rationales,
+       misconception_tag, difficulty, tags}
 
     We convert `options` dict → ordered list and `correct_answer` letter → index.
+    Also extracts the set of unique `concept` values across all questions.
+
+    Returns a tuple of (questions, concepts_covered).
     """
     # Strip code fences if present
     text = raw.strip()
@@ -763,12 +767,15 @@ def _parse_quiz_questions(raw: str) -> list[QuizQuestion]:
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        return []
+        return [], []
 
     if not isinstance(data, list):
         data = [data]
 
     questions: list[QuizQuestion] = []
+    concepts_seen: list[str] = []
+    concepts_set: set[str] = set()
+
     for item in data:
         if not isinstance(item, dict):
             continue
@@ -776,6 +783,21 @@ def _parse_quiz_questions(raw: str) -> list[QuizQuestion]:
         opts_raw = item.get("options", {})
         explanation = item.get("explanation", "")
         correct_raw = str(item.get("correct_answer", "A")).strip().upper()
+
+        # Neuroscience metadata — all have safe fallback defaults
+        bloom_level: str = str(item.get("bloom_level", "application"))
+        concept: str = str(item.get("concept", ""))
+        question_type: str = str(item.get("question_type", "application"))
+        distractor_rationales_raw = item.get("distractor_rationales", [])
+        distractor_rationales: list[str] = (
+            [str(r) for r in distractor_rationales_raw]
+            if isinstance(distractor_rationales_raw, list)
+            else []
+        )
+        misconception_tag_raw = item.get("misconception_tag")
+        misconception_tag: str | None = (
+            str(misconception_tag_raw) if misconception_tag_raw is not None else None
+        )
 
         # Convert options dict {A: ..., B: ..., C: ..., D: ...} to ordered list
         options: list[str] = []
@@ -795,10 +817,18 @@ def _parse_quiz_questions(raw: str) -> list[QuizQuestion]:
                     options=options,
                     correct_index=correct_index,
                     explanation=explanation,
+                    bloom_level=bloom_level,
+                    concept=concept,
+                    question_type=question_type,
+                    distractor_rationales=distractor_rationales,
+                    misconception_tag=misconception_tag,
                 )
             )
+            if concept and concept not in concepts_set:
+                concepts_set.add(concept)
+                concepts_seen.append(concept)
 
-    return questions
+    return questions, concepts_seen
 
 
 @router.post(
@@ -820,16 +850,20 @@ async def generate_quiz(
     from app.agents.base_agent import AgentState
     from app.agents.mcq_factory import MCQFactoryAgent
 
+    context_payload: dict[str, str] = {
+        "focus_topic": payload.content,
+        "source_message_id": payload.message_id,
+        "content": payload.content,
+    }
+    if payload.conversation_context is not None:
+        context_payload["conversation_context"] = payload.conversation_context
+
     agent = MCQFactoryAgent()
     state = AgentState(
         student_id=str(current_user.id),
         conversation_history=[],
         task="Generate 5 MCQ questions",
-        context={
-            "focus_topic": payload.content,
-            "source_message_id": payload.message_id,
-            "content": payload.content,
-        },
+        context=context_payload,
         response=None,
         tools_used=[],
         evaluation_score=None,
@@ -848,7 +882,7 @@ async def generate_quiz(
         ) from exc
 
     response_text = result_state.response or ""
-    questions = _parse_quiz_questions(response_text)
+    questions, concepts_covered = _parse_quiz_questions(response_text)
 
     # Fallback: if parsing yielded nothing, return a single placeholder so
     # the panel never shows empty (tests without a real LLM hit this path).
@@ -870,4 +904,4 @@ async def generate_quiz(
             )
         ]
 
-    return QuizGenerateResponse(questions=questions)
+    return QuizGenerateResponse(questions=questions, concepts_covered=concepts_covered)

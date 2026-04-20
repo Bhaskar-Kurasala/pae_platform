@@ -126,10 +126,17 @@ export type QuizQuestion = {
   correct_index: number;
   explanation: string;
   selected_index?: number;
+  // Neuroscience-informed fields (optional — backend may not return these yet)
+  bloom_level?: string;        // "recall" | "comprehension" | "application" | "analysis"
+  question_type?: string;      // "foundation" | "application" | "analysis" | "misconception_trap"
+  concept?: string;            // atomic concept this question tests
+  distractor_rationales?: string[]; // 3 items, one per wrong option
+  misconception_tag?: string | null;
 };
 
 export interface QuizGenerateResponse {
   questions: QuizQuestion[];
+  concepts_covered?: string[];
 }
 
 // P3-4 — notebook entry shape returned by the backend.

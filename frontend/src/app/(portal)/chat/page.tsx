@@ -2867,6 +2867,7 @@ function ChatArea({
   const [quizPanel, setQuizPanel] = useState<{
     messageId: string;
     questions: QuizQuestion[];
+    concepts_covered?: string[];
   } | null>(null);
   const [quizLoading, setQuizLoading] = useState(false);
 
@@ -2876,7 +2877,11 @@ function ChatArea({
       setQuizLoading(true);
       try {
         const result = await chatApi.generateQuiz(messageId, content);
-        setQuizPanel({ messageId, questions: result.questions });
+        setQuizPanel({
+          messageId,
+          questions: result.questions,
+          concepts_covered: result.concepts_covered,
+        });
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error("[chat] quiz generation failed", err);
@@ -3246,32 +3251,116 @@ function ChatArea({
           onUpdatePanel={setQuizPanel}
         />
       )}
+
     </div>
   );
 }
 
 // ── Quiz panel (P3-3) ────────────────────────────────────────────
-// Slide-in panel from the right. Shows 5 MCQ questions generated from the
-// selected assistant message. On answer selection highlights correct/wrong
-// and shows explanation. Positioned to the right of the chat area and
-// does NOT conflict with the ChatSidebar on the left.
+// Slide-in panel from the right. Shows 5 MCQ questions with a neuroscience-
+// informed flow: select option → pick confidence → reveal answer + explanation.
+// Bloom level badges, distractor rationales, and an end-of-quiz summary with
+// confidence breakdown are all rendered inline. Positioned to the right of the
+// chat area without conflicting with the ChatSidebar on the left.
+
+// Per-question confidence state — purely local to QuizPanel, not stored in API.
+type QuizConfidence = "sure" | "think_so" | "guessing";
+
+// Extended local question state layered on top of the API type.
+type LocalQuestion = QuizQuestion & {
+  // selected_index already in QuizQuestion
+  confidence?: QuizConfidence;
+};
+
+// Bloom level → display label + Tailwind color classes
+const BLOOM_BADGE: Record<string, { label: string; cls: string }> = {
+  recall:        { label: "Recall",      cls: "bg-gray-100 text-gray-600" },
+  comprehension: { label: "Understand",  cls: "bg-blue-100 text-blue-700" },
+  application:   { label: "Apply",       cls: "bg-violet-100 text-violet-700" },
+  analysis:      { label: "Analyse",     cls: "bg-orange-100 text-orange-700" },
+};
+
 function QuizPanel({
   panel,
   onClose,
   onUpdatePanel,
 }: {
-  panel: { messageId: string; questions: QuizQuestion[] };
+  panel: { messageId: string; questions: QuizQuestion[]; concepts_covered?: string[] };
   onClose: () => void;
-  onUpdatePanel: (p: { messageId: string; questions: QuizQuestion[] }) => void;
+  onUpdatePanel: (p: { messageId: string; questions: QuizQuestion[]; concepts_covered?: string[] }) => void;
 }) {
-  const titlePreview = panel.questions[0]?.question?.slice(0, 30) ?? "Quiz";
+  // Local layer: track pending selection + confidence before reveal
+  const [localQuestions, setLocalQuestions] = useState<LocalQuestion[]>(
+    () => panel.questions.map((q) => ({ ...q })),
+  );
+  // Track which question indices are pending-reveal (option chosen, confidence not yet picked)
+  const [pendingReveal, setPendingReveal] = useState<Set<number>>(new Set());
+  const [flashcardLoading, setFlashcardLoading] = useState(false);
+  const [flashcardsDone, setFlashcardsDone] = useState(false);
 
-  const handleSelect = (questionIndex: number, optionIndex: number) => {
-    const updated = panel.questions.map((q, qi) =>
-      qi === questionIndex ? { ...q, selected_index: optionIndex } : q,
+  const titlePreview = panel.questions[0]?.question?.slice(0, 30) ?? "Quiz";
+  const allAnswered = localQuestions.every((q, qi) => q.selected_index !== undefined && !pendingReveal.has(qi));
+
+  // Step 1: student clicks an option — goes into pending-reveal
+  const handleSelectOption = (qi: number, oi: number) => {
+    const q = localQuestions[qi];
+    if (q.selected_index !== undefined && !pendingReveal.has(qi)) return; // already revealed
+    setLocalQuestions((prev) =>
+      prev.map((lq, i) => (i === qi ? { ...lq, selected_index: oi } : lq)),
+    );
+    setPendingReveal((prev) => new Set([...prev, qi]));
+  };
+
+  // Step 2: student picks confidence → reveal answer
+  const handleConfidence = (qi: number, conf: QuizConfidence) => {
+    setLocalQuestions((prev) =>
+      prev.map((lq, i) => (i === qi ? { ...lq, confidence: conf } : lq)),
+    );
+    setPendingReveal((prev) => {
+      const next = new Set(prev);
+      next.delete(qi);
+      return next;
+    });
+    // Sync back to parent so state survives panel re-mount
+    const updated = localQuestions.map((lq, i) =>
+      i === qi ? { ...lq, confidence: conf } : lq,
     );
     onUpdatePanel({ ...panel, questions: updated });
   };
+
+  // Flashcard button: save each wrong question to /api/v1/chat/flashcards
+  const handleAddFlashcards = async () => {
+    setFlashcardLoading(true);
+    try {
+      const wrongOnes = localQuestions.filter(
+        (q, qi) => q.selected_index !== undefined && !pendingReveal.has(qi) && q.selected_index !== q.correct_index,
+      );
+      for (const q of wrongOnes) {
+        const content = `Q: ${q.question}\nCorrect answer: ${q.options[q.correct_index]}\nExplanation: ${q.explanation}`;
+        await chatApi.addFlashcards(panel.messageId, content);
+      }
+      setFlashcardsDone(true);
+      toast.success(`Added ${wrongOnes.length} question${wrongOnes.length !== 1 ? "s" : ""} to flashcards`);
+    } catch {
+      toast.error("Could not save flashcards — try again");
+    } finally {
+      setFlashcardLoading(false);
+    }
+  };
+
+  // Confidence breakdown for summary
+  const summaryStats = (() => {
+    const revealed = localQuestions.filter((q, qi) => q.selected_index !== undefined && !pendingReveal.has(qi));
+    const correct = revealed.filter((q) => q.selected_index === q.correct_index).length;
+    const wrong = revealed.filter((q) => q.selected_index !== q.correct_index).length;
+    const sure_correct   = revealed.filter((q) => q.confidence === "sure"     && q.selected_index === q.correct_index).length;
+    const sure_wrong     = revealed.filter((q) => q.confidence === "sure"     && q.selected_index !== q.correct_index).length;
+    const guess_correct  = revealed.filter((q) => q.confidence === "guessing" && q.selected_index === q.correct_index).length;
+    const guess_wrong    = revealed.filter((q) => q.confidence === "guessing" && q.selected_index !== q.correct_index).length;
+    return { correct, wrong, sure_correct, sure_wrong, guess_correct, guess_wrong };
+  })();
+
+  const revealedCount = localQuestions.filter((q, qi) => q.selected_index !== undefined && !pendingReveal.has(qi)).length;
 
   return (
     <div
@@ -3282,33 +3371,69 @@ function QuizPanel({
       data-testid="quiz-panel"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <ListChecks className="h-4 w-4 text-primary shrink-0" aria-hidden="true" />
-          <span className="text-sm font-semibold truncate">
-            Quiz: {titlePreview}…
-          </span>
+      <div className="flex flex-col border-b border-border bg-card shrink-0">
+        <div className="flex items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <ListChecks className="h-4 w-4 text-primary shrink-0" aria-hidden="true" />
+            <span className="text-sm font-semibold truncate">
+              Quiz: {titlePreview}…
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close quiz panel"
+            className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close quiz panel"
-          className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0"
-        >
-          <X className="h-4 w-4" aria-hidden="true" />
-        </button>
+        {/* Concept chips */}
+        {panel.concepts_covered && panel.concepts_covered.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-4 pb-3">
+            {panel.concepts_covered.map((concept) => (
+              <span
+                key={concept}
+                className="inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-medium"
+              >
+                {concept}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Questions */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-6">
-        {panel.questions.map((q, qi) => {
-          const answered = q.selected_index !== undefined;
-          const isCorrect = answered && q.selected_index === q.correct_index;
+        {localQuestions.map((q, qi) => {
+          const isInPending = pendingReveal.has(qi);
+          const isRevealed = q.selected_index !== undefined && !isInPending;
+          const isCorrect = isRevealed && q.selected_index === q.correct_index;
+          const bloomInfo = q.bloom_level ? BLOOM_BADGE[q.bloom_level] : null;
+          const isMisconceptionTrap = q.question_type === "misconception_trap";
+
           return (
             <div key={qi} className="space-y-2">
+              {/* Question header badges */}
+              <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                {bloomInfo && (
+                  <span className={cn("inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold", bloomInfo.cls)}>
+                    {bloomInfo.label}
+                  </span>
+                )}
+                {isMisconceptionTrap && (
+                  <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-700">
+                    ⚠ Misconception trap
+                  </span>
+                )}
+              </div>
+
+              {/* Question text */}
               <p className="text-sm font-medium leading-snug" data-testid={`quiz-question-${qi}`}>
                 {qi + 1}. {q.question}
               </p>
+
+              {/* Options */}
               <div className="space-y-1.5">
                 {q.options.map((opt, oi) => {
                   const label = String.fromCharCode(65 + oi); // A, B, C, D
@@ -3316,11 +3441,16 @@ function QuizPanel({
                   const isThisCorrect = oi === q.correct_index;
                   let optClass =
                     "flex items-start gap-2 w-full rounded-lg border px-3 py-2 text-sm text-left transition-colors";
-                  if (!answered) {
+                  if (!isRevealed && !isInPending) {
                     optClass += " border-border hover:border-primary/50 hover:bg-primary/5 cursor-pointer";
-                  } else if (isThisCorrect) {
+                  } else if (isInPending && isSelected) {
+                    // Pending: selected but confidence not yet chosen — yellow highlight
+                    optClass += " border-yellow-400 bg-yellow-50 text-yellow-900 cursor-default";
+                  } else if (isInPending) {
+                    optClass += " border-border text-muted-foreground cursor-default";
+                  } else if (isRevealed && isThisCorrect) {
                     optClass += " border-green-500 bg-green-50 text-green-800";
-                  } else if (isSelected && !isThisCorrect) {
+                  } else if (isRevealed && isSelected && !isThisCorrect) {
                     optClass += " border-destructive bg-destructive/10 text-destructive";
                   } else {
                     optClass += " border-border text-muted-foreground";
@@ -3329,46 +3459,148 @@ function QuizPanel({
                     <button
                       key={oi}
                       type="button"
-                      disabled={answered}
-                      onClick={() => handleSelect(qi, oi)}
+                      disabled={isRevealed || (isInPending && !isSelected)}
+                      onClick={() => handleSelectOption(qi, oi)}
                       aria-label={`Option ${label}: ${opt}`}
                       data-testid={`quiz-option-${qi}-${oi}`}
                       className={optClass}
                     >
                       <span className="font-semibold shrink-0">{label}.</span>
                       <span>{opt}</span>
-                      {answered && isThisCorrect && (
+                      {isRevealed && isThisCorrect && (
                         <Check className="h-3.5 w-3.5 ml-auto shrink-0 text-green-600" aria-hidden="true" />
                       )}
                     </button>
                   );
                 })}
               </div>
-              {answered && (
+
+              {/* Confidence picker — shown after option selected, before reveal */}
+              {isInPending && (
+                <div className="pt-1 space-y-1">
+                  <p className="text-[11px] text-muted-foreground font-medium">How confident are you?</p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      data-testid="quiz-confidence-sure"
+                      onClick={() => handleConfidence(qi, "sure")}
+                      className="flex-1 rounded-lg border border-green-300 bg-green-50 px-2 py-1.5 text-xs font-medium text-green-700 hover:bg-green-100 transition-colors"
+                    >
+                      🎯 I&apos;m sure
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="quiz-confidence-think-so"
+                      onClick={() => handleConfidence(qi, "think_so")}
+                      className="flex-1 rounded-lg border border-blue-300 bg-blue-50 px-2 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors"
+                    >
+                      🤔 Think so
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="quiz-confidence-guessing"
+                      onClick={() => handleConfidence(qi, "guessing")}
+                      className="flex-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100 transition-colors"
+                    >
+                      🎲 Guessing
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Explanation — shown after reveal */}
+              {isRevealed && (
                 <div
                   className={cn(
-                    "rounded-lg px-3 py-2 text-xs leading-relaxed",
+                    "rounded-lg px-3 py-2.5 text-xs leading-relaxed space-y-1.5",
                     isCorrect
                       ? "bg-green-50 text-green-800 border border-green-200"
-                      : "bg-amber-50 text-amber-800 border border-amber-200",
+                      : "bg-red-50 text-red-800 border border-red-200",
                   )}
                   data-testid={`quiz-explanation-${qi}`}
                 >
-                  <span className="font-semibold">{isCorrect ? "Correct! " : "Not quite. "}</span>
-                  {q.explanation}
+                  <p className="font-semibold">{isCorrect ? "✓ Correct!" : "✗ Not quite."}</p>
+                  <p>{q.explanation}</p>
+                  {/* Distractor rationale for wrong answers */}
+                  {!isCorrect && q.distractor_rationales && q.selected_index !== undefined && (
+                    <p className="text-[11px] opacity-80 italic border-t border-current/20 pt-1.5 mt-1.5">
+                      Why this answer is tempting: {q.distractor_rationales[
+                        // Map selected wrong index to distractor index (skip correct_index slot)
+                        q.selected_index < q.correct_index ? q.selected_index : q.selected_index - 1
+                      ] ?? q.distractor_rationales[0]}
+                    </p>
+                  )}
+                  {/* Bloom level chip at bottom of explanation */}
+                  {bloomInfo && (
+                    <div className="pt-0.5">
+                      <span className={cn("inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold", bloomInfo.cls)}>
+                        {bloomInfo.label}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           );
         })}
+
+        {/* End-of-quiz summary */}
+        {allAnswered && (
+          <div
+            className="mt-4 rounded-xl border border-border bg-muted/40 p-4 space-y-3"
+            data-testid="quiz-summary"
+          >
+            <div className="border-b border-border pb-2 text-xs font-semibold text-center text-muted-foreground uppercase tracking-wider">
+              Your Results
+            </div>
+            <div className="flex gap-4 justify-center text-sm font-semibold">
+              <span className="text-green-700">✓ {summaryStats.correct} correct</span>
+              <span className="text-red-600">✗ {summaryStats.wrong} wrong</span>
+            </div>
+            <div className="space-y-1 text-xs text-muted-foreground">
+              <p className="font-medium text-foreground text-[11px] uppercase tracking-wide mb-1">Confidence breakdown</p>
+              <p>• Sure + Correct: <span className="font-semibold text-foreground">{summaryStats.sure_correct}</span> <span className="text-green-600">(solid knowledge)</span></p>
+              {summaryStats.sure_wrong > 0 && (
+                <p>• Sure + Wrong: <span className="font-semibold text-foreground">{summaryStats.sure_wrong}</span> <span className="text-amber-600">⚠ misconception — review this!</span></p>
+              )}
+              {summaryStats.sure_wrong === 0 && (
+                <p>• Sure + Wrong: <span className="font-semibold text-foreground">0</span></p>
+              )}
+              <p>• Guessing + Correct: <span className="font-semibold text-foreground">{summaryStats.guess_correct}</span> {summaryStats.guess_correct > 0 && <span className="text-blue-600">(lucky — needs reinforcement)</span>}</p>
+              <p>• Guessing + Wrong: <span className="font-semibold text-foreground">{summaryStats.guess_wrong}</span></p>
+            </div>
+            {summaryStats.wrong > 0 && (
+              <button
+                type="button"
+                data-testid="quiz-add-flashcards-btn"
+                disabled={flashcardLoading || flashcardsDone}
+                onClick={() => void handleAddFlashcards()}
+                className={cn(
+                  "w-full rounded-lg border px-3 py-2 text-xs font-medium transition-colors",
+                  flashcardsDone
+                    ? "border-green-300 bg-green-50 text-green-700 cursor-default"
+                    : "border-primary/40 bg-primary/5 text-primary hover:bg-primary/10",
+                )}
+              >
+                {flashcardsDone
+                  ? "✓ Added to Flashcards"
+                  : flashcardLoading
+                    ? "Saving…"
+                    : `Add ${summaryStats.wrong} missed question${summaryStats.wrong !== 1 ? "s" : ""} to Flashcards →`}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Footer */}
-      <div className="border-t border-border px-4 py-3 shrink-0 bg-card">
-        <p className="text-xs text-muted-foreground text-center">
-          {panel.questions.filter((q) => q.selected_index !== undefined).length} / {panel.questions.length} answered
-        </p>
-      </div>
+      {/* Footer — only while answering */}
+      {!allAnswered && (
+        <div className="border-t border-border px-4 py-3 shrink-0 bg-card">
+          <p className="text-xs text-muted-foreground text-center">
+            {revealedCount} / {localQuestions.length} answered
+          </p>
+        </div>
+      )}
     </div>
   );
 }

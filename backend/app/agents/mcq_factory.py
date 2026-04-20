@@ -26,22 +26,32 @@ class MCQFactoryAgent(BaseAgent):
     ]
     model = "claude-sonnet-4-6"
 
-    def _build_llm(self, max_tokens: int = 1024):
+    def _build_llm(self, max_tokens: int = 2048):
         from app.agents.llm_factory import build_llm
         return build_llm(max_tokens=max_tokens)
 
     async def execute(self, state: AgentState) -> AgentState:
         content = state.context.get("content", state.task)
+        conversation_context: str | None = state.context.get("conversation_context")
+
+        context_block = ""
+        if conversation_context:
+            context_block = (
+                f"\n\nStudent's original question (use this to anchor scenario-grounded distractors):\n"
+                f"{conversation_context}\n"
+            )
 
         llm = self._build_llm()
         messages: list[Any] = [
             SystemMessage(content=_PROMPT),
             HumanMessage(
                 content=(
-                    f"Generate exactly 5 multiple-choice questions for the following content:\n\n"
-                    f"{content}\n\n"
-                    "Return a JSON array of MCQ objects matching the schema in your system prompt. "
-                    "No extra text — only the JSON array."
+                    f"Generate EXACTLY 5 multiple-choice questions following the balanced mix "
+                    f"(foundation recall → application A → application B → analysis/tradeoff → misconception trap) "
+                    f"for the following content:\n\n"
+                    f"{content}"
+                    f"{context_block}\n"
+                    "Return ONLY the JSON array — no surrounding text, no markdown fences."
                 )
             ),
         ]
