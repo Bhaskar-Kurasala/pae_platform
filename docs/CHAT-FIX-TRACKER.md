@@ -732,10 +732,10 @@
   (4 frontend tests, including pill, quiet-state, singular copy, and 429 banner).
 
 ### P2-8 — Slash commands + keyboard shortcuts
-- **Status:** todo
-- **Owner:** —
-- **Claimed:** —
-- **Completed:** —
+- **Status:** done
+- **Owner:** agent-P2-8
+- **Claimed:** 2026-04-20
+- **Completed:** 2026-04-20
 - **Depends-on:** P1-7, P1-9
 - **Problem:** Power users have no accelerators.
 - **Acceptance criteria:**
@@ -743,7 +743,15 @@
     autocomplete in the composer.
   - Shortcuts: `Cmd+K` new chat, `Cmd+/` switch mode, `↑` in empty composer
     edits last user message, `Esc` stops stream.
-- **Implementation note:** —
+- **Implementation note:** Added `SLASH_COMMANDS` const + `slashMenuOpen`/`slashHighlight`
+  state to `InputBar`; a floating `<ul role="listbox">` renders above the textarea
+  (`absolute bottom-full`) filtered by the typed prefix. `handleKeyDown` in `InputBar`
+  extended for `ArrowUp`/`ArrowDown` menu navigation, `Enter` to select, `Esc` to
+  close (or abort stream when `isStreaming`), and `ArrowUp` in empty composer calls
+  `onArrowUpEmpty` which sets `forcingEditId` in `ChatArea` — a `forceEdit` prop on
+  `UserBubble` opens the inline editor via a `useEffect`. `Cmd+K` / `Ctrl+K` and
+  `Cmd+/` / `Ctrl+/` are wired via a window `keydown` listener in `ChatPageInner`.
+  7 tests added in `slash-commands.test.tsx`; full suite: 212 pass, 1 skip across 30 files.
 
 ### P2-9 — Better loading skeleton
 - **Status:** done

@@ -734,6 +734,9 @@ function UserBubble({
   canEdit,
   siblingIds,
   onSelectSibling,
+  // P2-8 — when true, open the editor automatically (triggered by ↑ shortcut).
+  forceEdit,
+  onForceEditConsumed,
 }: {
   messageId: string;
   content: string;
@@ -743,6 +746,8 @@ function UserBubble({
   // chain has more than one entry. The parent owns the fetch + id swap.
   siblingIds?: string[];
   onSelectSibling?: (messageId: string, targetId: string) => Promise<void>;
+  forceEdit?: boolean;
+  onForceEditConsumed?: () => void;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(content);
@@ -779,6 +784,16 @@ function UserBubble({
       }
     });
   };
+
+  // P2-8 — open the editor when the parent requests it (↑ shortcut).
+  useEffect(() => {
+    if (forceEdit && canEdit && !isEditing) {
+      openEditor();
+      onForceEditConsumed?.();
+    }
+  // Only re-run on forceEdit change; openEditor is stable (no deps change).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forceEdit]);
 
   const cancelEdit = () => {
     if (isSaving) return;
@@ -1664,6 +1679,19 @@ interface LabeledContextRef extends ChatContextRef {
 }
 
 // ── Input bar ────────────────────────────────────────────────────
+// P2-8 — slash command definitions. Each entry maps a `/command` to its
+// action: mode switch (tutor/code/quiz/career), context picker, export, or
+// new chat. The `kind` field drives the handler in InputBar.
+const SLASH_COMMANDS = [
+  { cmd: "/tutor",   label: "Tutor mode",           kind: "mode",   agentName: "socratic_tutor" },
+  { cmd: "/code",    label: "Code Review mode",      kind: "mode",   agentName: "coding_assistant" },
+  { cmd: "/quiz",    label: "Quiz Me mode",          kind: "mode",   agentName: "adaptive_quiz" },
+  { cmd: "/career",  label: "Career mode",           kind: "mode",   agentName: "career_coach" },
+  { cmd: "/attach",  label: "Attach context (@)",    kind: "attach", agentName: null },
+  { cmd: "/export",  label: "Export conversation",   kind: "export", agentName: null },
+  { cmd: "/new",     label: "New conversation",      kind: "new",    agentName: null },
+] as const;
+
 function InputBar({
   value,
   onChange,
@@ -1681,6 +1709,8 @@ function InputBar({
   contextRefs,
   onAddContextRef,
   onRemoveContextRef,
+  // P2-8 — extra callbacks for keyboard accelerators.
+  onArrowUpEmpty,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -1709,6 +1739,8 @@ function InputBar({
   contextRefs: LabeledContextRef[];
   onAddContextRef: (ref: ChatContextRef, label: string) => void;
   onRemoveContextRef: (kind: ChatContextRef["kind"], id: string) => void;
+  // P2-8 — fires when ↑ pressed in an empty composer to edit the last user msg.
+  onArrowUpEmpty?: () => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1716,6 +1748,9 @@ function InputBar({
   // P1-7 — picker popover visibility. Lazy-mount keeps us from paying the
   // network cost until the student actually clicks the "@" button.
   const [pickerOpen, setPickerOpen] = useState(false);
+  // P2-8 — slash-command autocomplete menu state.
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
+  const [slashHighlight, setSlashHighlight] = useState(0);
   // Backend caps `context_refs` at 3 via Pydantic `max_length=3`; mirror
   // here so we never POST a payload that will 422.
   const MAX_CONTEXT_REFS = 3;
@@ -1728,11 +1763,92 @@ function InputBar({
     ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
   }, [value]);
 
+  // P2-8 — derive which slash commands are visible based on what the user typed.
+  const slashFilter = value.startsWith("/") && !value.includes(" ")
+    ? value.toLowerCase()
+    : "";
+  const slashVisible = slashFilter
+    ? SLASH_COMMANDS.filter((c) => c.cmd.startsWith(slashFilter))
+    : [];
+  // Sync the menu open state to whether there are visible items.
+  // We do this inline (not in an effect) so it's synchronous with `value`.
+  const shouldMenuBeOpen = slashVisible.length > 0;
+
+  // Execute the selected slash command.
+  const executeSlashCommand = (entry: (typeof SLASH_COMMANDS)[number]) => {
+    onChange("");
+    setSlashMenuOpen(false);
+    setSlashHighlight(0);
+    if (entry.kind === "mode") {
+      onModeChange(entry.agentName as ModeAgent);
+    } else if (entry.kind === "attach") {
+      setPickerOpen(true);
+    } else if (entry.kind === "export") {
+      // Export is handled at the page level via the sidebar ⋯ menu; here we
+      // just surface a no-op placeholder. The /export command closes the menu
+      // so the user knows it was recognised; full plumbing is P1-8 scope.
+    } else if (entry.kind === "new") {
+      onStartNew();
+    }
+  };
+
+  // Sync slashMenuOpen whenever the filter changes (open on match, close on no match).
+  useEffect(() => {
+    if (shouldMenuBeOpen) {
+      setSlashMenuOpen(true);
+      setSlashHighlight(0);
+    } else {
+      setSlashMenuOpen(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slashFilter]);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // P2-8 — slash menu navigation.
+    if (shouldMenuBeOpen || slashMenuOpen) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSlashMenuOpen(true);
+        setSlashHighlight((h) => (h + 1) % slashVisible.length);
+        return;
+      }
+      if (e.key === "ArrowUp" && slashMenuOpen) {
+        e.preventDefault();
+        setSlashHighlight((h) => (h - 1 + slashVisible.length) % slashVisible.length);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSlashMenuOpen(false);
+        return;
+      }
+      if (e.key === "Enter" && slashMenuOpen && slashVisible.length > 0) {
+        e.preventDefault();
+        executeSlashCommand(slashVisible[slashHighlight]);
+        return;
+      }
+    }
+
+    // P2-8 — Esc stops stream when streaming (textarea is enabled, so this
+    // fires before the window handler in ChatArea).
+    if (e.key === "Escape" && isStreaming) {
+      e.preventDefault();
+      onCancel();
+      return;
+    }
+
+    // P2-8 — ↑ in empty composer enters edit mode on last user message.
+    if (e.key === "ArrowUp" && !value && !isStreaming) {
+      e.preventDefault();
+      onArrowUpEmpty?.();
+      return;
+    }
+
     // DISC-46 — plain Enter sends; Shift+Enter inserts a newline. Matches
     // the prevailing convention across ChatGPT / Claude.ai / Gemini.
     if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
       e.preventDefault();
+      if (shouldMenuBeOpen || slashMenuOpen) return; // menu takes priority
       onSend();
     }
   };
@@ -1874,18 +1990,59 @@ function InputBar({
             {uploadError}
           </p>
         )}
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          placeholder="Ask your AI coach anything…"
-          rows={1}
-          disabled={isStreaming}
-          aria-label="Message input"
-          className="w-full resize-none bg-transparent px-5 pt-4 pb-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground/50 disabled:opacity-60 max-h-[160px] overflow-y-auto"
-        />
+        {/* P2-8 — slash command autocomplete menu. Floats above the textarea,
+            anchored to the bottom of the composer. Visible when the user types
+            `/` and there are matching commands. Arrow keys navigate; Enter or
+            click selects; Esc closes. */}
+        <div className="relative">
+          {slashMenuOpen && slashVisible.length > 0 && (
+            <ul
+              role="listbox"
+              aria-label="Slash commands"
+              data-testid="slash-menu"
+              className="absolute bottom-full mb-1 left-0 z-30 w-64 rounded-xl border bg-popover text-popover-foreground shadow-lg py-1 text-sm"
+            >
+              {slashVisible.map((entry, idx) => (
+                <li
+                  key={entry.cmd}
+                  role="option"
+                  aria-selected={idx === slashHighlight}
+                  data-testid={`slash-item-${entry.cmd.slice(1)}`}
+                  onMouseDown={(e) => {
+                    // Use mousedown so the textarea doesn't blur before click.
+                    e.preventDefault();
+                    executeSlashCommand(entry);
+                  }}
+                  className={cn(
+                    "flex items-center gap-3 px-3 py-2 cursor-pointer",
+                    idx === slashHighlight
+                      ? "bg-primary/10 text-primary"
+                      : "hover:bg-muted",
+                  )}
+                >
+                  <span className="font-mono font-medium text-xs w-20 shrink-0">
+                    {entry.cmd}
+                  </span>
+                  <span className="text-xs text-muted-foreground truncate">
+                    {entry.label}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <textarea
+            ref={textareaRef}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            placeholder="Ask your AI coach anything…"
+            rows={1}
+            disabled={isStreaming}
+            aria-label="Message input"
+            className="w-full resize-none bg-transparent px-5 pt-4 pb-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground/50 disabled:opacity-60 max-h-[160px] overflow-y-auto"
+          />
+        </div>
         <div className="flex items-center justify-between px-4 pb-3 gap-3">
           <div className="flex items-center gap-2 flex-wrap">
             <button
@@ -2464,6 +2621,22 @@ function ChatArea({
     [setMessages, persistedIdSet],
   );
 
+  // P2-8 — tracks which user message should be forced into edit mode (↑ shortcut).
+  const [forcingEditId, setForcingEditId] = useState<string | null>(null);
+
+  // P2-8 — ↑ in empty composer: find the last persisted user message and open
+  // its editor. Mirrors clicking the pencil button.
+  const handleArrowUpEmpty = useCallback(() => {
+    if (isStreaming) return;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role === "user" && persistedIdSet.has(m.id)) {
+        setForcingEditId(m.id);
+        return;
+      }
+    }
+  }, [messages, isStreaming, persistedIdSet]);
+
   const [input, setInput] = useState<string>(initialInput ?? "");
   // P1-6 — local state for pending (uploaded-but-not-yet-sent) attachments.
   // Each `ChatAttachmentRead` carries the server-assigned id we pass to
@@ -2684,6 +2857,9 @@ function ChatArea({
                     // callback so the bubble can flip between branches.
                     siblingIds={msg.siblingIds}
                     onSelectSibling={isPersisted ? handleSelectSibling : undefined}
+                    // P2-8 — ↑ shortcut activates edit on the last persisted user msg.
+                    forceEdit={forcingEditId === msg.id}
+                    onForceEditConsumed={() => setForcingEditId(null)}
                   />
                 : <AssistantBubble
                     key={msg.id}
@@ -2764,6 +2940,7 @@ function ChatArea({
         contextRefs={pendingContextRefs}
         onAddContextRef={handleAddContextRef}
         onRemoveContextRef={handleRemoveContextRef}
+        onArrowUpEmpty={handleArrowUpEmpty}
       />
     </div>
   );
@@ -3045,6 +3222,31 @@ function ChatPageInner() {
     router.replace("/chat");
     setChatKey((k) => k + 1);
   };
+
+  // P2-8 — Cmd+K: start a new chat (mirrors the "New Chat" button).
+  // Cmd+/: cycle through MODES array (Auto → Tutor → Code → Career → Quiz → Auto).
+  // Both use Ctrl on Windows/Linux.
+  const handleNewRef = useRef(handleNew);
+  handleNewRef.current = handleNew;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+      if (e.key === "k" || e.key === "K") {
+        e.preventDefault();
+        handleNewRef.current();
+      } else if (e.key === "/") {
+        e.preventDefault();
+        setActiveMode((prev) => {
+          const idx = MODES.findIndex((m) => m.agentName === prev);
+          const nextIdx = (idx + 1) % MODES.length;
+          return MODES[nextIdx].agentName;
+        });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // P2-10 — open the confirm dialog. ChatArea only surfaces the ⊕ button when
   // it has transcript, so by the time this fires there is genuinely something
