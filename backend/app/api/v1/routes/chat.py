@@ -769,6 +769,53 @@ _quiz_log = structlog.get_logger().bind(route="quiz_generate")
 _LETTER_TO_INDEX = {"A": 0, "B": 1, "C": 2, "D": 3}
 
 
+def _extract_partial_json_objects(text: str) -> list[dict]:
+    """Extract every complete top-level {...} object from a possibly-truncated JSON array.
+
+    Used as fallback when json.loads fails (e.g. LLM output cut off before the
+    closing `]`). Returns however many complete objects were found.
+    """
+    objects: list[dict] = []
+    i = 0
+    while i < len(text):
+        if text[i] != "{":
+            i += 1
+            continue
+        depth = 0
+        in_string = False
+        escape = False
+        j = i
+        while j < len(text):
+            ch = text[j]
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+            else:
+                if ch == '"':
+                    in_string = True
+                elif ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            obj = json.loads(text[i:j + 1])
+                            if isinstance(obj, dict):
+                                objects.append(obj)
+                        except json.JSONDecodeError:
+                            pass
+                        i = j + 1
+                        break
+            j += 1
+        else:
+            break
+    return objects
+
+
 def _parse_quiz_questions(raw: str) -> tuple[list[QuizQuestion], list[str]]:
     """Parse the MCQ factory agent's JSON array response into QuizQuestion objects.
 
@@ -797,8 +844,13 @@ def _parse_quiz_questions(raw: str) -> tuple[list[QuizQuestion], list[str]]:
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
-        _quiz_log.warning("quiz.parse_failed", error=str(exc), raw_preview=raw[:300])
-        return [], []
+        # Partial recovery: LLM may have been cut off mid-array. Extract every
+        # complete {...} object individually and parse what we can.
+        _quiz_log.warning("quiz.parse_failed_attempting_recovery", error=str(exc), raw_preview=raw[:300])
+        data = _extract_partial_json_objects(text)
+        if not data:
+            _quiz_log.warning("quiz.parse_failed_no_recovery", raw_preview=raw[:300])
+            return [], []
 
     if not isinstance(data, list):
         data = [data]

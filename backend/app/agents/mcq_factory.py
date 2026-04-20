@@ -41,7 +41,7 @@ class MCQFactoryAgent(BaseAgent):
                 f"{conversation_context}\n"
             )
 
-        llm = self._build_llm()
+        llm = self._build_llm(max_tokens=6000)
         messages: list[Any] = [
             SystemMessage(content=_PROMPT),
             HumanMessage(
