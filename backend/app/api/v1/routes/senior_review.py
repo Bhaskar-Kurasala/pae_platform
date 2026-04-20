@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 
+import anthropic
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -49,7 +50,18 @@ async def request_senior_review(
         has_context=bool(payload.problem_context),
     )
 
-    new_state = await agent.execute(state)
+    try:
+        new_state = await agent.execute(state)
+    except anthropic.OverloadedError:
+        log.warning("senior_review.api_overloaded", user_id=str(current_user.id))
+        raise HTTPException(
+            status_code=503,
+            detail="Claude API is temporarily overloaded — please try again in a few seconds.",
+        )
+    except anthropic.APIError as exc:
+        log.error("senior_review.api_error", err=str(exc))
+        raise HTTPException(status_code=502, detail=f"Claude API error: {exc}")
+
     try:
         review = json.loads(new_state.response or "{}")
     except json.JSONDecodeError as e:
