@@ -55,8 +55,8 @@ export function TodayReview() {
     return (
       <article className="rounded-2xl border border-foreground/10 bg-card p-5 md:p-6">
         <div className="flex items-start gap-3">
-          <div className="shrink-0 rounded-xl bg-foreground/[0.04] p-2.5">
-            <Brain className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+          <div className="shrink-0 rounded-xl bg-emerald-500/10 p-2.5">
+            <Brain className="h-4 w-4 text-emerald-500" aria-hidden="true" />
           </div>
           <div className="min-w-0 flex-1">
             <h2 className="text-base font-semibold leading-snug">
@@ -73,7 +73,6 @@ export function TodayReview() {
   }
 
   const current = cards[Math.min(index, cards.length - 1)];
-  const remaining = cards.length - index;
   const done = index >= cards.length;
 
   function handleReview(quality: number) {
@@ -113,7 +112,10 @@ export function TodayReview() {
   return (
     <article
       aria-labelledby="review-heading"
-      className="rounded-2xl border border-foreground/10 bg-card p-5 md:p-6"
+      className={cn(
+        "rounded-2xl border p-5 md:p-6 bg-card",
+        cards.length > 0 && !done ? "border-amber-500/20" : "border-foreground/10",
+      )}
     >
       <div className="flex items-start gap-3">
         <div className="shrink-0 rounded-xl bg-foreground/[0.04] p-2.5">
@@ -124,8 +126,8 @@ export function TodayReview() {
             <span className="inline-flex items-center rounded-full border border-foreground/10 bg-foreground/[0.04] px-2 h-5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
               Spaced review
             </span>
-            <span className="text-[11px] text-muted-foreground tabular-nums">
-              {remaining} due
+            <span className="inline-flex items-center rounded-full bg-amber-500/10 border border-amber-500/20 px-2 h-5 text-[10px] font-semibold text-amber-400 tabular-nums">
+              {cards.length} due today
             </span>
           </div>
           <h2

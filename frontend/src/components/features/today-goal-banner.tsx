@@ -31,6 +31,30 @@ function formatDeadline(months: number, createdAt: string): {
   return { target, daysRemaining, totalDays };
 }
 
+function PaceChip({
+  percent,
+  daysRemaining,
+  totalDays,
+}: {
+  percent: number;
+  daysRemaining: number;
+  totalDays: number;
+}) {
+  const label =
+    daysRemaining > totalDays * 0.7
+      ? "Early days"
+      : percent < 60
+        ? "On pace 🟢"
+        : daysRemaining > 14
+          ? "Keep going"
+          : "Final stretch ⚡";
+  return (
+    <span className="inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+      {label}
+    </span>
+  );
+}
+
 export function TodayGoalBanner({ goal }: { goal: GoalContract }) {
   const { target, daysRemaining, totalDays } = formatDeadline(
     goal.deadline_months,
@@ -80,45 +104,35 @@ export function TodayGoalBanner({ goal }: { goal: GoalContract }) {
         &ldquo;{goal.success_statement}&rdquo;
       </p>
 
-      {/* Countdown row */}
-      <div className="mt-5 flex items-end justify-between gap-4">
-        <div>
-          <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-            Days remaining
-          </p>
-          <p
-            className="mt-1 text-3xl font-semibold tabular-nums leading-none"
-            aria-live="polite"
-          >
-            {daysRemaining}
-          </p>
-          <p className="mt-1.5 text-xs text-muted-foreground tabular-nums">
-            Target · {targetLabel}
-          </p>
+      {/* Pace row */}
+      <div className="mt-5 space-y-3">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-muted-foreground">Time elapsed</span>
+          <span className="font-medium tabular-nums">{Math.round(percent)}%</span>
         </div>
-        <div className="text-right">
-          <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-            Time used
-          </p>
-          <p className="mt-1 text-sm font-medium tabular-nums text-foreground">
-            {Math.round(percent)}%
-          </p>
-        </div>
-      </div>
-
-      {/* Progress bar */}
-      <div
-        className="mt-3 h-1 w-full rounded-full bg-foreground/[0.06] overflow-hidden"
-        role="progressbar"
-        aria-valuenow={Math.round(percent)}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label="Time elapsed toward goal deadline"
-      >
         <div
-          className="h-full rounded-full bg-primary transition-[width] duration-700"
-          style={{ width: `${percent}%` }}
-        />
+          className="h-1.5 w-full rounded-full bg-foreground/[0.06] overflow-hidden"
+          role="progressbar"
+          aria-valuenow={Math.round(percent)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Time elapsed toward goal deadline"
+        >
+          <div
+            className="h-full rounded-full bg-primary transition-[width] duration-700"
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-muted-foreground">
+            {daysRemaining} days to {targetLabel}
+          </p>
+          <PaceChip
+            percent={percent}
+            daysRemaining={daysRemaining}
+            totalDays={totalDays}
+          />
+        </div>
       </div>
     </article>
   );

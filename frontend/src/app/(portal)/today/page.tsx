@@ -6,13 +6,11 @@ import { Loader2 } from "lucide-react";
 import { MotionFade } from "@/components/ui/motion-fade";
 import { TodayConsistency } from "@/components/features/today-consistency";
 import { TodayGoalBanner } from "@/components/features/today-goal-banner";
-import { TodayIntention } from "@/components/features/today-intention";
 import { TodayMicroWins } from "@/components/features/today-micro-wins";
 import { TodayNextAction } from "@/components/features/today-next-action";
 import { TodayReflection } from "@/components/features/today-reflection";
 import { TodayReview } from "@/components/features/today-review";
 import { TodaySignal } from "@/components/features/today-signal";
-import { TeachBackWidget } from "@/components/features/teach-back-widget";
 import { useMyGoal } from "@/lib/hooks/use-goal";
 import { useAuthStore } from "@/stores/auth-store";
 import { PageShell } from "@/components/layouts/page-shell";
@@ -75,11 +73,11 @@ export default function TodayPage() {
   const isMorning = variant === "morning";
 
   return (
-    <PageShell variant="narrow" density="flush" className="px-6 py-10 md:py-14">
-      <MotionFade>
-        <header className="mb-8">
+    <PageShell variant="default" density="flush" className="px-6 py-10 md:py-14">
+      <MotionFade delay={0}>
+        <header>
           <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-            Today · {today} · {isMorning ? "Morning view" : "Evening view"}
+            Today · {today}
           </p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight">
             {greeting(hour)}, {firstName}.
@@ -87,100 +85,85 @@ export default function TodayPage() {
         </header>
       </MotionFade>
 
-      <div className="flex flex-col gap-5">
-        <MotionFade delay={0.05}>
-          <section
-            id="today-goal-banner"
-            aria-label="Your goal"
-            data-slot="goal-banner"
-          >
-            <TodayGoalBanner goal={goal} />
-          </section>
-        </MotionFade>
+      <div className="mt-8 grid grid-cols-1 md:grid-cols-[1fr_320px] gap-5 items-start">
 
-        {isMorning && (
-          <MotionFade delay={0.08}>
+        {/* LEFT COLUMN — primary learning surface */}
+        <div className="flex flex-col gap-5">
+          <MotionFade delay={0}>
             <section
-              id="today-intention"
-              aria-label="Today's intention"
-              data-slot="intention"
+              id="today-next-action"
+              aria-label="Your next action"
+              data-slot="next-action"
             >
-              <TodayIntention />
+              <TodayNextAction />
             </section>
           </MotionFade>
-        )}
 
-        <MotionFade delay={0.1}>
-          <section
-            id="today-next-action"
-            aria-label="Your next action"
-            data-slot="next-action"
-          >
-            <TodayNextAction />
-          </section>
-        </MotionFade>
-
-        <MotionFade delay={0.12}>
-          <section
-            id="today-consistency"
-            aria-label="Consistency this week"
-            data-slot="consistency"
-          >
-            <TodayConsistency />
-          </section>
-        </MotionFade>
-
-        <MotionFade delay={0.15}>
-          <section
-            id="today-review"
-            aria-label="Spaced review"
-            data-slot="review"
-          >
-            <TodayReview />
-          </section>
-        </MotionFade>
-
-        <MotionFade delay={0.18}>
-          <section
-            id="today-teach-back"
-            aria-label="Teach it back"
-            data-slot="teach-back"
-          >
-            <TeachBackWidget />
-          </section>
-        </MotionFade>
-
-        <MotionFade delay={0.19}>
-          <section
-            id="today-micro-wins"
-            aria-label="Recent wins"
-            data-slot="micro-wins"
-          >
-            <TodayMicroWins />
-          </section>
-        </MotionFade>
-
-        {!isMorning && (
-          <MotionFade delay={0.2}>
+          <MotionFade delay={0}>
             <section
-              id="today-reflection"
-              aria-label="Daily reflection"
-              data-slot="reflection"
+              id="today-review"
+              aria-label="Spaced review"
+              data-slot="review"
             >
-              <TodayReflection />
+              <TodayReview />
             </section>
           </MotionFade>
-        )}
 
-        <MotionFade delay={0.25}>
-          <section
-            id="today-signal"
-            aria-label="Signal from reality"
-            data-slot="signal"
-          >
-            <TodaySignal />
-          </section>
-        </MotionFade>
+          {!isMorning && (
+            <MotionFade delay={0}>
+              <section
+                id="today-reflection"
+                aria-label="Daily reflection"
+                data-slot="reflection"
+              >
+                <TodayReflection />
+              </section>
+            </MotionFade>
+          )}
+        </div>
+
+        {/* RIGHT SIDEBAR — context & pace */}
+        <div className="flex flex-col gap-4">
+          <MotionFade delay={0}>
+            <section
+              id="today-goal-banner"
+              aria-label="Your goal"
+              data-slot="goal-banner"
+            >
+              <TodayGoalBanner goal={goal} />
+            </section>
+          </MotionFade>
+
+          <MotionFade delay={0}>
+            <section
+              id="today-consistency"
+              aria-label="Consistency this week"
+              data-slot="consistency"
+            >
+              <TodayConsistency />
+            </section>
+          </MotionFade>
+
+          <MotionFade delay={0}>
+            <section
+              id="today-micro-wins"
+              aria-label="Recent wins"
+              data-slot="micro-wins"
+            >
+              <TodayMicroWins />
+            </section>
+          </MotionFade>
+
+          <MotionFade delay={0}>
+            <section
+              id="today-signal"
+              aria-label="Signal from reality"
+              data-slot="signal"
+            >
+              <TodaySignal />
+            </section>
+          </MotionFade>
+        </div>
       </div>
     </PageShell>
   );

@@ -97,10 +97,7 @@ export function TodayNextAction() {
   return (
     <article
       aria-labelledby="next-action-heading"
-      className={cn(
-        "group relative overflow-hidden rounded-2xl border border-foreground/10 bg-card p-5 md:p-6",
-        "transition-all hover:border-foreground/20",
-      )}
+      className="group relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-card to-primary/[0.03] p-5 md:p-6 shadow-sm transition-all hover:border-foreground/20"
     >
       {/* Accent glow */}
       <div
@@ -110,22 +107,27 @@ export function TodayNextAction() {
 
       <div className="relative flex items-start justify-between gap-4">
         <div className="flex items-start gap-3 min-w-0">
-          <div className="mt-0.5 rounded-xl bg-primary/10 p-2.5 text-primary shrink-0">
-            <Icon className="h-4 w-4" aria-hidden="true" />
+          <div className="mt-0.5 rounded-xl bg-primary/15 p-3 text-primary shrink-0">
+            <Icon className="h-5 w-5" aria-hidden="true" />
           </div>
           <div className="min-w-0">
             <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-              Your next action
+              Up next
             </p>
             <h2
               id="next-action-heading"
-              className="mt-1.5 text-base font-semibold leading-snug truncate"
+              className="mt-1.5 text-lg font-semibold leading-snug line-clamp-2"
             >
               {action.title}
             </h2>
-            <p className="mt-1 text-sm text-muted-foreground line-clamp-2">
+            <p className="mt-1.5 text-sm text-muted-foreground line-clamp-2">
               {action.subtitle}
             </p>
+            {action.kind === "resume-lesson" && (
+              <p className="mt-2 text-xs text-muted-foreground/70">
+                Pick up where you left off
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -134,11 +136,7 @@ export function TodayNextAction() {
         <Link
           href={action.href}
           aria-label={action.cta}
-          className={cn(
-            "inline-flex items-center gap-1.5 h-9 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground",
-            "transition-all hover:bg-primary/90 active:translate-y-px",
-            "focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-          )}
+          className="inline-flex items-center gap-2 h-10 rounded-xl bg-primary px-5 text-sm font-semibold text-primary-foreground transition-all hover:bg-primary/90 active:translate-y-px focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           {action.cta}
           <ArrowRight

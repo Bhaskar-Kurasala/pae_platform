@@ -41,7 +41,7 @@ export function TodayMicroWins() {
   if (isLoading) {
     return (
       <article
-        className="rounded-2xl border border-foreground/10 bg-card p-5 md:p-6"
+        className="rounded-2xl border border-foreground/10 bg-card p-4"
         aria-busy="true"
       >
         <div className="h-3 w-28 rounded bg-foreground/[0.06] animate-pulse" />
@@ -58,7 +58,7 @@ export function TodayMicroWins() {
   return (
     <article
       aria-labelledby="wins-heading"
-      className="rounded-2xl border border-foreground/10 bg-card p-5 md:p-6"
+      className="rounded-2xl border border-foreground/10 bg-card p-4"
     >
       <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
         Recent wins
@@ -68,15 +68,16 @@ export function TodayMicroWins() {
         className="mt-1.5 text-base font-semibold inline-flex items-center gap-2"
       >
         <Award className="h-4 w-4 text-primary" aria-hidden="true" />
-        {wins.length > 0 ? `${wins.length} small wins this week` : "Your wins will show up here"}
+        {wins.length > 0 ? `${wins.length} wins this week` : "No wins yet"}
       </h2>
 
       {wins.length === 0 ? (
         <p className="mt-3 text-sm text-muted-foreground leading-relaxed">
+          <Award className="inline h-3.5 w-3.5 mr-1 text-muted-foreground" aria-hidden="true" />
           Finish a lesson, pass an exercise, or ace a quiz — you'll see it land here.
         </p>
       ) : (
-        <ul className="mt-4 space-y-2.5">
+        <ul className="mt-4 space-y-2">
           {wins.map((w, i) => {
             const Icon = iconFor(w.kind);
             return (

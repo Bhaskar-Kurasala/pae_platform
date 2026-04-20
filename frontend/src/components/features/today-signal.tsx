@@ -70,42 +70,32 @@ export function TodaySignal() {
   });
 
   return (
-    <article
+    <div
       aria-labelledby="signal-heading"
-      className="rounded-2xl border border-foreground/10 bg-card p-5 md:p-6"
+      className="rounded-xl border border-foreground/[0.07] bg-foreground/[0.02] px-4 py-3"
     >
       <div className="flex items-start gap-3">
-        <div className="shrink-0 rounded-xl bg-foreground/[0.04] p-2.5">
-          <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+        <div className={cn("shrink-0 mt-0.5 rounded-lg p-1.5 border", meta.accent)}>
+          <Icon className="h-3 w-3" aria-hidden="true" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span
-              className={cn(
-                "inline-flex items-center rounded-full border px-2 h-5 text-[10px] font-medium uppercase tracking-wider",
-                meta.accent,
-              )}
-            >
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {meta.label}
             </span>
-            <span className="text-[11px] text-muted-foreground tabular-nums">
-              {recordedLabel}
-            </span>
+            <span className="text-[10px] text-muted-foreground/60 tabular-nums">{recordedLabel}</span>
           </div>
           <h2
             id="signal-heading"
-            className="mt-2 text-base font-semibold leading-snug"
+            className="mt-0.5 text-xs font-semibold leading-snug line-clamp-1"
           >
             {signal.headline}
           </h2>
-          <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
+          <p className="mt-0.5 text-[11px] text-muted-foreground leading-snug line-clamp-2">
             {signal.body}
-          </p>
-          <p className="mt-3 text-xs text-muted-foreground/80">
-            Source: {signal.source}
           </p>
         </div>
       </div>
-    </article>
+    </div>
   );
 }
