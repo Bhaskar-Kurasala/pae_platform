@@ -33,6 +33,7 @@ from app.models.user import User
 from app.models.user_preferences import UserPreferences
 from app.models.saved_skill_path import SavedSkillPath
 from app.models.user_skill_state import UserSkillState
+from app.models.notebook_entry import NotebookEntry
 from app.models.weekly_intention import WeeklyIntention
 
 __all__ = [
@@ -72,5 +73,6 @@ __all__ = [
     "Feedback",
     "Resume",
     "InterviewQuestion",
+    "NotebookEntry",
     "WeeklyIntention",
 ]

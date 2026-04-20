@@ -811,49 +811,80 @@
 ## P3 — Learning-platform differentiators
 
 ### P3-1 — "Explain differently" button
-- **Status:** todo
-- **Owner:** —
-- **Claimed:** —
-- **Completed:** —
+- **Status:** done
+- **Owner:** Claude
+- **Claimed:** 2026-04-20
+- **Completed:** 2026-04-20
 - **Depends-on:** P1-2
 - **Acceptance criteria:**
   - Hover action on assistant bubble opens: Simpler / More rigorous / Via
     analogy / Show code. Reruns with an injected overlay.
-- **Implementation note:** —
+- **Implementation note:** Added `ExplainDifferentlyButton` component in
+  `page.tsx` (after `RegenerateButton` in the hover actions row). Clicking it
+  opens a 4-option dropdown menu; each option calls `onRegenerate(messageId,
+  { explainStyle: <value> })`. Updated `RegenerateOptions` in `chat-api.ts` to
+  add `explainStyle?: string` and passes `explain_style` in the POST body.
+  Backend `stream.py` reads `explain_style` from the JSON body (validated
+  against the 4 known values) and appends `[EXPLAIN_STYLE: <value>]` to the
+  task string before calling `_token_generator`. Test coverage added in
+  `__tests__/explain-differently.test.tsx` (5 test cases). All 220 existing
+  tests continue to pass.
 
 ### P3-2 — "Turn this into flashcards" → spaced_repetition
-- **Status:** todo
-- **Owner:** —
-- **Claimed:** —
-- **Completed:** —
+- **Status:** done
+- **Owner:** claude-sonnet-4-6
+- **Claimed:** 2026-04-20
+- **Completed:** 2026-04-20
 - **Depends-on:** P0-2
 - **Acceptance criteria:**
   - One-click action on an assistant bubble extracts Q/A pairs and enqueues
     them into the `spaced_repetition` agent's card store.
   - Student sees a toast "5 cards added to review".
-- **Implementation note:** —
+- **Implementation note:** Added `POST /api/v1/chat/flashcards` endpoint in
+  `backend/app/api/v1/routes/chat.py` (calls `SpacedRepetitionAgent.execute`,
+  parses Q/A pairs via regex + JSON, returns `{cards_added, cards}`). New
+  schemas `FlashcardExtractRequest/Item/Response` in `backend/app/schemas/chat.py`.
+  Frontend: `chatApi.addFlashcards()` in `frontend/src/lib/chat-api.ts` uses
+  `api.post`; `FlashcardButton` component added to `AssistantBubble` in
+  `frontend/src/app/(portal)/chat/page.tsx` (BookOpen icon, shows spinner while
+  loading, calls toast from `@/lib/toast`). Tests: 3 Vitest tests in
+  `frontend/src/app/(portal)/chat/__tests__/flashcards.test.tsx` (all pass);
+  2 pytest tests in `backend/tests/test_chat_flashcards.py`.
 
 ### P3-3 — "Quiz me on this" → adaptive_quiz
-- **Status:** todo
-- **Owner:** —
-- **Claimed:** —
-- **Completed:** —
+- **Status:** done
+- **Owner:** Claude
+- **Claimed:** 2026-04-20
+- **Completed:** 2026-04-20
 - **Depends-on:** P0-2
 - **Acceptance criteria:**
-  - Action passes the current conversation as context to `adaptive_quiz`;
-    launches a 5-question quiz in a side panel.
-- **Implementation note:** —
+  - Action passes the current message as context to `mcq_factory` agent;
+    launches a 5-question MCQ quiz in a right-side panel.
+- **Implementation note:** Added `POST /api/v1/chat/quiz` endpoint in
+  `backend/app/api/v1/routes/chat.py` (calls `MCQFactoryAgent.execute` with
+  message content as `focus_topic`, parses `options {A,B,C,D}` dict →
+  ordered list, `correct_answer` letter → `correct_index` int). New schemas
+  `QuizGenerateRequest/QuizQuestion/QuizGenerateResponse` in
+  `backend/app/schemas/chat.py`. Frontend: `chatApi.generateQuiz()` in
+  `frontend/src/lib/chat-api.ts`; `ListChecks` "Quiz me" button in
+  `AssistantBubble` hover actions; `QuizPanel` slide-in component (fixed
+  right-0, w-96, z-50) with radio-style option buttons, correct/wrong
+  highlight on selection, explanation reveal, and answer progress footer.
+  `quizPanel` + `quizLoading` state in `ChatArea` with `handleQuizMe`
+  callback. 4 pytest tests in
+  `backend/tests/test_api/test_chat_quiz.py`; 3 Vitest tests in
+  `frontend/src/app/(portal)/chat/__tests__/quiz-panel.test.tsx`.
 
 ### P3-4 — Save to notebook
-- **Status:** todo
-- **Owner:** —
-- **Claimed:** —
-- **Completed:** —
+- **Status:** done
+- **Owner:** Claude
+- **Claimed:** 2026-04-20
+- **Completed:** 2026-04-20
 - **Depends-on:** P0-2
 - **Acceptance criteria:**
   - Per-student `notebook_entries` table.
   - "Save" action on any bubble; Notebook page lists, searches, exports.
-- **Implementation note:** —
+- **Implementation note:** Migration 0034, `NotebookEntry` model, `/api/v1/chat/notebook` routes, `BookmarkButton` on assistant bubbles, `/notebook` portal page, frontend + backend tests.
 
 ### P3-5 — Mastery delta after conversation
 - **Status:** todo

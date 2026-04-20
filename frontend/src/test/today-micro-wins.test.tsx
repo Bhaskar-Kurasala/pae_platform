@@ -20,7 +20,7 @@ describe("TodayMicroWins", () => {
       isLoading: false,
     });
     render(<TodayMicroWins />);
-    expect(screen.getByText(/your wins will show up here/i)).toBeInTheDocument();
+    expect(screen.getByText(/finish a lesson, pass an exercise/i)).toBeInTheDocument();
   });
 
   it("lists wins with labels when they exist", () => {
@@ -35,7 +35,7 @@ describe("TodayMicroWins", () => {
       isLoading: false,
     });
     render(<TodayMicroWins />);
-    expect(screen.getByText(/2 small wins this week/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 wins this week/i)).toBeInTheDocument();
     expect(screen.getByText(/finished: async python/i)).toBeInTheDocument();
     expect(screen.getByText(/perfect quiz: promises/i)).toBeInTheDocument();
   });

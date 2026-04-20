@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Archive, ArchiveRestore, ArrowDown, ArrowUp, AtSign, BookOpen, Bot, BriefcaseBusiness, Check, ChevronLeft, ChevronRight, Clock, Code2, Copy, Download, FileCode, FileText, GraduationCap, ImageIcon, Lock, Menu, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Puzzle, RefreshCw, RotateCw, Search, Sparkles, Square, Timer, Trash2, User, X } from "lucide-react";
+import { AlertTriangle, Archive, ArchiveRestore, ArrowDown, ArrowUp, AtSign, Bookmark, BookmarkCheck, BookOpen, Bot, BriefcaseBusiness, Check, ChevronLeft, ChevronRight, Clock, Code2, Copy, Download, FileCode, FileText, GraduationCap, ImageIcon, ListChecks, Lock, Menu, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Puzzle, RefreshCw, RotateCw, Search, Sparkles, Square, Timer, Trash2, User, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MarkdownRenderer } from "@/components/features/markdown-renderer";
 import {
@@ -26,7 +26,9 @@ import {
   type ChatMessageRead,
   type ContextSuggestionsResponse,
   type ConversationListItem,
+  type QuizQuestion,
 } from "@/lib/chat-api";
+import { toast } from "@/lib/toast";
 import { ChatSkeleton } from "./chat-skeleton";
 import { FeedbackControls } from "./feedback-controls";
 import {
@@ -1025,6 +1027,40 @@ function CopyMessageButton({ content }: { content: string }) {
   );
 }
 
+// P3-4 — "Save to notebook" hover action on assistant bubbles. Mirrors the
+// CopyMessageButton pattern: self-contained, fires an async callback, shows a
+// brief active-state toggle. `isSaved` is true when the parent has already
+// bookmarked this message id in the current session.
+function BookmarkButton({
+  onClick,
+  isSaved,
+}: {
+  onClick: () => void;
+  isSaved: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={isSaved ? "Saved to notebook" : "Save to notebook"}
+      aria-pressed={isSaved}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
+        isSaved
+          ? "text-primary"
+          : "text-muted-foreground hover:bg-muted hover:text-foreground",
+      )}
+    >
+      {isSaved ? (
+        <BookmarkCheck className="h-3.5 w-3.5" />
+      ) : (
+        <Bookmark className="h-3.5 w-3.5" />
+      )}
+      {isSaved ? "Saved" : "Save"}
+    </button>
+  );
+}
+
 // P1-2 — "Regenerate" hover action on assistant bubbles. Matches the existing
 // hover-action visual style (CopyMessageButton / FeedbackControls). The click
 // handler lives in the parent so the regenerate fetch + stream consumption can
@@ -1057,6 +1093,88 @@ function RegenerateButton({
       />
       {isRegenerating ? "Regenerating" : "Regenerate"}
     </button>
+  );
+}
+
+// P3-1 — "Explain differently" hover action. Shows a 4-option dropdown
+// (Simpler / More rigorous / Via analogy / Show code) that calls the
+// regenerate route with an explain_style hint.
+const EXPLAIN_OPTIONS = [
+  { value: "simpler",       label: "Simpler" },
+  { value: "more_rigorous", label: "More rigorous" },
+  { value: "via_analogy",   label: "Via analogy" },
+  { value: "show_code",     label: "Show code" },
+] as const;
+
+function ExplainDifferentlyButton({
+  onSelect,
+  disabled,
+}: {
+  onSelect: (style: string) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click.
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        aria-label="Explain differently"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+        data-testid="explain-differently-trigger"
+        className={cn(
+          "inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
+          "text-muted-foreground hover:bg-muted hover:text-foreground",
+          "disabled:opacity-50 disabled:cursor-not-allowed",
+        )}
+      >
+        <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+        Explain differently
+      </button>
+      {open && (
+        <div
+          role="menu"
+          data-testid="explain-differently-menu"
+          className={cn(
+            "absolute bottom-full left-0 mb-1 z-50",
+            "rounded-lg border border-border bg-popover shadow-md",
+            "min-w-[150px] py-1",
+          )}
+        >
+          {EXPLAIN_OPTIONS.map(({ value, label }) => (
+            <button
+              key={value}
+              role="menuitem"
+              type="button"
+              data-testid={`explain-option-${value}`}
+              className="w-full text-left px-3 py-1.5 text-xs text-foreground hover:bg-muted transition-colors"
+              onClick={() => {
+                setOpen(false);
+                onSelect(value);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1318,6 +1436,52 @@ function RoutingAffordance({
   );
 }
 
+// P3-2 — Flashcard extraction button. Calls the spaced_repetition agent and
+// shows a toast with the card count.
+function FlashcardButton({
+  messageId,
+  content,
+}: {
+  messageId: string;
+  content: string;
+}) {
+  const [loading, setLoading] = useState(false);
+
+  const handleClick = async () => {
+    setLoading(true);
+    try {
+      const result = await chatApi.addFlashcards(messageId, content);
+      toast.success(`${result.cards_added} cards added to review`);
+    } catch {
+      toast.error("Could not add flashcards — try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={() => void handleClick()}
+      disabled={loading}
+      aria-label="Add flashcards from this message"
+      data-testid="flashcard-button"
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
+        "text-muted-foreground hover:bg-muted hover:text-foreground",
+        "disabled:opacity-50 disabled:cursor-not-allowed",
+      )}
+    >
+      {loading ? (
+        <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+      ) : (
+        <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
+      )}
+      Flashcards
+    </button>
+  );
+}
+
 function AssistantBubble({
   messageId,
   content,
@@ -1337,6 +1501,9 @@ function AssistantBubble({
   totalDurationMs,
   inputTokens,
   outputTokens,
+  onSaveToNotebook,
+  isSaved = false,
+  onQuizMe,
 }: {
   messageId: string;
   content: string;
@@ -1358,11 +1525,10 @@ function AssistantBubble({
   // live-streaming bubble (persisted-only actions).
   siblingIds?: string[];
   onSelectSibling?: (messageId: string, targetId: string) => Promise<void>;
-  // P2-4 — `onRegenerate` accepts an optional `agentOverride` so the
-  // routing-override dropdown can regenerate under a specific agent.
+  // P2-4/P3-1 — `onRegenerate` accepts optional agentOverride and explainStyle.
   onRegenerate?: (
     messageId: string,
-    options?: { agentOverride?: string },
+    options?: { agentOverride?: string; explainStyle?: string },
   ) => Promise<void>;
   isRegenerating?: boolean;
   // P2-5 — hover-panel metadata. Populated only for persisted assistant
@@ -1372,6 +1538,13 @@ function AssistantBubble({
   totalDurationMs?: number | null;
   inputTokens?: number | null;
   outputTokens?: number | null;
+  // P3-4 — notebook bookmark. `onSaveToNotebook` is omitted for the
+  // live-streaming bubble; `isSaved` tracks whether this message id is
+  // already in the current session's saved set.
+  onSaveToNotebook?: () => void;
+  isSaved?: boolean;
+  // P3-3 — quiz me button callback. Undefined for live-streaming bubbles.
+  onQuizMe?: (messageId: string, content: string) => void;
 }) {
   const modeLabel = MODES.find((m) => m.agentName === agentName)?.label;
   const showActions = !isThinking && !(isStreaming && isLast) && content.length > 0;
@@ -1436,10 +1609,29 @@ function AssistantBubble({
             aria-label="Message actions"
           >
             <CopyMessageButton content={content} />
+            <FlashcardButton messageId={messageId} content={content} />
+            {onQuizMe && (
+              <button
+                type="button"
+                onClick={() => onQuizMe(messageId, content)}
+                aria-label="Quiz me on this message"
+                data-testid="quiz-me-button"
+                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              >
+                <ListChecks className="h-3.5 w-3.5" aria-hidden="true" />
+                Quiz me
+              </button>
+            )}
             {canRegenerate && (
               <RegenerateButton
                 onClick={() => void onRegenerate(messageId)}
                 isRegenerating={!!isRegenerating}
+              />
+            )}
+            {canRegenerate && (
+              <ExplainDifferentlyButton
+                disabled={!!isRegenerating}
+                onSelect={(style) => void onRegenerate(messageId, { explainStyle: style })}
               />
             )}
             {hasSiblings && onSelectSibling && siblingIds && (
@@ -1458,6 +1650,9 @@ function AssistantBubble({
                 myFeedback={myFeedback}
                 onSubmit={onSubmitFeedback}
               />
+            )}
+            {onSaveToNotebook && (
+              <BookmarkButton onClick={onSaveToNotebook} isSaved={isSaved} />
             )}
           </div>
         )}
@@ -2430,15 +2625,15 @@ function ChatArea({
   const handleRegenerate = useCallback(
     async (
       messageId: string,
-      options?: { agentOverride?: string },
+      options?: { agentOverride?: string; explainStyle?: string },
     ): Promise<void> => {
       if (regeneratingId !== null) return;
       setRegeneratingId(messageId);
       try {
-        const res = await regenerateMessage(
-          messageId,
-          options?.agentOverride ? { agentOverride: options.agentOverride } : {},
-        );
+        const res = await regenerateMessage(messageId, {
+          agentOverride: options?.agentOverride,
+          explainStyle: options?.explainStyle,
+        });
         if (!res.ok) {
           // Surface the backend's detail if present (401/404/400/429/5xx) so
           // the console points at the failure class while the bubble reverts
@@ -2619,6 +2814,54 @@ function ChatArea({
       }
     },
     [setMessages, persistedIdSet],
+  );
+
+  // P3-4 — tracks which message ids have been bookmarked this session.
+  const [savedMessageIds, setSavedMessageIds] = useState<Set<string>>(new Set());
+
+  const handleSaveToNotebook = useCallback(
+    async (messageId: string, msgContent: string): Promise<void> => {
+      if (!conversationId) return;
+      try {
+        await chatApi.saveToNotebook({
+          messageId,
+          conversationId,
+          content: msgContent,
+        });
+        setSavedMessageIds((prev) => new Set([...prev, messageId]));
+        toast.success("Saved to notebook");
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("[chat] save to notebook failed", err);
+        toast.error("Could not save — try again");
+      }
+    },
+    [conversationId],
+  );
+
+  // P3-3 — quiz panel state. Non-null when the quiz panel is open.
+  const [quizPanel, setQuizPanel] = useState<{
+    messageId: string;
+    questions: QuizQuestion[];
+  } | null>(null);
+  const [quizLoading, setQuizLoading] = useState(false);
+
+  const handleQuizMe = useCallback(
+    async (messageId: string, content: string): Promise<void> => {
+      if (quizLoading) return;
+      setQuizLoading(true);
+      try {
+        const result = await chatApi.generateQuiz(messageId, content);
+        setQuizPanel({ messageId, questions: result.questions });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("[chat] quiz generation failed", err);
+        toast.error("Could not generate quiz — try again");
+      } finally {
+        setQuizLoading(false);
+      }
+    },
+    [quizLoading],
   );
 
   // P2-8 — tracks which user message should be forced into edit mode (↑ shortcut).
@@ -2881,6 +3124,15 @@ function ChatArea({
                     totalDurationMs={msg.totalDurationMs}
                     inputTokens={msg.inputTokens}
                     outputTokens={msg.outputTokens}
+                    // P3-3 — quiz me. Only available on persisted assistant rows.
+                    onQuizMe={isPersisted ? (id, c) => void handleQuizMe(id, c) : undefined}
+                    // P3-4 — notebook bookmark.
+                    onSaveToNotebook={
+                      isPersisted
+                        ? () => void handleSaveToNotebook(msg.id, msg.content)
+                        : undefined
+                    }
+                    isSaved={savedMessageIds.has(msg.id)}
                   />;
             })}
             <div ref={messagesEndRef} className="h-4" />
@@ -2942,6 +3194,149 @@ function ChatArea({
         onRemoveContextRef={handleRemoveContextRef}
         onArrowUpEmpty={handleArrowUpEmpty}
       />
+      {/* P3-3 — quiz panel slide-in from the right */}
+      {quizLoading && (
+        <div
+          className="fixed right-0 top-0 h-full w-96 bg-white shadow-xl z-50 flex items-center justify-center border-l border-border"
+          aria-label="Generating quiz…"
+          data-testid="quiz-panel-loading"
+        >
+          <div className="flex flex-col items-center gap-3 text-muted-foreground">
+            <RefreshCw className="h-6 w-6 animate-spin" aria-hidden="true" />
+            <span className="text-sm">Generating quiz…</span>
+          </div>
+        </div>
+      )}
+      {quizPanel && !quizLoading && (
+        <QuizPanel
+          panel={quizPanel}
+          onClose={() => setQuizPanel(null)}
+          onUpdatePanel={setQuizPanel}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Quiz panel (P3-3) ────────────────────────────────────────────
+// Slide-in panel from the right. Shows 5 MCQ questions generated from the
+// selected assistant message. On answer selection highlights correct/wrong
+// and shows explanation. Positioned to the right of the chat area and
+// does NOT conflict with the ChatSidebar on the left.
+function QuizPanel({
+  panel,
+  onClose,
+  onUpdatePanel,
+}: {
+  panel: { messageId: string; questions: QuizQuestion[] };
+  onClose: () => void;
+  onUpdatePanel: (p: { messageId: string; questions: QuizQuestion[] }) => void;
+}) {
+  const titlePreview = panel.questions[0]?.question?.slice(0, 30) ?? "Quiz";
+
+  const handleSelect = (questionIndex: number, optionIndex: number) => {
+    const updated = panel.questions.map((q, qi) =>
+      qi === questionIndex ? { ...q, selected_index: optionIndex } : q,
+    );
+    onUpdatePanel({ ...panel, questions: updated });
+  };
+
+  return (
+    <div
+      className="fixed right-0 top-0 h-full w-96 bg-white shadow-xl z-50 flex flex-col border-l border-border overflow-hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Quiz panel"
+      data-testid="quiz-panel"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <ListChecks className="h-4 w-4 text-primary shrink-0" aria-hidden="true" />
+          <span className="text-sm font-semibold truncate">
+            Quiz: {titlePreview}…
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close quiz panel"
+          className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0"
+        >
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
+      </div>
+
+      {/* Questions */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-6">
+        {panel.questions.map((q, qi) => {
+          const answered = q.selected_index !== undefined;
+          const isCorrect = answered && q.selected_index === q.correct_index;
+          return (
+            <div key={qi} className="space-y-2">
+              <p className="text-sm font-medium leading-snug" data-testid={`quiz-question-${qi}`}>
+                {qi + 1}. {q.question}
+              </p>
+              <div className="space-y-1.5">
+                {q.options.map((opt, oi) => {
+                  const label = String.fromCharCode(65 + oi); // A, B, C, D
+                  const isSelected = q.selected_index === oi;
+                  const isThisCorrect = oi === q.correct_index;
+                  let optClass =
+                    "flex items-start gap-2 w-full rounded-lg border px-3 py-2 text-sm text-left transition-colors";
+                  if (!answered) {
+                    optClass += " border-border hover:border-primary/50 hover:bg-primary/5 cursor-pointer";
+                  } else if (isThisCorrect) {
+                    optClass += " border-green-500 bg-green-50 text-green-800";
+                  } else if (isSelected && !isThisCorrect) {
+                    optClass += " border-destructive bg-destructive/10 text-destructive";
+                  } else {
+                    optClass += " border-border text-muted-foreground";
+                  }
+                  return (
+                    <button
+                      key={oi}
+                      type="button"
+                      disabled={answered}
+                      onClick={() => handleSelect(qi, oi)}
+                      aria-label={`Option ${label}: ${opt}`}
+                      data-testid={`quiz-option-${qi}-${oi}`}
+                      className={optClass}
+                    >
+                      <span className="font-semibold shrink-0">{label}.</span>
+                      <span>{opt}</span>
+                      {answered && isThisCorrect && (
+                        <Check className="h-3.5 w-3.5 ml-auto shrink-0 text-green-600" aria-hidden="true" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              {answered && (
+                <div
+                  className={cn(
+                    "rounded-lg px-3 py-2 text-xs leading-relaxed",
+                    isCorrect
+                      ? "bg-green-50 text-green-800 border border-green-200"
+                      : "bg-amber-50 text-amber-800 border border-amber-200",
+                  )}
+                  data-testid={`quiz-explanation-${qi}`}
+                >
+                  <span className="font-semibold">{isCorrect ? "Correct! " : "Not quite. "}</span>
+                  {q.explanation}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Footer */}
+      <div className="border-t border-border px-4 py-3 shrink-0 bg-card">
+        <p className="text-xs text-muted-foreground text-center">
+          {panel.questions.filter((q) => q.selected_index !== undefined).length} / {panel.questions.length} answered
+        </p>
+      </div>
     </div>
   );
 }

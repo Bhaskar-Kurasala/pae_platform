@@ -154,6 +154,60 @@ class ConversationListItem(BaseModel):
     message_count: int = 0
 
 
+# P3-2 — flashcard extraction ---------------------------------------------------
+
+
+class FlashcardExtractRequest(BaseModel):
+    """P3-2 — body for POST /chat/flashcards.
+
+    `message_id` is stored as a plain string (not UUID) because the UI may
+    pass client-generated ids for messages that haven't been persisted yet.
+    `content` holds the assistant message text to extract cards from.
+    """
+
+    message_id: str = Field(min_length=1, max_length=255)
+    content: str = Field(min_length=1, max_length=50000)
+
+
+class FlashcardItem(BaseModel):
+    question: str
+    answer: str
+
+
+class FlashcardExtractResponse(BaseModel):
+    cards_added: int
+    cards: list[FlashcardItem] = Field(default_factory=list)
+
+
+# P3-3 — quiz generation -------------------------------------------------
+
+
+class QuizGenerateRequest(BaseModel):
+    """P3-3 — body for POST /chat/quiz.
+
+    `message_id` is stored for audit/tracing; `content` is the assistant
+    message text passed as `focus_topic` to the adaptive_quiz agent.
+    """
+
+    message_id: str = Field(min_length=1, max_length=100)
+    content: str = Field(min_length=1, max_length=20000)
+
+
+class QuizQuestion(BaseModel):
+    """A single MCQ item returned by the quiz endpoint."""
+
+    question: str
+    options: list[str]
+    correct_index: int
+    explanation: str
+
+
+class QuizGenerateResponse(BaseModel):
+    """P3-3 — response for POST /chat/quiz."""
+
+    questions: list[QuizQuestion]
+
+
 # P1-6 — attachments ---------------------------------------------------------
 
 

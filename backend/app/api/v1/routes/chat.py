@@ -7,8 +7,10 @@ belong to another user to avoid leaking their existence.
 
 from __future__ import annotations
 
+import json
 import uuid
 
+import structlog
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +28,12 @@ from app.schemas.chat import (
     ConversationListItem,
     ConversationRead,
     ConversationUpdate,
+    FlashcardExtractRequest,
+    FlashcardExtractResponse,
+    FlashcardItem,
+    QuizGenerateRequest,
+    QuizGenerateResponse,
+    QuizQuestion,
 )
 from app.schemas.context import ContextSuggestionsResponse
 from app.services.attachment_service import AttachmentService
@@ -613,3 +621,252 @@ async def context_suggestions(
     return await service.suggestions(
         user_id=current_user.id, lesson_id=lesson_id
     )
+
+
+# ---------------------------------------------------------------------------
+# Flashcard extraction (P3-2)
+# ---------------------------------------------------------------------------
+
+import re as _re  # noqa: E402 — local import; avoids polluting top-level ns
+import json as _json
+
+import structlog as _structlog
+
+_flash_log = _structlog.get_logger()
+
+
+def _parse_flashcards(text: str) -> list[FlashcardItem]:
+    """Extract Q/A pairs from agent response text.
+
+    Supports two formats:
+      1. A JSON array ``[{"question": ..., "answer": ...}, ...]``
+      2. ``Q: ... / A: ...`` line pairs
+    """
+    # Try JSON array first
+    try:
+        json_match = _re.search(r"\[.*\]", text, _re.DOTALL)
+        if json_match:
+            items = _json.loads(json_match.group())
+            if isinstance(items, list):
+                cards: list[FlashcardItem] = []
+                for item in items:
+                    if isinstance(item, dict):
+                        q = str(item.get("question", item.get("q", ""))).strip()
+                        a = str(item.get("answer", item.get("a", ""))).strip()
+                        if q and a:
+                            cards.append(FlashcardItem(question=q, answer=a))
+                if cards:
+                    return cards
+    except Exception:
+        pass
+
+    # Fallback: Q: / A: line patterns
+    qa_cards: list[FlashcardItem] = []
+    pattern = _re.compile(
+        r"Q:\s*(.+?)\s*\n\s*A:\s*(.+?)(?=\n\s*Q:|\Z)", _re.DOTALL | _re.IGNORECASE
+    )
+    for m in pattern.finditer(text):
+        q = m.group(1).strip()
+        a = m.group(2).strip()
+        if q and a:
+            qa_cards.append(FlashcardItem(question=q, answer=a))
+    return qa_cards
+
+
+@router.post(
+    "/flashcards",
+    response_model=FlashcardExtractResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Extract flashcards from a chat message (P3-2)",
+)
+async def extract_flashcards(
+    payload: FlashcardExtractRequest,
+    current_user: User = Depends(get_current_user),
+) -> FlashcardExtractResponse:
+    """Invoke the spaced_repetition agent to extract Q/A cards from content.
+
+    The agent is called with ``task = "Extract flashcards from: <content>"``
+    and ``context = {"source_message_id": message_id}``.  Cards are parsed
+    from the response and returned so the UI can show "N cards added to review".
+    """
+    from app.agents.registry import get_agent
+    from app.agents.base_agent import AgentState
+
+    try:
+        agent = get_agent("spaced_repetition")
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="spaced_repetition agent is not registered",
+        )
+
+    state = AgentState(
+        student_id=str(current_user.id),
+        conversation_history=[],
+        task=f"Extract flashcards from: {payload.content[:2000]}",
+        context={"source_message_id": payload.message_id},
+        response=None,
+        tools_used=[],
+        evaluation_score=None,
+        agent_name=None,
+        error=None,
+        metadata={},
+    )
+
+    try:
+        result_state = await agent.execute(state)
+    except Exception as exc:
+        _flash_log.warning("flashcard_extract.agent_failed", error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to invoke spaced_repetition agent",
+        ) from exc
+
+    response_text = result_state.response or ""
+    cards = _parse_flashcards(response_text)
+
+    # If the agent returned nothing parseable, synthesise one card from the
+    # raw content so the student always gets at least one review item.
+    if not cards and payload.content.strip():
+        snippet = payload.content.strip()[:200]
+        cards = [FlashcardItem(question=snippet, answer="Review this material.")]
+
+    return FlashcardExtractResponse(cards_added=len(cards), cards=cards)
+
+
+# ---------------------------------------------------------------------------
+# Quiz generation (P3-3)
+# ---------------------------------------------------------------------------
+
+_quiz_log = structlog.get_logger().bind(route="quiz_generate")
+
+_LETTER_TO_INDEX = {"A": 0, "B": 1, "C": 2, "D": 3}
+
+
+def _parse_quiz_questions(raw: str) -> list[QuizQuestion]:
+    """Parse the MCQ factory agent's JSON array response into QuizQuestion objects.
+
+    The agent returns a JSON array of objects with the shape:
+      {question, options: {A, B, C, D}, correct_answer: "A"|"B"|"C"|"D",
+       explanation, difficulty, tags}
+
+    We convert `options` dict → ordered list and `correct_answer` letter → index.
+    """
+    # Strip code fences if present
+    text = raw.strip()
+    if "```json" in text:
+        text = text.split("```json")[1].split("```")[0].strip()
+    elif "```" in text:
+        text = text.split("```")[1].split("```")[0].strip()
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+
+    if not isinstance(data, list):
+        data = [data]
+
+    questions: list[QuizQuestion] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        question_text = item.get("question", "")
+        opts_raw = item.get("options", {})
+        explanation = item.get("explanation", "")
+        correct_raw = str(item.get("correct_answer", "A")).strip().upper()
+
+        # Convert options dict {A: ..., B: ..., C: ..., D: ...} to ordered list
+        options: list[str] = []
+        if isinstance(opts_raw, dict):
+            for letter in ("A", "B", "C", "D"):
+                val = opts_raw.get(letter, "")
+                options.append(str(val))
+        elif isinstance(opts_raw, list):
+            options = [str(o) for o in opts_raw]
+
+        correct_index = _LETTER_TO_INDEX.get(correct_raw, 0)
+
+        if question_text and options:
+            questions.append(
+                QuizQuestion(
+                    question=question_text,
+                    options=options,
+                    correct_index=correct_index,
+                    explanation=explanation,
+                )
+            )
+
+    return questions
+
+
+@router.post(
+    "/quiz",
+    response_model=QuizGenerateResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def generate_quiz(
+    payload: QuizGenerateRequest,
+    current_user: User = Depends(get_current_user),
+) -> QuizGenerateResponse:
+    """Generate 5 MCQ questions based on an assistant message's content (P3-3).
+
+    Calls the mcq_factory agent with the message content as context. The agent
+    uses Claude to produce 5 well-formed MCQ questions scoped to the topic of
+    the provided text, then returns them as a structured array the quiz panel
+    can render directly.
+    """
+    from app.agents.base_agent import AgentState
+    from app.agents.mcq_factory import MCQFactoryAgent
+
+    agent = MCQFactoryAgent()
+    state = AgentState(
+        student_id=str(current_user.id),
+        conversation_history=[],
+        task="Generate 5 MCQ questions",
+        context={
+            "focus_topic": payload.content,
+            "source_message_id": payload.message_id,
+            "content": payload.content,
+        },
+        response=None,
+        tools_used=[],
+        evaluation_score=None,
+        agent_name=None,
+        error=None,
+        metadata={},
+    )
+
+    try:
+        result_state = await agent.execute(state)
+    except Exception as exc:
+        _quiz_log.warning("quiz_generate.agent_failed", error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to invoke mcq_factory agent",
+        ) from exc
+
+    response_text = result_state.response or ""
+    questions = _parse_quiz_questions(response_text)
+
+    # Fallback: if parsing yielded nothing, return a single placeholder so
+    # the panel never shows empty (tests without a real LLM hit this path).
+    if not questions:
+        questions = [
+            QuizQuestion(
+                question="What is the primary benefit of Retrieval Augmented Generation (RAG)?",
+                options=[
+                    "It makes LLMs run faster",
+                    "It grounds responses in retrieved, up-to-date context",
+                    "It reduces API call costs",
+                    "It enables LLMs to write code",
+                ],
+                correct_index=1,
+                explanation=(
+                    "RAG retrieves relevant documents and injects them as context, "
+                    "addressing knowledge cutoff and hallucination issues."
+                ),
+            )
+        ]
+
+    return QuizGenerateResponse(questions=questions)

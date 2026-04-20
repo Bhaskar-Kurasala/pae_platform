@@ -698,7 +698,10 @@ async def regenerate_assistant_message(
     # P2-4 — optional body. Read defensively because the legacy client
     # (pre-P2-4) POSTs with no body at all; FastAPI would 422 if we
     # required a Pydantic model here.
+    # P3-1 — also accepts explain_style for the "Explain differently" feature.
     agent_override: str | None = None
+    explain_style: str | None = None
+    _VALID_EXPLAIN_STYLES = {"simpler", "more_rigorous", "via_analogy", "show_code"}
     try:
         body = await request.json()
     except Exception:
@@ -707,6 +710,9 @@ async def regenerate_assistant_message(
         raw_override = body.get("agent_override")
         if isinstance(raw_override, str) and raw_override.strip():
             agent_override = raw_override.strip()
+        raw_style = body.get("explain_style")
+        if isinstance(raw_style, str) and raw_style.strip() in _VALID_EXPLAIN_STYLES:
+            explain_style = raw_style.strip()
 
     conversation_history: list[dict[str, Any]] = []
     parent_msg_id: uuid.UUID
@@ -780,9 +786,16 @@ async def regenerate_assistant_message(
         agent=agent_name,
     )
 
+    # P3-1 — when the user picks an "Explain differently" style, append a
+    # free-text hint to the task. The agents treat task as plain text so this
+    # requires no schema changes downstream.
+    task_with_hint = parent_msg.content
+    if explain_style:
+        task_with_hint = f"{parent_msg.content}\n\n[EXPLAIN_STYLE: {explain_style}]"
+
     return StreamingResponse(
         _token_generator(
-            parent_msg.content,
+            task_with_hint,
             agent_name,
             conversation_history,
             None,  # code_context — regenerate doesn't re-read the editor

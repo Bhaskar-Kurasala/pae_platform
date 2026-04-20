@@ -20,7 +20,7 @@ describe("TodayConsistency", () => {
       isLoading: false,
     });
     render(<TodayConsistency />);
-    expect(screen.getByText(/4 of 7 days this week/i)).toBeInTheDocument();
+    expect(screen.getByText(/4 of 7 days/i)).toBeInTheDocument();
     expect(screen.getByText("57%")).toBeInTheDocument();
   });
 

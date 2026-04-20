@@ -8,6 +8,7 @@ import { MobileBottomNav } from "@/components/layouts/mobile-bottom-nav";
 import { SkipToContent } from "@/components/layouts/skip-to-content";
 import {
   BookOpen,
+  Bookmark,
   Briefcase,
   ChevronRight,
   Code2,
@@ -61,6 +62,7 @@ const navItems = [
   { href: "/receipts", label: "Receipts", icon: ScrollText },
   { href: "/career", label: "Career", icon: Briefcase },
   { href: "/chat", label: "AI Tutor", icon: MessageSquare },
+  { href: "/notebook", label: "Notebook", icon: Bookmark },
 ];
 
 function SidebarContent({ onClose }: { onClose?: () => void }) {

@@ -119,6 +119,29 @@ export interface ConversationListItem {
   message_count: number;
 }
 
+// P3-3 — quiz question shape returned by POST /chat/quiz.
+export type QuizQuestion = {
+  question: string;
+  options: string[];
+  correct_index: number;
+  explanation: string;
+  selected_index?: number;
+};
+
+export interface QuizGenerateResponse {
+  questions: QuizQuestion[];
+}
+
+// P3-4 — notebook entry shape returned by the backend.
+export interface NotebookEntryOut {
+  id: string;
+  message_id: string;
+  conversation_id: string;
+  content: string;
+  title: string | null;
+  created_at: string;
+}
+
 export const chatApi = {
   listConversations: (opts?: { includeArchived?: boolean; q?: string }) => {
     const params = new URLSearchParams();
@@ -179,6 +202,43 @@ export const chatApi = {
       `/api/v1/chat/context-suggestions${qs}`,
     );
   },
+  // P3-4 — notebook: save / list / delete bookmarked assistant messages.
+  saveToNotebook: (entry: {
+    messageId: string;
+    conversationId: string;
+    content: string;
+    title?: string;
+  }) =>
+    api.post<NotebookEntryOut>("/api/v1/chat/notebook", {
+      message_id: entry.messageId,
+      conversation_id: entry.conversationId,
+      content: entry.content,
+      title: entry.title ?? null,
+    }),
+  listNotebook: () => api.get<NotebookEntryOut[]>("/api/v1/chat/notebook"),
+  deleteNotebookEntry: (entryId: string) =>
+    api.del(`/api/v1/chat/notebook/${entryId}`),
+  // P3-2 — send an assistant message to the spaced_repetition agent and
+  // get back a count of extracted Q/A flashcards.
+  addFlashcards: (
+    messageId: string,
+    content: string,
+  ): Promise<{ cards_added: number }> =>
+    api.post<{ cards_added: number }>("/api/v1/chat/flashcards", {
+      message_id: messageId,
+      content,
+    }),
+  // P3-3 — generate 5 MCQ questions based on an assistant message's content.
+  // The backend calls the mcq_factory agent scoped to the provided text and
+  // returns a structured array ready for the quiz panel to render.
+  generateQuiz: (
+    messageId: string,
+    content: string,
+  ): Promise<QuizGenerateResponse> =>
+    api.post<QuizGenerateResponse>("/api/v1/chat/quiz", {
+      message_id: messageId,
+      content,
+    }),
 };
 
 // ---------- Export (P1-9) ----------
@@ -227,6 +287,13 @@ export interface RegenerateOptions {
    * side; unknown names are ignored (fall back to original behavior).
    */
   agentOverride?: string;
+  /**
+   * P3-1 — "Explain differently" style hint. When set, the backend
+   * appends an [EXPLAIN_STYLE: <value>] hint to the task so the agent
+   * reshapes its response accordingly.
+   * Valid values: "simpler" | "more_rigorous" | "via_analogy" | "show_code"
+   */
+  explainStyle?: string;
   signal?: AbortSignal;
 }
 
@@ -249,9 +316,12 @@ export async function regenerateMessage(
     headers,
     signal: opts.signal,
   };
-  if (opts.agentOverride) {
+  if (opts.agentOverride || opts.explainStyle) {
     headers["Content-Type"] = "application/json";
-    init.body = JSON.stringify({ agent_override: opts.agentOverride });
+    const bodyObj: Record<string, string> = {};
+    if (opts.agentOverride) bodyObj.agent_override = opts.agentOverride;
+    if (opts.explainStyle) bodyObj.explain_style = opts.explainStyle;
+    init.body = JSON.stringify(bodyObj);
   }
   return fetch(
     `${API_BASE}/api/v1/chat/messages/${messageId}/regenerate`,

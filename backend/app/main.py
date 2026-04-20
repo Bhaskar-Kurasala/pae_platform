@@ -133,6 +133,7 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.career import router as career_router
     from app.api.v1.routes.chat import router as chat_router
     from app.api.v1.routes.clarification import router as clarification_router
+    from app.api.v1.routes.notebook import router as notebook_router
     from app.api.v1.routes.stream import (
         chat_stream_router,
         router as stream_router,
@@ -179,6 +180,7 @@ def create_app() -> FastAPI:
         career_router,
         chat_router,
         clarification_router,
+        notebook_router,
     ]
     for r in api_routers:
         app.include_router(r, prefix="/api/v1")
