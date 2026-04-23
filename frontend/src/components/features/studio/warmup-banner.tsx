@@ -78,6 +78,14 @@ function todayKey(): string {
   return `studio-warmup-dismissed-${date}`;
 }
 
+// Keep in sync with code-editor.tsx DEFAULT_CODE so warm-up also appears
+// for users who have never typed anything (just the template placeholder).
+const DEFAULT_CODE = `# Write Python here — try calling Claude or building a small agent.\nimport os\n\ndef greet(name: str) -> str:\n    return f"Hello, {name}!"\n\nprint(greet("PAE"))\n`;
+
+function isEmptyOrDefault(code: string): boolean {
+  return code === "" || code.trim() === DEFAULT_CODE.trim();
+}
+
 function isDismissedToday(): boolean {
   try {
     return localStorage.getItem(todayKey()) === "1";
@@ -105,8 +113,8 @@ export function WarmupBanner() {
   const challenge = pickChallenge();
 
   useEffect(() => {
-    // Only show when editor is empty and no run has happened yet
-    const shouldShow = code === "" && !hasRunOnce && !isDismissedToday();
+    // Show when editor has no user code (empty or still the default template)
+    const shouldShow = isEmptyOrDefault(code) && !hasRunOnce && !isDismissedToday();
     startTransition(() => {
       setVisible(shouldShow);
     });

@@ -24,11 +24,23 @@ export async function getToken(): Promise<string> {
   return access_token;
 }
 
-/** Inject JWT into the page's localStorage and reload so Next.js picks it up. */
+/** Inject JWT into the page's localStorage so Next.js picks it up on load. */
 export async function injectAuth(page: Page, token: string) {
   await page.addInitScript((t: string) => {
     localStorage.setItem("auth_token", t);
     localStorage.setItem("access_token", t);
+    // Zustand auth-storage: the app reads isAuthenticated from here on hydration.
+    const existing = localStorage.getItem("auth-storage");
+    if (existing) {
+      try {
+        const parsed = JSON.parse(existing) as { state?: { isAuthenticated?: boolean } };
+        if (parsed.state?.isAuthenticated) return; // already authenticated, leave it alone
+      } catch { /* fall through */ }
+    }
+    localStorage.setItem(
+      "auth-storage",
+      JSON.stringify({ state: { user: null, token: t, refreshToken: null, isAuthenticated: true }, version: 0 }),
+    );
   }, token);
 }
 
