@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Fraunces, Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import "./v8.css";
+import "./v8-overrides.css";
 import { Providers } from "@/lib/providers";
 
 const inter = Inter({

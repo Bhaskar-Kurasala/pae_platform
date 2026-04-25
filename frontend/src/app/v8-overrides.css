@@ -1,0 +1,113 @@
+/*
+ * v8 supplemental rules — for things that don't exist in the canonical
+ * v8 HTML (or that need to apply to React-rendered <a> elements where
+ * the v8 CSS only targets <button>). Loaded after v8.css.
+ */
+
+/* The canonical v8 sidebar uses `.nav button`; React Router uses <a> for
+   <Link>. Re-apply the same chrome to anchor children of `.nav` so we
+   don't lose prefetch. */
+.nav a {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 16px;
+  color: #d8d0c3;
+  background: transparent;
+  text-decoration: none;
+  transition:
+    transform 0.24s var(--ease),
+    background 0.24s var(--ease),
+    color 0.24s var(--ease),
+    box-shadow 0.24s var(--ease);
+}
+.nav a:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  transform: translateX(2px);
+}
+.nav a.active {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 10px 24px rgba(0, 0, 0, 0.18);
+}
+.nav a.active .nav-dot {
+  background: var(--gold-2);
+  transform: scale(1.25);
+  box-shadow: 0 0 0 6px rgba(214, 165, 77, 0.12);
+}
+.nav a.catalog-link {
+  margin-top: 2px;
+  position: relative;
+  padding-left: 12px;
+}
+.nav a.catalog-link .sparkle {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  color: var(--gold);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 800;
+}
+
+/* The hero-aside in v8 is `display: grid; grid-template-columns: repeat(2, 1fr);`
+   but the inner KPI columns can clip when content is wider than expected.
+   Make them robust by allowing horizontal overflow inside individual KPIs
+   without breaking the 2x2 layout. */
+.hero-aside .kpi {
+  min-width: 0;
+}
+
+/* The CareerForge sidebar should not steal focus visually. Ensure focus
+   ring on nav anchors is visible. */
+.nav a:focus-visible {
+  outline: 2px solid var(--forest-3);
+  outline-offset: 2px;
+}
+
+/* Reveals: ensure they always end up in their final state if the
+   IntersectionObserver hasn't run yet (above the fold on first paint
+   should not stay blurred). */
+.screen.active .reveal {
+  /* Nudge: if no `.in` class within 800ms, browsers may have failed to
+     observe; the JS observer will add `.in` once it fires. */
+}
+
+/* Sidebar foot bottom — three children (sound, theme, sign-out): allow
+   wrap so they don't overflow on narrow sidebars. */
+.sidebar-foot-bottom {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Compact icon-only sign-out button in the sidebar foot. */
+.sidebar-signout {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--muted-2, #8f897d);
+  cursor: pointer;
+  transition: all 0.2s var(--ease);
+  flex-shrink: 0;
+}
+.sidebar-signout:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.sidebar-signout svg {
+  width: 12px;
+  height: 12px;
+}

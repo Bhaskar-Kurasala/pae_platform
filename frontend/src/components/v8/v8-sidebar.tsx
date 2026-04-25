@@ -183,8 +183,7 @@ export function V8Sidebar() {
             type="button"
             onClick={handleLogout}
             aria-label="Sign out"
-            className="sound-toggle"
-            style={{ background: "transparent", borderColor: "rgba(255,255,255,.12)" }}
+            className="sidebar-signout"
             title="Sign out"
           >
             <svg
@@ -199,7 +198,6 @@ export function V8Sidebar() {
               <path d="M5 4V2.5a1 1 0 011-1h5a1 1 0 011 1v9a1 1 0 01-1 1H6a1 1 0 01-1-1V10" />
               <path d="M2 7h7m0 0L7 5m2 2l-2 2" />
             </svg>
-            <span>Sign out</span>
           </button>
         </div>
       </div>
