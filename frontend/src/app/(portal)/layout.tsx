@@ -2,9 +2,8 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { FeedbackWidget } from "@/components/features/feedback-widget";
-import { PortalLayout } from "@/components/layouts/portal-layout";
 import { useAuthStore } from "@/stores/auth-store";
+import { V8Shell } from "@/components/v8/v8-shell";
 
 export default function PortalRootLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, _hasHydrated } = useAuthStore();
@@ -24,10 +23,5 @@ export default function PortalRootLayout({ children }: { children: React.ReactNo
     );
   }
 
-  return (
-    <PortalLayout>
-      {children}
-      <FeedbackWidget />
-    </PortalLayout>
-  );
+  return <V8Shell>{children}</V8Shell>;
 }
