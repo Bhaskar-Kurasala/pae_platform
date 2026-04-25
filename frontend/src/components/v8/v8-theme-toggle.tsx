@@ -1,7 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { useTheme } from "next-themes";
+
+function subscribe(): () => void {
+  // No external store — useSyncExternalStore just gives us a deterministic
+  // server snapshot ("mounted=false") and the post-hydration value ("true").
+  return () => undefined;
+}
+function getSnapshot() {
+  return true;
+}
+function getServerSnapshot() {
+  return false;
+}
 
 /**
  * iOS-style sliding pill that mirrors the v8 sidebar theme toggle.
@@ -9,11 +21,10 @@ import { useTheme } from "next-themes";
  */
 export function V8ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   const isDark = mounted && resolvedTheme === "dark";
-  const next = isDark ? "light" : "dark";
+  const next: "light" | "dark" = isDark ? "light" : "dark";
 
   function setMode(mode: "light" | "dark") {
     setTheme(mode);

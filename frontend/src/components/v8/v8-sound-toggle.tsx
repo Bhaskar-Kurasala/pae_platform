@@ -1,21 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 const STORAGE_KEY = "cf-sound";
 
+function readInitial(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    const v = window.localStorage.getItem(STORAGE_KEY);
+    return v === null ? true : v === "true";
+  } catch {
+    return true;
+  }
+}
+
 /** v8 sidebar sound-cues toggle. Persists preference in localStorage. */
 export function V8SoundToggle() {
-  const [enabled, setEnabled] = useState(true);
-
-  useEffect(() => {
-    try {
-      const v = localStorage.getItem(STORAGE_KEY);
-      if (v !== null) setEnabled(v === "true");
-    } catch {
-      /* ignore */
-    }
-  }, []);
+  const [enabled, setEnabled] = useState<boolean>(readInitial);
 
   function toggle() {
     setEnabled((prev) => {
@@ -61,7 +62,10 @@ export function playUiSound(type: "toggle" | "complete" | "promote") {
     if (typeof window === "undefined") return;
     const enabled = localStorage.getItem(STORAGE_KEY) !== "false";
     if (!enabled) return;
-    const W = window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext };
+    const W = window as unknown as {
+      AudioContext?: typeof AudioContext;
+      webkitAudioContext?: typeof AudioContext;
+    };
     const Ctx = W.AudioContext ?? W.webkitAudioContext;
     if (!Ctx) return;
     const ctx = new Ctx();
