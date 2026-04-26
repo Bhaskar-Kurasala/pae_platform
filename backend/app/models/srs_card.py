@@ -13,7 +13,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,6 +35,8 @@ class SRSCard(Base, UUIDMixin, TimestampMixin):
     )
     concept_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     prompt: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    answer: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    hint: Mapped[str] = mapped_column(Text, nullable=False, default="")
     ease_factor: Mapped[float] = mapped_column(Float, nullable=False, default=2.5)
     interval_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     repetitions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

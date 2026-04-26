@@ -6,7 +6,10 @@ import {
   type ConsistencyResponse,
   type DailyIntention,
   type MicroWinsResponse,
+  type SessionStep,
+  type TodaySummaryResponse,
 } from "@/lib/api-client";
+import { useAuthStore } from "@/stores/auth-store";
 
 export function useMyIntention() {
   return useQuery<DailyIntention | null>({
@@ -44,5 +47,26 @@ export function useMicroWins() {
   return useQuery<MicroWinsResponse>({
     queryKey: ["today", "micro-wins"],
     queryFn: () => todayApi.microWins(),
+  });
+}
+
+export function useTodaySummary() {
+  const isAuthed = useAuthStore((s) => s.isAuthenticated);
+  return useQuery<TodaySummaryResponse>({
+    queryKey: ["today", "summary"],
+    queryFn: () => todayApi.summary(),
+    enabled: isAuthed,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useMarkSessionStep() {
+  const qc = useQueryClient();
+  return useMutation<TodaySummaryResponse, Error, SessionStep>({
+    mutationFn: (step) => todayApi.markStep(step),
+    onSuccess: (data) => {
+      qc.setQueryData(["today", "summary"], data);
+    },
   });
 }

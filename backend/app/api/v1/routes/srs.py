@@ -41,6 +41,8 @@ async def create_card(
         user_id=current_user.id,
         concept_key=payload.concept_key,
         prompt=payload.prompt,
+        answer=payload.answer,
+        hint=payload.hint,
     )
     return SRSCardResponse.model_validate(card)
 

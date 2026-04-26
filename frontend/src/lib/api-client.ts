@@ -241,11 +241,18 @@ export interface DailyCompletion {
 export interface ProgressResponse {
   courses: CourseProgress[];
   overall_progress: number;
+  lessons_completed_total: number;
+  lessons_total: number;
   exercises_completed: number;
   total_exercises: number;
   exercise_completion_rate: number;
   watch_time_minutes: number;
   completions_by_day: DailyCompletion[];
+  active_course_id: string | null;
+  active_course_title: string | null;
+  next_lesson_id: string | null;
+  next_lesson_title: string | null;
+  today_unlock_percentage: number;
 }
 
 export interface LessonProgressRecord {
@@ -438,6 +445,9 @@ export interface GoalContract {
   motivation: Motivation;
   deadline_months: number;
   success_statement: string;
+  weekly_hours: string | null;
+  target_role: string | null;
+  days_remaining: number;
   created_at: string;
   updated_at: string;
 }
@@ -446,6 +456,8 @@ export interface GoalContractInput {
   motivation: Motivation;
   deadline_months: number;
   success_statement: string;
+  weekly_hours?: string | null;
+  target_role?: string | null;
 }
 
 export const goalsApi = {
@@ -702,6 +714,13 @@ export interface AutopsyFinding {
 }
 
 export interface PortfolioAutopsy {
+  /**
+   * The persisted row id is currently NOT returned by `POST /receipts/autopsy`
+   * (the route still uses the legacy `AutopsyResponse` shape). Marked optional
+   * so that a future backend change adding `id` to the response is non-breaking.
+   * The list/detail endpoints (`GET /receipts/autopsy[/{id}]`) DO carry `id`.
+   */
+  id?: string;
   headline: string;
   overall_score: number;
   architecture: AutopsyAxis;
@@ -714,6 +733,31 @@ export interface PortfolioAutopsy {
   next_project_seed: string;
 }
 
+// Persistence-side rows for the Proof Portfolio view.
+export interface PortfolioAutopsyListItem {
+  id: string;
+  project_title: string;
+  headline: string;
+  overall_score: number;
+  created_at: string;
+}
+
+export interface PortfolioAutopsyDetailResponse {
+  id: string;
+  user_id: string;
+  project_title: string;
+  project_description: string;
+  headline: string;
+  overall_score: number;
+  axes: Record<string, unknown>;
+  what_worked: string[];
+  what_to_do_differently: Record<string, unknown>[];
+  production_gaps: string[];
+  next_project_seed: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export const portfolioAutopsyApi = {
   create: (payload: {
     project_title: string;
@@ -723,6 +767,12 @@ export const portfolioAutopsyApi = {
     what_was_hard_self?: string;
   }) =>
     api.post<PortfolioAutopsy>("/api/v1/receipts/autopsy", payload),
+  list: () =>
+    api.get<PortfolioAutopsyListItem[]>("/api/v1/receipts/autopsy"),
+  get: (id: string) =>
+    api.get<PortfolioAutopsyDetailResponse>(
+      `/api/v1/receipts/autopsy/${id}`,
+    ),
 };
 
 export const interviewApi = {
@@ -910,6 +960,8 @@ export interface SRSCard {
   id: string;
   concept_key: string;
   prompt: string;
+  answer: string;
+  hint: string;
   ease_factor: number;
   interval_days: number;
   repetitions: number;
@@ -951,6 +1003,98 @@ export interface MicroWinsResponse {
   wins: MicroWinItem[];
 }
 
+// ── Today summary (DISC: today refactor 2026-04-26) ──────────────
+export interface TodayUser {
+  first_name: string;
+}
+
+export interface TodayGoal {
+  success_statement: string | null;
+  target_role: string | null;
+  days_remaining: number;
+  motivation: string | null;
+}
+
+export interface TodayConsistency {
+  days_active: number;
+  window_days: number;
+}
+
+export interface TodayProgress {
+  overall_percentage: number;
+  lessons_completed_total: number;
+  lessons_total: number;
+  today_unlock_percentage: number;
+  active_course_id: string | null;
+  active_course_title: string | null;
+  next_lesson_id: string | null;
+  next_lesson_title: string | null;
+}
+
+export interface TodaySession {
+  id: string | null;
+  ordinal: number;
+  started_at: string | null;
+  warmup_done_at: string | null;
+  lesson_done_at: string | null;
+  reflect_done_at: string | null;
+}
+
+export interface TodayCurrentFocus {
+  skill_slug: string | null;
+  skill_name: string | null;
+  skill_blurb: string | null;
+}
+
+export interface TodayCapstone {
+  exercise_id: string | null;
+  title: string | null;
+  days_to_due: number | null;
+  draft_quality: number | null;
+  drafts_count: number;
+}
+
+export interface TodayMilestone {
+  label: string | null;
+  days: number;
+}
+
+export interface TodayReadiness {
+  current: number;
+  delta_week: number;
+}
+
+export interface TodayIntentionField {
+  text: string | null;
+}
+
+export interface TodayCohortEventItem {
+  kind: string;
+  actor_handle: string;
+  label: string;
+  occurred_at: string;
+}
+
+export interface TodaySummaryResponse {
+  user: TodayUser;
+  goal: TodayGoal;
+  consistency: TodayConsistency;
+  progress: TodayProgress;
+  session: TodaySession;
+  current_focus: TodayCurrentFocus;
+  capstone: TodayCapstone;
+  next_milestone: TodayMilestone;
+  readiness: TodayReadiness;
+  intention: TodayIntentionField;
+  due_card_count: number;
+  peers_at_level: number;
+  promotions_today: number;
+  micro_wins: MicroWinItem[];
+  cohort_events: TodayCohortEventItem[];
+}
+
+export type SessionStep = "warmup" | "lesson" | "reflect";
+
 export const todayApi = {
   getIntention: () => api.get<DailyIntention | null>("/api/v1/today/intention"),
   setIntention: (text: string, intentionDate?: string) =>
@@ -961,6 +1105,9 @@ export const todayApi = {
   consistency: () =>
     api.get<ConsistencyResponse>("/api/v1/today/consistency"),
   microWins: () => api.get<MicroWinsResponse>("/api/v1/today/micro-wins"),
+  summary: () => api.get<TodaySummaryResponse>("/api/v1/today/summary"),
+  markStep: (step: SessionStep) =>
+    api.post<TodaySummaryResponse>(`/api/v1/today/session/step/${step}`, {}),
 };
 
 // ── Retrieval quiz (3A-10) ───────────────────────────────────────
@@ -1020,6 +1167,242 @@ export const clarifyApi = {
     api.post<ClarifyCheckResponse>("/api/v1/clarify/check", { message }),
   followups: (reply: string) =>
     api.post<FollowupResponse>("/api/v1/clarify/followups", { reply }),
+};
+
+// ── Readiness Overview + Proof Portfolio ─────────────────────────
+// Mirrors `backend/app/schemas/readiness_overview.py`. The wire is
+// snake_case so the FE types preserve snake_case (no remapping here).
+
+export interface ReadinessSubScores {
+  skill: number;
+  proof: number;
+  interview: number;
+  targeting: number;
+}
+
+export interface ReadinessNorthStarDelta {
+  current: number;
+  prior: number;
+  delta_week: number;
+}
+
+export interface ReadinessNextAction {
+  kind: string;
+  route: string;
+  label: string;
+  payload?: Record<string, unknown> | null;
+}
+
+export interface ReadinessLatestVerdict {
+  session_id: string;
+  headline: string;
+  next_action: ReadinessNextAction;
+  created_at: string;
+}
+
+export interface ReadinessTrendPoint {
+  week_start: string; // ISO date
+  score: number;
+}
+
+export interface ReadinessOverviewResponse {
+  user_first_name: string;
+  target_role: string | null;
+  overall_readiness: number;
+  sub_scores: ReadinessSubScores;
+  north_star: ReadinessNorthStarDelta;
+  top_actions: ReadinessNextAction[];
+  latest_verdict: ReadinessLatestVerdict | null;
+  trend_8w: ReadinessTrendPoint[];
+}
+
+export interface ProofCapstoneArtifact {
+  exercise_id: string;
+  title: string;
+  draft_count: number;
+  last_score: number | null;
+  days_since_last_edit: number | null;
+}
+
+export interface ProofAIReviewItem {
+  id: string;
+  problem_title: string | null;
+  score: number | null;
+  created_at: string;
+}
+
+export interface ProofAIReviews {
+  count: number;
+  last_three: ProofAIReviewItem[];
+}
+
+export interface ProofMockReport {
+  session_id: string;
+  headline: string | null;
+  verdict: string | null;
+  created_at: string;
+  target_role: string | null;
+}
+
+export interface ProofAutopsy {
+  id: string;
+  project_title: string;
+  headline: string;
+  overall_score: number;
+  created_at: string;
+}
+
+export interface ProofPeerReviews {
+  count_received: number;
+  count_given: number;
+}
+
+export interface ProofPrimaryArtifact {
+  title: string | null;
+  snippet: string | null;
+}
+
+export interface ProofResponse {
+  capstone_artifacts: ProofCapstoneArtifact[];
+  ai_reviews: ProofAIReviews;
+  mock_reports: ProofMockReport[];
+  autopsies: ProofAutopsy[];
+  peer_reviews: ProofPeerReviews;
+  last_capstone_summary: ProofPrimaryArtifact | null;
+}
+
+export const readinessOverviewApi = {
+  getOverview: () =>
+    api.get<ReadinessOverviewResponse>("/api/v1/readiness/overview"),
+  getProof: () => api.get<ProofResponse>("/api/v1/readiness/proof"),
+};
+
+// ── Application Kit ─────────────────────────────────────────────
+// Mirrors `backend/app/schemas/application_kit.py`.
+
+export interface BuildKitRequest {
+  label: string;
+  target_role?: string | null;
+  jd_library_id?: string | null;
+  tailored_resume_id?: string | null;
+  mock_session_id?: string | null;
+  autopsy_id?: string | null;
+}
+
+export interface ApplicationKitListItem {
+  id: string;
+  label: string;
+  target_role: string | null;
+  status: string;
+  generated_at: string | null;
+  created_at: string;
+  manifest_keys: string[];
+}
+
+export interface ApplicationKitResponse {
+  id: string;
+  label: string;
+  target_role: string | null;
+  status: string;
+  generated_at: string | null;
+  created_at: string;
+  manifest: Record<string, unknown>;
+  has_pdf: boolean;
+}
+
+export const applicationKitApi = {
+  build: (req: BuildKitRequest) =>
+    api.post<ApplicationKitResponse>("/api/v1/readiness/kit", req),
+  list: () =>
+    api.get<ApplicationKitListItem[]>("/api/v1/readiness/kit"),
+  get: (id: string) =>
+    api.get<ApplicationKitResponse>(`/api/v1/readiness/kit/${id}`),
+  delete: (id: string) => api.del(`/api/v1/readiness/kit/${id}`),
+  /**
+   * Returns the absolute URL for the PDF stream so callers can drop it
+   * into an `<a href download>` rather than fetching it through the JSON
+   * `request()` helper (which assumes JSON bodies).
+   */
+  downloadUrl: (id: string): string =>
+    `${API_BASE}/api/v1/readiness/kit/${id}/download`,
+};
+
+// ── Readiness Workspace Events ──────────────────────────────────
+// Mirrors `backend/app/schemas/readiness_events.py`.
+
+export interface RecordEventInput {
+  view: string;
+  event: string;
+  payload?: Record<string, unknown> | null;
+  session_id?: string | null;
+  occurred_at?: string | null;
+}
+
+export interface RecordEventBatchResponse {
+  recorded: number;
+  skipped: number;
+}
+
+export interface WorkspaceEventOut {
+  id: string;
+  view: string;
+  event: string;
+  payload: Record<string, unknown> | null;
+  session_id: string | null;
+  occurred_at: string;
+}
+
+export interface WorkspaceEventSummaryResponse {
+  total: number;
+  by_view: Record<string, number>;
+  by_event: Record<string, number>;
+  last_event_at: string | null;
+  since_days: number;
+  generated_at: string;
+}
+
+export interface WorkspaceEventListOpts {
+  view?: string;
+  limit?: number;
+}
+
+export interface WorkspaceEventSummaryOpts {
+  since_days?: number;
+}
+
+export const readinessEventsApi = {
+  /**
+   * Always normalizes to a wrapped batch — the backend pre-validator
+   * accepts both shapes but `{events: [...]}` keeps the wire predictable.
+   */
+  record: (events: RecordEventInput | RecordEventInput[]) => {
+    const batch = Array.isArray(events) ? events : [events];
+    return api.post<RecordEventBatchResponse>(
+      "/api/v1/readiness/events",
+      { events: batch },
+    );
+  },
+  list: (opts: WorkspaceEventListOpts = {}) => {
+    const params = new URLSearchParams();
+    if (opts.view) params.set("view", opts.view);
+    if (typeof opts.limit === "number") {
+      params.set("limit", String(opts.limit));
+    }
+    const qs = params.toString();
+    return api.get<WorkspaceEventOut[]>(
+      `/api/v1/readiness/events${qs ? `?${qs}` : ""}`,
+    );
+  },
+  summary: (opts: WorkspaceEventSummaryOpts = {}) => {
+    const params = new URLSearchParams();
+    if (typeof opts.since_days === "number") {
+      params.set("since_days", String(opts.since_days));
+    }
+    const qs = params.toString();
+    return api.get<WorkspaceEventSummaryResponse>(
+      `/api/v1/readiness/events/summary${qs ? `?${qs}` : ""}`,
+    );
+  },
 };
 
 export { ApiError, API_BASE, sanitizeNext };

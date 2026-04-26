@@ -2,7 +2,6 @@
 
 import {
   type CSSProperties,
-  type ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -29,11 +28,72 @@ import {
   DiagnosticAnchor,
   isReadinessDiagnosticEnabled,
 } from "@/components/features/readiness-diagnostic";
-import { useMyResume, useFitScore } from "@/lib/hooks/use-career";
+import {
+  useMyResume,
+  useRegenerateResume,
+  useFitScore,
+  useSaveJd,
+  useJdLibrary,
+  type JdLibraryItem,
+} from "@/lib/hooks/use-career";
 import { useMyProgress } from "@/lib/hooks/use-progress";
+import {
+  useReadinessOverview,
+  useReadinessProof,
+} from "@/lib/hooks/use-readiness-overview";
+import {
+  useRecordWorkspaceEvent,
+  useFlushWorkspaceEvents,
+} from "@/lib/hooks/use-readiness-events";
+import {
+  useApplicationKits,
+  useBuildApplicationKit,
+  useDeleteApplicationKit,
+  applicationKitDownloadUrl,
+} from "@/lib/hooks/use-application-kit";
+import {
+  useAutopsyList,
+  useCreateAutopsy,
+} from "@/lib/hooks/use-portfolio-autopsy";
+import { useMyMockSessions } from "@/lib/hooks/use-mock-interview";
+import type {
+  ReadinessNextAction,
+  ReadinessOverviewResponse,
+  ProofResponse,
+  ProofAutopsy,
+  ProofMockReport,
+  ProofCapstoneArtifact,
+  ApplicationKitListItem,
+} from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
 
 type ReadinessView = "overview" | "resume" | "jd" | "interview" | "proof" | "kit";
+
+const VALID_VIEWS: ReadonlyArray<ReadinessView> = [
+  "overview",
+  "resume",
+  "jd",
+  "interview",
+  "proof",
+  "kit",
+];
+
+function safeRoute(s: string): ReadinessView {
+  return (VALID_VIEWS as ReadonlyArray<string>).includes(s)
+    ? (s as ReadinessView)
+    : "overview";
+}
+
+// Human-readable CTA labels for each route — beats `Open ${route}` because
+// "Open Jd" reads wrong.
+const ROUTE_LABEL: Record<ReadinessView, string> = {
+  overview: "Open Overview",
+  resume: "Open Resume Lab",
+  jd: "Open JD Match",
+  interview: "Open Interview Coach",
+  proof: "Open Proof Portfolio",
+  kit: "Open Application Kit",
+};
 
 interface NavItem {
   id: ReadinessView;
@@ -104,33 +164,6 @@ const JD_PRESETS: Record<"python" | "data" | "genai", JdPreset> = {
   },
 };
 
-const DEFAULT_JD_TEXT =
-  "Junior Python Developer — Backend / Tooling. We need a developer comfortable with Python, async I/O, API integration, and writing small production-quality tools. Must know how to handle errors, rate limits, and environment-based configuration. Git collaboration, basic testing, and clear written communication required.";
-
-function computeFit(text: string): number {
-  const t = text.toLowerCase();
-  const signals: Record<string, number> = {
-    python: 15,
-    async: 12,
-    api: 12,
-    retry: 8,
-    error: 6,
-    env: 5,
-    git: 4,
-    test: 5,
-    pandas: -6,
-    sql: -6,
-    rag: -10,
-    vector: -8,
-    langchain: -6,
-  };
-  let base = 42;
-  for (const [k, v] of Object.entries(signals)) {
-    if (t.includes(k)) base += v;
-  }
-  return Math.max(20, Math.min(92, base));
-}
-
 function useAnimatedBars(active: boolean): React.RefObject<HTMLDivElement | null> {
   const ref = useRef<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
@@ -158,20 +191,43 @@ interface ViewProps {
 }
 
 export function ReadinessScreen() {
+  const [activeView, setActiveView] = useState<ReadinessView>("overview");
+  const { data: progress } = useMyProgress();
+  const { data: overview } = useReadinessOverview();
+  const recordEvent = useRecordWorkspaceEvent();
+
+  const readinessPct = useMemo(() => {
+    if (overview) {
+      return Math.max(0, Math.min(100, Math.round(overview.overall_readiness)));
+    }
+    if (!progress) return 62;
+    return Math.max(0, Math.min(100, Math.round(progress.overall_progress)));
+  }, [overview, progress]);
+
+  const topbarChips = useMemo(() => {
+    const chips: Array<{ label: string; variant: "forest" | "gold" | "ink" | "neutral" }> = [];
+    const verdict = overview?.latest_verdict;
+    if (verdict) {
+      const label = verdict.next_action?.label ?? "";
+      chips.push({
+        label: `Latest: ${label.slice(0, 28)}`,
+        variant: "forest",
+      });
+    }
+    return chips;
+  }, [overview]);
+
   useSetV8Topbar({
     eyebrow: "Career · Job readiness workspace",
     titleHtml: "Turn learning into <i>interviewable proof</i>.",
-    chips: [],
-    progress: 82,
+    chips: topbarChips,
+    progress: readinessPct,
   });
 
-  const [activeView, setActiveView] = useState<ReadinessView>("overview");
-  const { data: progress } = useMyProgress();
-
-  const readinessPct = useMemo(() => {
-    if (!progress) return 62;
-    return Math.max(0, Math.min(100, Math.round(progress.overall_progress)));
-  }, [progress]);
+  // view_opened telemetry: fires on mount and any subsequent activeView change.
+  useEffect(() => {
+    recordEvent(activeView, "view_opened");
+  }, [activeView, recordEvent]);
 
   const open = useCallback((v: ReadinessView) => {
     setActiveView(v);
@@ -234,26 +290,395 @@ interface OverviewViewProps extends ViewProps {
 }
 
 function OverviewView(props: OverviewViewProps) {
-  // Feature-flagged swap. Legacy demo overview (readiness ring + 3 hard-
-  // coded action rows + tool grid) is preserved below as
-  // OverviewViewLegacy so environments that haven't enabled the
-  // diagnostic don't go empty during rollout. The rules-of-hooks split
-  // pattern matches the JD decoder swap from commit 5.
+  // Feature-flagged swap. The live overview now renders REAL data from
+  // useReadinessOverview() — a hero score card, sub-scores breakdown,
+  // top actions, recommended sequence, and the diagnostic anchor at the
+  // bottom. The legacy demo block below is kept ONLY for the kill-switch
+  // path where the diagnostic flag is off. While the overview hook is
+  // loading or the user is unauthenticated we render an honest skeleton
+  // — the legacy "62%" demo data would be misleading.
+  const isAuthed = useAuthStore((s) => s.isAuthenticated);
+  const overviewQuery = useReadinessOverview();
+
   if (isReadinessDiagnosticEnabled()) {
-    return <OverviewViewLive {...props} />;
+    if (!isAuthed || overviewQuery.isLoading || !overviewQuery.data) {
+      return <OverviewSkeleton active={props.active} />;
+    }
+    return <OverviewViewLive {...props} data={overviewQuery.data} />;
   }
   return <OverviewViewLegacy {...props} />;
 }
 
-function OverviewViewLive({ active }: OverviewViewProps) {
-  // The conversational diagnostic IS the new anchor. No competing
-  // readiness ring above the fold; the verdict will surface its own
-  // headline when ready. Calm, generous, single emotional anchor.
+interface OverviewSkeletonProps {
+  active: boolean;
+}
+
+function OverviewSkeleton({ active }: OverviewSkeletonProps) {
   return (
-    <div className={`view${active ? " active" : ""}`} id="rd-overview">
-      <section className="rd-hero reveal in" style={{ paddingTop: 8 }}>
-        <DiagnosticAnchor />
+    <div
+      className={`view${active ? " active" : ""}`}
+      id="rd-overview"
+      data-testid="rd-overview-skeleton"
+    >
+      <section className="rd-hero reveal in">
+        <div className="rd-hero-grid">
+          <div>
+            <div className="eyebrow">Overview · Start here</div>
+            <div className="rd-skel rd-skel-line" style={{ width: "75%", height: 28 }} />
+            <div className="rd-skel rd-skel-line" style={{ width: "92%", height: 14, marginTop: 12 }} />
+            <div className="rd-skel rd-skel-line" style={{ width: "60%", height: 14, marginTop: 8 }} />
+          </div>
+          <div className="score-card">
+            <div className="rd-skel rd-skel-ring" />
+            <div className="rd-skel rd-skel-line" style={{ width: "70%", height: 14, marginTop: 12 }} />
+            <div className="rd-skel rd-skel-line" style={{ width: "50%", height: 12, marginTop: 6 }} />
+          </div>
+        </div>
       </section>
+      <div className="rd-stack">
+        <div className="rd-2col">
+          <section className="card pad reveal in delay-1">
+            <div className="rd-skel rd-skel-line" style={{ width: "40%", height: 16 }} />
+            <div className="rd-skel rd-skel-line" style={{ width: "85%", height: 14, marginTop: 10 }} />
+            <div className="rd-skel rd-skel-line" style={{ width: "80%", height: 14, marginTop: 8 }} />
+            <div className="rd-skel rd-skel-line" style={{ width: "70%", height: 14, marginTop: 8 }} />
+          </section>
+          <section className="card pad reveal in delay-2">
+            <div className="rd-skel rd-skel-line" style={{ width: "40%", height: 16 }} />
+            <div className="rd-skel rd-skel-line" style={{ width: "85%", height: 14, marginTop: 10 }} />
+            <div className="rd-skel rd-skel-line" style={{ width: "80%", height: 14, marginTop: 8 }} />
+            <div className="rd-skel rd-skel-line" style={{ width: "70%", height: 14, marginTop: 8 }} />
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface OverviewViewLiveProps extends OverviewViewProps {
+  data: ReadinessOverviewResponse;
+}
+
+function bandTagline(score: number): string {
+  if (score >= 80) return "Apply with confidence.";
+  if (score >= 60) return "Promising, not yet polished.";
+  if (score >= 40) return "Building real signal.";
+  return "Just getting started.";
+}
+
+function deltaPill(delta: number): string {
+  if (delta > 0) return `▲ +${delta} this week`;
+  if (delta < 0) return `▼ ${delta} this week`;
+  return `0 this week`;
+}
+
+function skillSub(score: number): string {
+  if (score >= 70) return "Your lessons and exercises suggest solid fundamentals.";
+  if (score >= 40) return "Foundations are forming; one more focused module helps.";
+  return "Core skill signal is thin — start a lesson sequence this week.";
+}
+
+function proofSub(score: number): string {
+  if (score >= 70) return "Your work reads as recruiter-friendly proof.";
+  if (score >= 60) return "Real work exists; refine packaging into shareable proof.";
+  return "You have meaningful work, but it is not yet shareable proof.";
+}
+
+function interviewSub(score: number): string {
+  if (score >= 70) return "You explain your work clearly under pressure.";
+  if (score >= 50) return "Practice answers; clarity drops when stakes feel real.";
+  return "You likely know more than you can currently explain under pressure.";
+}
+
+function targetingSub(score: number): string {
+  if (score >= 70) return "Your proof aligns with the roles you target.";
+  if (score >= 50) return "Tighten the match between proof and the roles you chase.";
+  return "Pick one role family and shape every artifact toward it.";
+}
+
+interface SparklineProps {
+  points: ReadonlyArray<{ score: number }>;
+  fallback: number;
+}
+
+function Sparkline({ points, fallback }: SparklineProps) {
+  const width = 90;
+  const height = 28;
+  const padX = 2;
+  const padY = 6;
+  if (points.length < 2) {
+    const y = height - padY - ((Math.max(0, Math.min(100, fallback)) / 100) * (height - padY * 2));
+    return (
+      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
+        <polyline
+          points={`${padX},${y} ${width - padX},${y}`}
+          fill="none"
+          stroke="#beddc8"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+        <circle cx={width - padX} cy={y} r="3" fill="#beddc8" />
+      </svg>
+    );
+  }
+  const stepX = (width - padX * 2) / (points.length - 1);
+  const coords = points.map((p, i) => {
+    const x = padX + stepX * i;
+    const clamped = Math.max(0, Math.min(100, p.score));
+    const y = height - padY - (clamped / 100) * (height - padY * 2);
+    return { x, y };
+  });
+  const polyline = coords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(" ");
+  const last = coords[coords.length - 1];
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
+      <polyline
+        points={polyline}
+        fill="none"
+        stroke="#beddc8"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx={last.x} cy={last.y} r="3" fill="#beddc8" />
+    </svg>
+  );
+}
+
+const FALLBACK_TOP_ACTIONS: ReadinessNextAction[] = [
+  {
+    kind: "open_resume",
+    route: "resume",
+    label: "Build resume from proof",
+  },
+  {
+    kind: "open_jd",
+    route: "jd",
+    label: "Match me to a real JD",
+  },
+];
+
+function OverviewViewLive({ open, active, data }: OverviewViewLiveProps) {
+  const ref = useAnimatedBars(active);
+  const recordEvent = useRecordWorkspaceEvent();
+
+  const role = data.target_role?.trim() || "Target role";
+  const overall = Math.max(0, Math.min(100, Math.round(data.overall_readiness)));
+  const tagline = bandTagline(overall);
+  const delta = data.north_star?.delta_week ?? 0;
+  const heroHeadline =
+    overall < 30
+      ? "Just starting your readiness picture."
+      : `Hello, ${data.user_first_name}. You are close to interviewable.`;
+
+  // Top two CTAs in the hero. Fall back to a sensible default pair when the
+  // backend hasn't yet inferred enough actions to populate two slots.
+  const ctaActions: ReadinessNextAction[] =
+    data.top_actions.length >= 2
+      ? data.top_actions.slice(0, 2)
+      : data.top_actions.length === 1
+        ? [data.top_actions[0], FALLBACK_TOP_ACTIONS[1]]
+        : FALLBACK_TOP_ACTIONS;
+
+  const handleAction = useCallback(
+    (action: ReadinessNextAction) => {
+      const route = safeRoute(action.route);
+      recordEvent("overview", "cta_clicked", {
+        kind: action.kind,
+        route,
+      });
+      open(route);
+    },
+    [open, recordEvent],
+  );
+
+  const handleTool = useCallback(
+    (tool: "resume" | "jd" | "interview" | "kit") => {
+      recordEvent("overview", "cta_clicked", { tool });
+      open(tool);
+    },
+    [open, recordEvent],
+  );
+
+  const subs = data.sub_scores;
+  const proofTone: MetricRowProps["tone"] = subs.proof < 60 ? "warn" : undefined;
+  const interviewTone: MetricRowProps["tone"] =
+    subs.interview < 50 ? "low" : subs.interview < 70 ? "warn" : undefined;
+  const targetingTone: MetricRowProps["tone"] = subs.targeting < 70 ? "warn" : undefined;
+
+  return (
+    <div className={`view${active ? " active" : ""}`} id="rd-overview" ref={ref}>
+      <section className="rd-hero reveal in">
+        <div className="rd-hero-grid">
+          <div>
+            <div className="eyebrow">Overview · Start here</div>
+            <h3>
+              {overall < 30 ? (
+                heroHeadline
+              ) : (
+                <>
+                  Hello, {data.user_first_name}. You are <i>close</i> to interviewable.
+                </>
+              )}
+            </h3>
+            <p>
+              Job readiness is a clear diagnosis, a focused next action, and a
+              believable path from today to a real offer.
+            </p>
+            <div className="rd-hero-actions">
+              {ctaActions.map((action, idx) => (
+                <button
+                  key={`${action.kind}-${idx}`}
+                  type="button"
+                  className={idx === 0 ? "btn primary" : "btn secondary"}
+                  onClick={() => handleAction(action)}
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="score-card">
+            <div className="ring">
+              <strong>
+                <span className="count">{overall}</span>%
+              </strong>
+            </div>
+            <div className="lbl">{role} readiness</div>
+            <div className="tl">{tagline}</div>
+            <div
+              style={{
+                marginTop: 10,
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              <span className="delta-pill">{deltaPill(delta)}</span>
+              <Sparkline points={data.trend_8w} fallback={overall} />
+            </div>
+            <div className="cp">
+              Each completed lesson, capstone revision, and review response
+              moves this score. Tracked weekly across the last 8 weeks.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className="rd-stack">
+        <div className="rd-2col">
+          <section className="card pad reveal in delay-1">
+            <div className="rd-section-k">Top next actions</div>
+            <div className="rd-section-t">Do these before anything else.</div>
+            <div className="rd-section-c">
+              A job-readiness screen should lead with action, not six equally
+              weighted tools. These are the next steps the system recommends
+              based on your current proof and signal.
+            </div>
+            <div className="rd-actions">
+              {data.top_actions.length === 0 ? (
+                <div className="rd-section-c">
+                  No new recommendations right now — keep building proof and
+                  this list will refresh as your signal grows.
+                </div>
+              ) : (
+                data.top_actions.slice(0, 3).map((action, idx) => (
+                  <ActionRow
+                    key={`${action.kind}-${idx}`}
+                    num={String(idx + 1)}
+                    title={action.label}
+                    copy={`Recommended next step from your readiness profile (${action.kind.replace(/_/g, " ")}).`}
+                    ctaLabel={ROUTE_LABEL[safeRoute(action.route)]}
+                    onClick={() => handleAction(action)}
+                  />
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="card pad reveal in delay-2">
+            <div className="rd-section-k">Readiness breakdown</div>
+            <div className="rd-section-t">Make the score explain itself.</div>
+            <div className="rd-section-c">
+              One number motivates. A breakdown makes it actionable and
+              trustworthy.
+            </div>
+            <div className="rd-metrics">
+              <MetricRow
+                label="Core skill readiness"
+                sub={skillSub(subs.skill)}
+                value={subs.skill}
+              />
+              <MetricRow
+                label="Proof and portfolio"
+                sub={proofSub(subs.proof)}
+                value={subs.proof}
+                tone={proofTone}
+              />
+              <MetricRow
+                label="Interview performance"
+                sub={interviewSub(subs.interview)}
+                value={subs.interview}
+                tone={interviewTone}
+              />
+              <MetricRow
+                label="Role targeting"
+                sub={targetingSub(subs.targeting)}
+                value={subs.targeting}
+                tone={targetingTone}
+              />
+            </div>
+          </section>
+        </div>
+
+        <section className="card pad reveal in delay-3">
+          <div className="rd-section-k">Recommended sequence</div>
+          <div className="rd-section-t">One clear path, not a wall of options.</div>
+          <div className="rd-section-c">
+            Package proof → test against a real job → rehearse your story →
+            export an application kit. Each step hands off cleanly to the next.
+          </div>
+          <div className="rd-tools">
+            <ToolCard
+              k="Step 1"
+              t="Resume Lab"
+              s="Build a resume from capstone work, review scores, and the strongest signals already earned inside the platform."
+              arrow="Open focused workspace →"
+              onClick={() => handleTool("resume")}
+            />
+            <ToolCard
+              k="Step 2"
+              t="JD Match"
+              s="Paste a real job description and convert the fit analysis into a gap plan tied back to platform learning."
+              arrow="Compare to a real role →"
+              onClick={() => handleTool("jd")}
+            />
+            <ToolCard
+              k="Step 3"
+              t="Interview Coach"
+              s="Rehearse answers using your own proof instead of memorizing generic talking points."
+              arrow="Practice with live prompts →"
+              onClick={() => handleTool("interview")}
+            />
+            <ToolCard
+              k="Step 4"
+              t="Application Kit"
+              s="Leave with a ready set of assets: resume, project proof, pitch lines, and tailored role language."
+              arrow="Assemble final assets →"
+              onClick={() => handleTool("kit")}
+            />
+          </div>
+        </section>
+
+        {isReadinessDiagnosticEnabled() ? (
+          <section className="card pad reveal in delay-4">
+            <div className="rd-section-k">Conversational diagnosis</div>
+            <div className="rd-section-t">Talk through where you actually stand.</div>
+            <DiagnosticAnchor />
+          </section>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -516,19 +941,62 @@ function ToolCard({ k, t, s, arrow, onClick }: ToolCardProps) {
   );
 }
 
+type ResumeTab = "evidence" | "bullets" | "tailoring" | "export";
+
+const RESUME_TABS: ReadonlyArray<{ id: ResumeTab; label: string }> = [
+  { id: "evidence", label: "Evidence" },
+  { id: "bullets", label: "Bullets" },
+  { id: "tailoring", label: "Role tailoring" },
+  { id: "export", label: "Export" },
+];
+
+function capstoneEvidenceTone(score: number | null): "good" | "warn" | "low" {
+  if (score === null) return "low";
+  if (score >= 70) return "good";
+  return "warn";
+}
+
+function capstoneEvidenceBadge(score: number | null): string {
+  if (score === null) return "Building";
+  if (score >= 70) return "Strong";
+  return "Improve";
+}
+
 function ResumeView({ open, active }: ViewProps) {
   const user = useAuthStore((s) => s.user);
-  const { data: resume } = useMyResume();
+  const { data: resume, isLoading: resumeLoading } = useMyResume();
+  const { data: proof } = useReadinessProof();
+  const regenerate = useRegenerateResume();
+  const recordEvent = useRecordWorkspaceEvent();
   const [tailorOpen, setTailorOpen] = useState(false);
-  const displayName = user?.full_name ?? "Your Name";
-  const summary =
-    resume?.summary ??
-    "Python Developer candidate · Async APIs · Error handling · CLI tooling";
-  const bullets = resume?.bullets?.slice(0, 3).map((b) => b.text) ?? [
-    "Built a CLI AI tool in Python using asynchronous API calls, structured prompting, and response handling inside a project-based learning environment.",
-    "Implemented production-minded patterns including isolated API logic, retry planning, and environment-based configuration from senior review feedback.",
-    "Demonstrated practical understanding of async / await workflows, modular code structure, and debugging-oriented iteration across guided capstone milestones.",
-  ];
+  const [tab, setTab] = useState<ResumeTab>("evidence");
+
+  const displayName = user?.full_name ?? "";
+
+  const handleTab = useCallback(
+    (next: ResumeTab) => {
+      setTab(next);
+      recordEvent("resume", "subnav_clicked", { tab: next });
+    },
+    [recordEvent],
+  );
+
+  const handleRegenerate = useCallback(() => {
+    regenerate.mutate(true, {
+      onSuccess: () => v8Toast("Resume regenerated from latest proof."),
+      onError: () => v8Toast("Could not regenerate. Try again in a moment."),
+    });
+  }, [regenerate]);
+
+  const handleGoToKit = useCallback(() => {
+    recordEvent("resume", "cta_clicked", { cta: "go_to_kit" });
+    open("kit");
+  }, [open, recordEvent]);
+
+  const handleOpenTailor = useCallback(() => {
+    setTailorOpen(true);
+    recordEvent("resume", "cta_clicked", { cta: "open_tailor" });
+  }, [recordEvent]);
 
   return (
     <div className={`view${active ? " active" : ""}`} id="rd-resume">
@@ -541,92 +1009,47 @@ function ResumeView({ open, active }: ViewProps) {
             </div>
             <div className="rd-section-c">
               A resume builder is helpful only if it translates actual work into
-              believable recruiter language. This page converts lessons, capstones,
-              review comments, and demonstrated skills into a resume that sounds
-              earned.
+              believable recruiter language. This page converts lessons,
+              capstones, review comments, and demonstrated skills into a resume
+              that sounds earned.
             </div>
             <div className="rd-subnav">
-              <button type="button" className="rd-subtab on">
-                Evidence
-              </button>
-              <button type="button" className="rd-subtab">
-                Bullets
-              </button>
-              <button type="button" className="rd-subtab">
-                Role tailoring
-              </button>
-              <button type="button" className="rd-subtab">
-                Export
-              </button>
+              {RESUME_TABS.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`rd-subtab${tab === t.id ? " on" : ""}`}
+                  onClick={() => handleTab(t.id)}
+                >
+                  {t.label}
+                </button>
+              ))}
             </div>
           </div>
           <TailoredResumeQuotaChip enabled={active} />
         </div>
 
-        <div className="rd-dual">
-          <div className="rd-panel">
-            <div className="t">What this section should do</div>
-            <div className="c">
-              Students should not start with a blank document. The system surfaces
-              their best evidence, drafts strong bullets, shows what still feels
-              thin, and helps create role-specific versions.
-            </div>
-          </div>
-          <div className="rd-panel">
-            <div className="t">Highest-value outputs</div>
-            <div className="c">
-              One polished master resume, one role-tailored version, three strong
-              project bullets, and one concise profile summary that matches how
-              recruiters scan.
-            </div>
-          </div>
-        </div>
-
-        <div className="resume-preview">
-          <div className="resume-head">
-            <div>
-              <div className="resume-name">{displayName}</div>
-              <div className="resume-meta">
-                {summary}
-                <br />
-                Portfolio summary generated from capstone proof and platform
-                performance.
-              </div>
-            </div>
-            <span className="rd-badge good">Built from proof</span>
-          </div>
-          <div className="resume-block">
-            <h6>Suggested profile</h6>
-            {bullets.map((b, i) => (
-              <div key={i} className="resume-bullet">
-                {b}
-              </div>
-            ))}
-          </div>
-          <div className="resume-block">
-            <h6>Evidence currently powering this draft</h6>
-            <div className="rd-list">
-              <EvidenceRow
-                title="Capstone draft"
-                copy="CLI AI tool with async request flow and review score of 84/100."
-                badge="Strong"
-                tone="good"
-              />
-              <EvidenceRow
-                title="Lesson completion"
-                copy="Python fundamentals, OOP, APIs and async progression visible in the path."
-                badge="Solid"
-                tone="good"
-              />
-              <EvidenceRow
-                title="Proof depth"
-                copy="Needs one clearer accomplishment story and one quantified outcome or scope line."
-                badge="Improve"
-                tone="warn"
-              />
-            </div>
-          </div>
-        </div>
+        {tab === "evidence" ? (
+          <ResumeEvidenceTab proof={proof} />
+        ) : null}
+        {tab === "bullets" ? (
+          <ResumeBulletsTab
+            resume={resume}
+            isLoading={resumeLoading}
+            onRegenerate={handleRegenerate}
+            isRegenerating={regenerate.isPending}
+            displayName={displayName}
+          />
+        ) : null}
+        {tab === "tailoring" ? (
+          <ResumeTailoringTab
+            active={active}
+            onGenerate={handleOpenTailor}
+          />
+        ) : null}
+        {tab === "export" ? (
+          <ResumeExportTab onGoToKit={handleGoToKit} />
+        ) : null}
 
         <div className="rd-footer">
           <button
@@ -639,13 +1062,247 @@ function ResumeView({ open, active }: ViewProps) {
           <button
             type="button"
             className="btn ghost"
-            onClick={() => setTailorOpen(true)}
+            onClick={handleOpenTailor}
           >
             Generate tailored version
           </button>
         </div>
       </section>
       <IntakeModal open={tailorOpen} onClose={() => setTailorOpen(false)} />
+    </div>
+  );
+}
+
+function ResumeEvidenceTab({ proof }: { proof: ProofResponse | undefined }) {
+  if (!proof) {
+    return (
+      <div className="resume-preview" data-testid="resume-evidence-skeleton">
+        <div className="rd-skel rd-skel-line" style={{ width: "60%", height: 14, marginTop: 8 }} />
+        <div className="rd-skel rd-skel-line" style={{ width: "80%", height: 14, marginTop: 8 }} />
+        <div className="rd-skel rd-skel-line" style={{ width: "70%", height: 14, marginTop: 8 }} />
+      </div>
+    );
+  }
+  const capstones: ProofCapstoneArtifact[] = proof.capstone_artifacts ?? [];
+  const aiReviews = proof.ai_reviews;
+  const lastReviewScore =
+    aiReviews?.last_three?.[0]?.score ?? null;
+  const autopsyCount = proof.autopsies?.length ?? 0;
+  const lastAutopsyScore = proof.autopsies?.[0]?.overall_score ?? null;
+  const peerReceived = proof.peer_reviews?.count_received ?? 0;
+  return (
+    <div className="resume-preview">
+      <div className="resume-block">
+        <h6>Evidence currently powering this draft</h6>
+        <div className="rd-list">
+          {capstones.length === 0 ? (
+            <EvidenceRow
+              title="Capstones"
+              copy="No capstones shipped yet — start one in Studio to seed real proof."
+              badge="Building"
+              tone="low"
+            />
+          ) : (
+            capstones.map((c) => (
+              <EvidenceRow
+                key={c.exercise_id}
+                title={c.title}
+                copy={`${c.draft_count} draft${c.draft_count === 1 ? "" : "s"}${
+                  c.last_score !== null ? ` · score ${c.last_score}/100` : ""
+                }`}
+                badge={capstoneEvidenceBadge(c.last_score)}
+                tone={capstoneEvidenceTone(c.last_score)}
+              />
+            ))
+          )}
+          <EvidenceRow
+            title="AI reviews"
+            copy={
+              aiReviews && aiReviews.count > 0
+                ? `${aiReviews.count} review${aiReviews.count === 1 ? "" : "s"}${
+                    lastReviewScore !== null
+                      ? ` · last score ${lastReviewScore}/100`
+                      : ""
+                  }`
+                : "No AI reviews yet — submit a draft to get one."
+            }
+            badge={
+              aiReviews && aiReviews.count > 0
+                ? lastReviewScore !== null && lastReviewScore >= 70
+                  ? "Strong"
+                  : "Improve"
+                : "Building"
+            }
+            tone={
+              aiReviews && aiReviews.count > 0
+                ? lastReviewScore !== null && lastReviewScore >= 70
+                  ? "good"
+                  : "warn"
+                : "low"
+            }
+          />
+          <EvidenceRow
+            title="Autopsies"
+            copy={
+              autopsyCount > 0
+                ? `${autopsyCount} autopsy${autopsyCount === 1 ? "" : "s"}${
+                    lastAutopsyScore !== null
+                      ? ` · last overall ${lastAutopsyScore}/100`
+                      : ""
+                  }`
+                : "Run a portfolio autopsy to surface gaps in your shipped work."
+            }
+            badge={
+              autopsyCount > 0
+                ? lastAutopsyScore !== null && lastAutopsyScore < 60
+                  ? "Improve"
+                  : "Strong"
+                : "Building"
+            }
+            tone={
+              autopsyCount > 0
+                ? lastAutopsyScore !== null && lastAutopsyScore < 60
+                  ? "warn"
+                  : "good"
+                : "low"
+            }
+          />
+          <EvidenceRow
+            title="Peer reviews"
+            copy={
+              peerReceived > 0
+                ? `${peerReceived} peer review${peerReceived === 1 ? "" : "s"} received`
+                : "No peer reviews yet — share work with the cohort."
+            }
+            badge={peerReceived > 0 ? "Strong" : "Building"}
+            tone={peerReceived > 0 ? "good" : "low"}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface ResumeBulletsTabProps {
+  resume: ReturnType<typeof useMyResume>["data"];
+  isLoading: boolean;
+  onRegenerate: () => void;
+  isRegenerating: boolean;
+  displayName: string;
+}
+
+function ResumeBulletsTab({
+  resume,
+  isLoading,
+  onRegenerate,
+  isRegenerating,
+  displayName,
+}: ResumeBulletsTabProps) {
+  if (isLoading && !resume) {
+    return (
+      <div className="resume-preview" data-testid="resume-bullets-skeleton">
+        <div className="rd-skel rd-skel-line" style={{ width: "70%", height: 16, marginTop: 8 }} />
+        <div className="rd-skel rd-skel-line" style={{ width: "90%", height: 14, marginTop: 8 }} />
+        <div className="rd-skel rd-skel-line" style={{ width: "85%", height: 14, marginTop: 8 }} />
+      </div>
+    );
+  }
+  const bullets = resume?.bullets ?? [];
+  const summary = resume?.summary ?? "";
+  return (
+    <div className="resume-preview">
+      <div className="resume-head">
+        <div>
+          <div className="resume-name">{displayName}</div>
+          {summary ? <div className="resume-meta">{summary}</div> : null}
+        </div>
+        <span className="rd-badge good">Built from proof</span>
+      </div>
+      <div className="resume-block">
+        <h6>Bullets</h6>
+        {bullets.length === 0 ? (
+          <div className="rd-section-c">
+            No bullets yet — regenerate from your latest proof to draft them.
+          </div>
+        ) : (
+          <div data-testid="resume-bullets-list">
+            {bullets.map((b, i) => (
+              <div key={i} className="resume-bullet">
+                {b.text}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="rd-footer" style={{ marginTop: 12 }}>
+          <button
+            type="button"
+            className="btn primary"
+            onClick={onRegenerate}
+            disabled={isRegenerating}
+          >
+            {isRegenerating ? "Regenerating…" : "Regenerate from latest proof"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface ResumeTailoringTabProps {
+  active: boolean;
+  onGenerate: () => void;
+}
+
+function ResumeTailoringTab({ active, onGenerate }: ResumeTailoringTabProps) {
+  return (
+    <div className="resume-preview">
+      <div className="resume-block">
+        <h6>Role-tailored versions</h6>
+        <div className="rd-section-c">
+          Generate a version of your resume shaped to a specific job description.
+          Each tailored variant runs against your real proof, not a rewrite of
+          generic copy.
+        </div>
+        <div className="rd-dual" style={{ marginTop: 12 }}>
+          <TailoredResumeQuotaChip enabled={active} />
+          <div className="rd-panel">
+            <div className="t">Generate a tailored version</div>
+            <div className="c">
+              Paste a JD in the next step. We&apos;ll draft a focused variant
+              you can review and download.
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <button
+                type="button"
+                className="btn primary"
+                onClick={onGenerate}
+              >
+                Generate tailored version
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ResumeExportTab({ onGoToKit }: { onGoToKit: () => void }) {
+  return (
+    <div className="resume-preview">
+      <div className="resume-block">
+        <h6>Export</h6>
+        <div className="rd-section-c">
+          PDF export of the master resume happens through the Application Kit
+          — the same flow that bundles your tailored resume, JD analysis, mock
+          report, and autopsy into one downloadable kit.
+        </div>
+        <div className="rd-footer" style={{ marginTop: 12 }}>
+          <button type="button" className="btn primary" onClick={onGoToKit}>
+            Build my application kit
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -670,12 +1327,10 @@ function EvidenceRow({ title, copy, badge, tone }: EvidenceRowProps) {
 }
 
 function JdMatchView(props: ViewProps) {
-  // Feature-flagged swap. The legacy demo (computeFit + JD presets)
-  // stays compiled in JdMatchViewLegacy below so environments that
-  // haven't enabled the flag yet don't go empty during rollout.
-  // Hooks live in their respective components — the early-return
-  // pattern would violate React's rules-of-hooks since the legacy
-  // path uses useState / useFitScore.
+  // Feature-flagged swap. The legacy fallback now collapses to a single
+  // disabled placeholder (the old computeFit + EvidenceRow demo block was
+  // dropped on rewire) so environments without the decoder flag still
+  // render an honest "off" state instead of misleading hard-coded numbers.
   if (isJdDecoderEnabled()) {
     return <JdMatchViewLive {...props} />;
   }
@@ -683,10 +1338,116 @@ function JdMatchView(props: ViewProps) {
 }
 
 function JdMatchViewLive({ open, active }: ViewProps) {
+  const [jdText, setJdText] = useState<string>("");
+  const [decoderKey, setDecoderKey] = useState(0);
+  const recordEvent = useRecordWorkspaceEvent();
+  const saveJd = useSaveJd();
+  const { data: jdLibrary } = useJdLibrary();
+
+  const presetText = useCallback(
+    (key: keyof typeof JD_PRESETS) => {
+      const preset = JD_PRESETS[key];
+      setJdText(preset.text);
+      setDecoderKey((k) => k + 1);
+      recordEvent("jd", "jd_preset_selected", { preset: key });
+    },
+    [recordEvent],
+  );
+
+  const loadFromLibrary = useCallback(
+    (item: JdLibraryItem) => {
+      // The library list endpoint returns metadata only; we don't have the JD
+      // text here. Persist title + use it as the textarea seed so the user can
+      // re-paste / re-decode without losing the JD they saved earlier.
+      setJdText(`# ${item.title}${item.company ? ` — ${item.company}` : ""}\n\n`);
+      setDecoderKey((k) => k + 1);
+      recordEvent("jd", "jd_library_selected", { jd_id: item.id });
+    },
+    [recordEvent],
+  );
+
+  const handleSave = useCallback(() => {
+    const text = jdText.trim();
+    if (text.length < 40) return;
+    const firstLine = text.split("\n", 1)[0]?.slice(0, 80) ?? "Saved JD";
+    const title = firstLine.replace(/^#\s*/, "") || "Saved JD";
+    saveJd.mutate(
+      { title, jd_text: text },
+      {
+        onSuccess: () => {
+          v8Toast("JD saved to your library.");
+          recordEvent("jd", "jd_saved");
+        },
+        onError: () => v8Toast("Could not save JD. Try again."),
+      },
+    );
+  }, [jdText, saveJd, recordEvent]);
+
   return (
     <div className={`view${active ? " active" : ""}`} id="rd-jd">
       <section className="card pad reveal in">
-        <JdDecoderCard />
+        <div className="rd-section-k">JD Match</div>
+        <div className="rd-section-t">
+          Match me to a real role — then map gaps back to learning.
+        </div>
+
+        <div className="jd-paste-row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          <div className="jd-sample-chips">
+            <button
+              type="button"
+              className="jd-sample-chip"
+              onClick={() => presetText("python")}
+            >
+              Python Developer
+            </button>
+            <button
+              type="button"
+              className="jd-sample-chip"
+              onClick={() => presetText("data")}
+            >
+              Data Analyst
+            </button>
+            <button
+              type="button"
+              className="jd-sample-chip"
+              onClick={() => presetText("genai")}
+            >
+              GenAI Engineer
+            </button>
+          </div>
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={handleSave}
+            disabled={jdText.trim().length < 40 || saveJd.isPending}
+          >
+            {saveJd.isPending ? "Saving…" : "Save this JD"}
+          </button>
+        </div>
+
+        <JdDecoderCard key={decoderKey} initialJdText={jdText} />
+
+        {jdLibrary && jdLibrary.length > 0 ? (
+          <div className="rd-list" style={{ marginTop: 16 }}>
+            <div className="rd-section-k">Saved JDs</div>
+            <div className="jd-sample-chips" style={{ flexWrap: "wrap" }}>
+              {jdLibrary.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="jd-sample-chip"
+                  onClick={() => loadFromLibrary(item)}
+                >
+                  {item.title}
+                  {item.last_fit_score !== null
+                    ? ` · fit:${Math.round(item.last_fit_score)}`
+                    : ""}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <div
           className="rd-actions"
           style={{ marginTop: 24, display: "flex", gap: 8 }}
@@ -705,188 +1466,91 @@ function JdMatchViewLive({ open, active }: ViewProps) {
 }
 
 function JdMatchViewLegacy({ open, active }: ViewProps) {
-  const [jdText, setJdText] = useState<string>(DEFAULT_JD_TEXT);
-  const [score, setScore] = useState<number>(68);
-  const [recomputing, setRecomputing] = useState(false);
+  const [jdText, setJdText] = useState<string>("");
   const fitScoreMutation = useFitScore();
 
-  const rescore = useCallback(
-    (target?: number) => {
-      const next = target ?? computeFit(jdText);
-      setRecomputing(true);
-      window.setTimeout(() => {
-        setScore(next);
-        setRecomputing(false);
-        v8Toast(`Re-scored to ${next}%`);
-      }, 500);
-      // Fire real backend call non-blocking when JD has substance.
-      if (jdText.trim().length > 40) {
-        fitScoreMutation.mutate(
-          { jd_text: jdText, jd_title: "Target role" },
-          {
-            onSuccess: (data) => {
-              if (typeof data.fit_score === "number") {
-                setScore(Math.round(data.fit_score));
-              }
-            },
-          },
-        );
-      }
-    },
-    [jdText, fitScoreMutation],
-  );
+  const onScore = useCallback(() => {
+    const text = jdText.trim();
+    if (text.length < 40) {
+      v8Toast("Paste a longer JD to score it.");
+      return;
+    }
+    fitScoreMutation.mutate({ jd_text: text, jd_title: "Target role" });
+  }, [jdText, fitScoreMutation]);
 
-  const onChip = useCallback(
-    (key: keyof typeof JD_PRESETS) => {
-      const preset = JD_PRESETS[key];
-      setJdText(preset.text);
-      rescore(preset.score);
-    },
-    [rescore],
-  );
+  const data = fitScoreMutation.data;
+  const buckets = data?.verdict?.buckets;
 
   return (
     <div className={`view${active ? " active" : ""}`} id="rd-jd">
       <section className="card pad reveal in">
-        <div className="rd-section-k">JD Match</div>
+        <div className="rd-section-k">JD Match (kill-switch)</div>
         <div className="rd-section-t">
-          Match me to a real role — then map gaps back to learning.
+          The decoder is disabled in this environment.
         </div>
         <div className="rd-section-c">
-          This turns abstract readiness into target-role readiness. Paste a real
-          job description and get a truthful gap analysis connected directly to
-          what you can do next in the platform.
+          Falling back to the basic fit-score endpoint. Paste a JD and we&apos;ll
+          score it against your current proof.
         </div>
-
-        <div className="jd-grid">
-          <div className="match-card" style={{ gridColumn: "1 / -1" }}>
-            <div className="k">Paste a job description</div>
-            <div className="big">Live fit analysis</div>
-            <div className="body">
-              Drop any job description below. The fit score and gaps re-score in
-              real time against your current proof.
-            </div>
-            <textarea
-              className="jd-paste"
-              placeholder="Paste the full JD here — requirements, responsibilities, tech stack, everything."
-              value={jdText}
-              onChange={(e) => setJdText(e.target.value)}
-            />
-            <div className="jd-paste-row">
-              <button
-                type="button"
-                className="btn primary"
-                onClick={() => rescore()}
-              >
-                Re-score fit
-              </button>
-              <div className="jd-sample-chips">
-                <button
-                  type="button"
-                  className="jd-sample-chip"
-                  onClick={() => onChip("python")}
-                >
-                  Python Developer
-                </button>
-                <button
-                  type="button"
-                  className="jd-sample-chip"
-                  onClick={() => onChip("data")}
-                >
-                  Data Analyst
-                </button>
-                <button
-                  type="button"
-                  className="jd-sample-chip"
-                  onClick={() => onChip("genai")}
-                >
-                  GenAI Engineer
-                </button>
-              </div>
-            </div>
-          </div>
-          <div className={`match-card${recomputing ? " rd-recomputing" : ""}`}>
-            <div className="k">Target role</div>
-            <div className="big">Junior Python Developer · Backend / Tooling</div>
-            <div className="body">
-              Sample job requires Python fundamentals, API integration, async
-              familiarity, debugging, Git collaboration, and ability to explain
-              project work clearly.
-            </div>
-            <div className="rd-list">
-              <EvidenceRow
-                title="Python fundamentals"
-                copy="Core readiness clearly supported by completed lessons and current capstone direction."
-                badge="Match"
-                tone="good"
-              />
-              <EvidenceRow
-                title="APIs and async"
-                copy="Good emerging fit — stronger if translated into clean resume bullets and a clearer project explanation."
-                badge="Near match"
-                tone="good"
-              />
-              <EvidenceRow
-                title="Testing / debugging"
-                copy="Needs stronger proof or at least a concise example of how you diagnosed and fixed an issue."
-                badge="Gap"
-                tone="warn"
-              />
-              <EvidenceRow
-                title="Git / collaboration"
-                copy="Weakly signaled today. Needs project narrative or future coursework surfaced in profile."
-                badge="Gap"
-                tone="low"
-              />
-            </div>
-          </div>
-          <div className={`match-card${recomputing ? " rd-recomputing" : ""}`}>
-            <div className="k">Role fit</div>
-            <div className="fit-score">
-              <span className="count">{score}</span>%
-            </div>
-            <div className="body">
-              Strong enough to target selective junior roles if you improve
-              packaging and interview clarity. Not yet strong enough to apply
-              broadly without role filtering.
-            </div>
-            <div className="rd-timeline">
-              <TimelineStep
-                num="1"
-                title="Tighten proof"
-                copy="Convert capstone into cleaner evidence with clearer responsibilities and decisions."
-              />
-              <TimelineStep
-                num="2"
-                title="Close one explicit gap"
-                copy="Complete testing / debugging practice and surface it in the resume and proof portfolio."
-              />
-              <TimelineStep
-                num="3"
-                title="Rehearse project explanation"
-                copy="Practice the “Tell me about your project” answer with the Interview Coach."
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="rd-note">
-          <b>Design principle</b>
-          <span>
-            Do not stop at a fit score. Help students understand why they fit, why
-            they do not, and exactly where to go next inside the product to close
-            the highest-impact gaps.
-          </span>
-        </div>
-
-        <div className="rd-footer">
+        <textarea
+          className="jd-paste"
+          placeholder="Paste a JD…"
+          value={jdText}
+          onChange={(e) => setJdText(e.target.value)}
+        />
+        <div className="jd-paste-row" style={{ marginTop: 8 }}>
           <button
             type="button"
             className="btn primary"
-            onClick={() => open("interview")}
+            onClick={onScore}
+            disabled={fitScoreMutation.isPending}
           >
-            Practice likely interview gaps
+            {fitScoreMutation.isPending ? "Scoring…" : "Score fit"}
           </button>
+        </div>
+        {data ? (
+          <div className="rd-list" style={{ marginTop: 16 }}>
+            <div className="rd-section-k">
+              Fit: {Math.round(data.fit_score)} / 100
+            </div>
+            {buckets ? (
+              <>
+                <EvidenceRow
+                  title="Match"
+                  copy={
+                    buckets.proven.length > 0
+                      ? buckets.proven.join(", ")
+                      : "No proven skill matches yet."
+                  }
+                  badge="Match"
+                  tone="good"
+                />
+                <EvidenceRow
+                  title="Near match"
+                  copy={
+                    buckets.unproven.length > 0
+                      ? buckets.unproven.join(", ")
+                      : "No partial-match skills."
+                  }
+                  badge="Near match"
+                  tone="warn"
+                />
+                <EvidenceRow
+                  title="Gap"
+                  copy={
+                    buckets.missing.length > 0
+                      ? buckets.missing.join(", ")
+                      : "No critical gaps detected."
+                  }
+                  badge="Gap"
+                  tone="low"
+                />
+              </>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="rd-footer">
           <button
             type="button"
             className="btn ghost"
@@ -896,24 +1560,6 @@ function JdMatchViewLegacy({ open, active }: ViewProps) {
           </button>
         </div>
       </section>
-    </div>
-  );
-}
-
-interface TimelineStepProps {
-  num: string;
-  title: string;
-  copy: string;
-}
-
-function TimelineStep({ num, title, copy }: TimelineStepProps) {
-  return (
-    <div className="rd-step">
-      <div className="rd-step-no">{num}</div>
-      <div className="rd-step-b">
-        <b>{title}</b>
-        <span>{copy}</span>
-      </div>
     </div>
   );
 }
@@ -957,7 +1603,48 @@ function InterviewCoachView({ active }: ViewProps) {
   );
 }
 
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const diffMs = Date.now() - then;
+  const mins = Math.round(diffMs / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.round(days / 30);
+  return `${months}mo ago`;
+}
+
+function autopsyTone(score: number): "good" | "warn" | "low" {
+  if (score >= 70) return "good";
+  if (score >= 50) return "warn";
+  return "low";
+}
+
 function ProofView({ open, active }: ViewProps) {
+  const { data: proof, isLoading } = useReadinessProof();
+  const recordEvent = useRecordWorkspaceEvent();
+  const [autopsyOpen, setAutopsyOpen] = useState(false);
+
+  const handleUseInKit = useCallback(() => {
+    recordEvent("proof", "cta_clicked", { cta: "use_in_kit" });
+    open("kit");
+  }, [open, recordEvent]);
+
+  const handleTurnIntoBullets = useCallback(() => {
+    recordEvent("proof", "cta_clicked", { cta: "turn_into_bullets" });
+    open("resume");
+  }, [open, recordEvent]);
+
+  const primary = proof?.last_capstone_summary;
+  const autopsies: ProofAutopsy[] = (proof?.autopsies ?? []).slice(0, 5);
+  const mocks: ProofMockReport[] = (proof?.mock_reports ?? []).slice(0, 3);
+  const aiReviewCount = proof?.ai_reviews?.count ?? 0;
+  const peerCount = proof?.peer_reviews?.count_received ?? 0;
+
   return (
     <div className={`view${active ? " active" : ""}`} id="rd-proof">
       <section className="card pad reveal in">
@@ -974,167 +1661,351 @@ function ProofView({ open, active }: ViewProps) {
         <div className="proof-grid-3">
           <div className="pf proof-linked">
             <div className="k">Primary artifact</div>
-            <div className="t">CLI AI Tool</div>
-            <pre>{`async def ask_claude(prompt):
-    for attempt in range(3):
-        try:
-            resp = await client.messages.create(...)
-            return resp.content[0].text
-        except APIError:
-            await asyncio.sleep(2 ** attempt)
-    raise RuntimeError("failed after retries")`}</pre>
-            <div className="meta">
-              Pulled live from your Studio capstone · 84/100 review · last edited
-              today. Signals async thinking, retry logic, isolated API surface.
+            {isLoading && !proof ? (
+              <>
+                <div className="rd-skel rd-skel-line" style={{ width: "60%", height: 18, marginTop: 6 }} />
+                <div className="rd-skel rd-skel-line" style={{ width: "90%", height: 14, marginTop: 8 }} />
+                <div className="rd-skel rd-skel-line" style={{ width: "85%", height: 14, marginTop: 8 }} />
+              </>
+            ) : primary && primary.title ? (
+              <>
+                <div className="t">{primary.title}</div>
+                {primary.snippet ? (
+                  <div className="meta" style={{ marginTop: 14 }}>
+                    {primary.snippet}
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <div className="t">No primary artifact yet</div>
+                <div className="meta" style={{ marginTop: 14 }}>
+                  Ship your first capstone to seed your proof.
+                </div>
+              </>
+            )}
+          </div>
+          <div className="pf">
+            <div className="k">Recent autopsies</div>
+            {autopsies.length === 0 ? (
+              <div className="meta" style={{ marginTop: 14 }}>
+                No autopsies yet. Run one to surface what your shipped work is
+                missing.
+              </div>
+            ) : (
+              <div className="rd-list" data-testid="proof-autopsy-list">
+                {autopsies.map((a) => (
+                  <EvidenceRow
+                    key={a.id}
+                    title={a.project_title}
+                    copy={a.headline}
+                    badge={`${a.overall_score}/100`}
+                    tone={autopsyTone(a.overall_score)}
+                  />
+                ))}
+              </div>
+            )}
+            <div className="rd-footer" style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => setAutopsyOpen(true)}
+              >
+                Run a new autopsy
+              </button>
             </div>
           </div>
           <div className="pf">
-            <div className="k">Review signal</div>
-            <div className="t">84 / 100 review</div>
-            <div className="meta" style={{ marginTop: 14 }}>
-              Working strengths: async flow, function isolation, practical project
-              direction.
-              <br />
-              <br />
-              Gaps called out: error handling, env config, stronger retry
-              behavior.
-            </div>
+            <div className="k">Mock interview reports</div>
+            {mocks.length === 0 ? (
+              <div className="meta" style={{ marginTop: 14 }}>
+                No mock interviews yet. Run one in the Interview Coach.
+              </div>
+            ) : (
+              <div className="rd-list">
+                {mocks.map((m) => (
+                  <EvidenceRow
+                    key={m.session_id}
+                    title={m.headline ?? "Mock interview"}
+                    copy={`${m.verdict ?? "pending"} · ${relativeTime(m.created_at)}`}
+                    badge={m.verdict ?? "—"}
+                    tone="good"
+                  />
+                ))}
+              </div>
+            )}
           </div>
-          <div className="pf">
-            <div className="k">Interview use</div>
-            <div className="t">What this proves</div>
-            <div className="meta" style={{ marginTop: 14 }}>
-              You can talk about an API-based project, explain async choices,
-              discuss iteration from review feedback, and show that you think
-              beyond the happy path.
-            </div>
-          </div>
+        </div>
+
+        <div className="rd-list" style={{ marginTop: 16, display: "flex", gap: 8 }}>
+          <span className="rd-badge good">AI reviews · {aiReviewCount}</span>
+          <span className="rd-badge good">Peer reviews · {peerCount}</span>
         </div>
 
         <div className="rd-footer">
           <button
             type="button"
             className="btn primary"
-            onClick={() => open("kit")}
+            onClick={handleUseInKit}
           >
             Use this in application kit
           </button>
           <button
             type="button"
             className="btn ghost"
-            onClick={() => open("resume")}
+            onClick={handleTurnIntoBullets}
           >
             Turn proof into bullets
           </button>
         </div>
       </section>
+      <AutopsyComposerModal
+        open={autopsyOpen}
+        onClose={() => setAutopsyOpen(false)}
+      />
     </div>
   );
 }
 
-interface KitCardData {
-  title: string;
-  copy: string;
+interface AutopsyComposerModalProps {
+  open: boolean;
+  onClose: () => void;
 }
 
-const KIT_CARDS: ReadonlyArray<KitCardData> = [
-  {
-    title: "Role-tailored resume",
-    copy: "Built from proof, then shaped for a specific Python Developer job family.",
-  },
-  {
-    title: "Project proof card",
-    copy: "A concise summary of your capstone with stack, challenge, approach, and what it proves.",
-  },
-  {
-    title: "Interview story set",
-    copy: "Three strong answers: project walkthrough, debugging story, and technical growth arc.",
-  },
-  {
-    title: "Target-role summary",
-    copy: "A plain-language note explaining what kinds of roles you should apply for right now.",
-  },
-  {
-    title: "Gap plan",
-    copy: "The one or two most valuable things to improve for stronger conversion over the next two weeks.",
-  },
-  {
-    title: "Apply with confidence",
-    copy: "A final signal indicating whether you are ready to apply now or should complete one more readiness pass first.",
-  },
-];
+function AutopsyComposerModal(props: AutopsyComposerModalProps) {
+  // The modal is fully unmounted while closed, so internal state always
+  // starts fresh on each open — no reset effect needed (and no cascading
+  // re-renders flagged by react-hooks/set-state-in-effect).
+  if (!props.open) return null;
+  return <AutopsyComposerModalBody onClose={props.onClose} />;
+}
 
-const EXPORT_STEPS: ReadonlyArray<string> = [
-  "Compiling resume from proof",
-  "Packaging capstone artifact",
-  "Bundling interview answers",
-  "Finalizing application kit",
-];
+function AutopsyComposerModalBody({ onClose }: { onClose: () => void }) {
+  const create = useCreateAutopsy();
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [whatWentWell, setWhatWentWell] = useState("");
+  const [whatWasHard, setWhatWasHard] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const onSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      const trimmedTitle = title.trim();
+      const trimmedDescription = description.trim();
+      if (trimmedTitle.length < 1) {
+        setError("Project title is required.");
+        return;
+      }
+      if (trimmedDescription.length < 20) {
+        setError("Add at least 20 characters of description.");
+        return;
+      }
+      setError(null);
+      create.mutate(
+        {
+          project_title: trimmedTitle,
+          project_description: trimmedDescription,
+          what_went_well_self: whatWentWell.trim() || undefined,
+          what_was_hard_self: whatWasHard.trim() || undefined,
+        },
+        {
+          onSuccess: (data) => {
+            v8Toast(data.headline ?? "Autopsy created.");
+            onClose();
+          },
+          onError: () => {
+            setError("Could not create autopsy. Try again.");
+          },
+        },
+      );
+    },
+    [title, description, whatWentWell, whatWasHard, create, onClose],
+  );
+
+  return (
+    <div
+      className="export-overlay show"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Create portfolio autopsy"
+    >
+      <div className="export-card">
+        <b>Run a new autopsy</b>
+        <form
+          onSubmit={onSubmit}
+          style={{ display: "grid", gap: 10, marginTop: 12 }}
+        >
+          <label className="rd-section-k" htmlFor="autopsy-title">
+            Project title
+          </label>
+          <input
+            id="autopsy-title"
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            required
+            style={{ padding: "8px 10px", borderRadius: 6 }}
+          />
+          <label className="rd-section-k" htmlFor="autopsy-description">
+            What did you build?
+          </label>
+          <textarea
+            id="autopsy-description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={4}
+            required
+            minLength={20}
+            style={{ padding: "8px 10px", borderRadius: 6 }}
+          />
+          <label className="rd-section-k" htmlFor="autopsy-well">
+            What went well? (optional)
+          </label>
+          <textarea
+            id="autopsy-well"
+            value={whatWentWell}
+            onChange={(e) => setWhatWentWell(e.target.value)}
+            rows={2}
+            style={{ padding: "8px 10px", borderRadius: 6 }}
+          />
+          <label className="rd-section-k" htmlFor="autopsy-hard">
+            What was hard? (optional)
+          </label>
+          <textarea
+            id="autopsy-hard"
+            value={whatWasHard}
+            onChange={(e) => setWhatWasHard(e.target.value)}
+            rows={2}
+            style={{ padding: "8px 10px", borderRadius: 6 }}
+          />
+          {error ? (
+            <div role="alert" style={{ color: "#c14a3f", fontSize: 13 }}>
+              {error}
+            </div>
+          ) : null}
+          <div className="rd-footer" style={{ marginTop: 8 }}>
+            <button
+              type="submit"
+              className="btn primary"
+              disabled={create.isPending}
+            >
+              {create.isPending ? "Creating…" : "Create autopsy"}
+            </button>
+            <button type="button" className="btn ghost" onClick={onClose}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function todayISO(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function kitStatusBadge(status: string): "good" | "warn" | "low" {
+  if (status === "ready") return "good";
+  if (status === "failed") return "low";
+  return "warn";
+}
 
 function KitView({ open, active }: ViewProps) {
-  const [showOverlay, setShowOverlay] = useState(false);
-  const [pct, setPct] = useState(0);
-  const [done, setDone] = useState(false);
-  const intervalRef = useRef<number | null>(null);
+  const overview = useReadinessOverview();
+  const { data: kits, refetch: refetchKits } = useApplicationKits();
+  const buildKit = useBuildApplicationKit();
+  const deleteKit = useDeleteApplicationKit();
+  const recordEvent = useRecordWorkspaceEvent();
+  const flush = useFlushWorkspaceEvents();
+  const { data: jdLibrary } = useJdLibrary();
+  const { data: mockSessions } = useMyMockSessions();
+  const { data: autopsies } = useAutopsyList();
 
+  const [label, setLabel] = useState<string>(`Kit · ${todayISO()}`);
+  const [targetRole, setTargetRole] = useState<string>("");
+  const [jdId, setJdId] = useState<string>("");
+  const [mockId, setMockId] = useState<string>("");
+  const [autopsyId, setAutopsyId] = useState<string>("");
+
+  // Prefill the target role from the overview hook once it lands so the form
+  // matches the role the readiness score is keyed on.
   useEffect(() => {
-    return () => {
-      if (intervalRef.current !== null) {
-        window.clearInterval(intervalRef.current);
-      }
-    };
-  }, []);
-
-  const startExport = useCallback(() => {
-    setShowOverlay(true);
-    setPct(0);
-    setDone(false);
-    if (intervalRef.current !== null) {
-      window.clearInterval(intervalRef.current);
+    const inferred = overview.data?.target_role?.trim() ?? "";
+    if (inferred && !targetRole) {
+      setTargetRole(inferred);
     }
-    intervalRef.current = window.setInterval(() => {
-      setPct((p) => {
-        const next = Math.min(100, p + 3);
-        if (next >= 100) {
-          if (intervalRef.current !== null) {
-            window.clearInterval(intervalRef.current);
-            intervalRef.current = null;
-          }
-          setDone(true);
-          v8Toast("Application kit ready.");
-        }
-        return next;
-      });
-    }, 90);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overview.data?.target_role]);
 
-  const closeOverlay = useCallback(() => {
-    setShowOverlay(false);
-  }, []);
+  // Long-poll while any kit is still building. Three-second cadence — the
+  // PDF render takes 5–15s today; tighter polling is wasted requests, looser
+  // would feel sluggish. Only runs when this view is the active tab.
+  const hasBuilding = (kits ?? []).some((k) => k.status === "building");
+  useEffect(() => {
+    if (!active || !hasBuilding) return;
+    const id = window.setInterval(() => {
+      void refetchKits();
+    }, 3000);
+    return () => window.clearInterval(id);
+  }, [active, hasBuilding, refetchKits]);
 
-  const download = useCallback(() => {
-    const blob = new Blob(
-      [
-        "CareerForge Application Kit\n\n• Role-tailored resume\n• Capstone proof card\n• 3 interview answers\n• Target-role summary\n• Gap plan\n",
-      ],
-      { type: "text/plain" },
+  const handleBuild = useCallback(() => {
+    const trimmedLabel = label.trim() || `Kit · ${todayISO()}`;
+    const components: string[] = [];
+    if (jdId) components.push("jd");
+    if (mockId) components.push("mock");
+    if (autopsyId) components.push("autopsy");
+    recordEvent("kit", "kit_build_started", { components });
+    void flush();
+    buildKit.mutate(
+      {
+        label: trimmedLabel,
+        target_role: targetRole.trim() || null,
+        jd_library_id: jdId || null,
+        mock_session_id: mockId || null,
+        autopsy_id: autopsyId || null,
+      },
+      {
+        onSuccess: () => v8Toast("Kit build started."),
+        onError: () => v8Toast("Could not start kit build."),
+      },
     );
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "CareerForge-ApplicationKit.txt";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    v8Toast("Downloaded. Good luck.");
-  }, []);
+  }, [
+    label,
+    targetRole,
+    jdId,
+    mockId,
+    autopsyId,
+    buildKit,
+    recordEvent,
+    flush,
+  ]);
 
-  const ringStyle: CSSProperties = {
-    background: `conic-gradient(var(--forest) ${pct * 3.6}deg, #e4dbc8 ${pct * 3.6}deg)`,
-  };
+  const handleDownloadClick = useCallback(
+    (id: string) => {
+      recordEvent("kit", "kit_downloaded", { kit_id: id });
+      void flush();
+    },
+    [recordEvent, flush],
+  );
 
-  const stepStates: ReadonlyArray<boolean> = [25, 50, 75, 100].map((t) => pct >= t);
+  const handleDelete = useCallback(
+    (id: string) => {
+      deleteKit.mutate(id, {
+        onSuccess: () => v8Toast("Kit deleted."),
+        onError: () => v8Toast("Could not delete kit."),
+      });
+    },
+    [deleteKit],
+  );
+
+  const kitsList: ApplicationKitListItem[] = kits ?? [];
 
   return (
     <div className={`view${active ? " active" : ""}`} id="rd-kit">
@@ -1144,33 +2015,162 @@ function KitView({ open, active }: ViewProps) {
           Leave this workspace with everything needed to apply.
         </div>
         <div className="rd-section-c">
-          This is the conversion layer. The point of Job Readiness is not to
-          display tools — it is to help you leave with a clear, usable set of
-          assets that support actual applications.
+          This is the conversion layer. Bundle your resume, JD analysis, mock
+          interview report, and portfolio autopsy into one downloadable kit.
         </div>
 
-        <div className="kit-grid">
-          {KIT_CARDS.map((c) => (
-            <div key={c.title} className="kit-card">
-              <b>{c.title}</b>
-              <span>{c.copy}</span>
-            </div>
-          ))}
+        <div className="rd-section-k" style={{ marginTop: 16 }}>
+          Recent kits
         </div>
+        {kitsList.length === 0 ? (
+          <div className="rd-section-c" data-testid="kit-empty">
+            No kits yet — build your first one below.
+          </div>
+        ) : (
+          <div className="rd-list" data-testid="kit-list">
+            {kitsList.map((k) => (
+              <div key={k.id} className="rd-li">
+                <div>
+                  <b>{k.label}</b>
+                  <span>
+                    {k.status === "building" ? "Building…" : k.status} ·{" "}
+                    {k.generated_at
+                      ? relativeTime(k.generated_at)
+                      : relativeTime(k.created_at)}
+                  </span>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  {k.status === "building" ? (
+                    <span className="rd-badge warn">Building…</span>
+                  ) : null}
+                  <span className={`rd-badge ${kitStatusBadge(k.status)}`}>
+                    {k.status}
+                  </span>
+                  {k.status === "ready" ? (
+                    <a
+                      className="btn primary"
+                      href={applicationKitDownloadUrl(k.id)}
+                      download={`kit-${k.label}.pdf`}
+                      onClick={() => handleDownloadClick(k.id)}
+                    >
+                      Download
+                    </a>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    onClick={() => handleDelete(k.id)}
+                    disabled={deleteKit.isPending}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
-        <div className="rd-note">
-          <b>How this page should feel</b>
-          <span>
-            Not like a careers dashboard. Not like a modal stack. It should feel
-            like a calm operating workspace that diagnoses readiness, guides one
-            focused action at a time, and helps the student leave with tangible,
-            real-world outputs.
-          </span>
+        <div className="rd-section-k" style={{ marginTop: 24 }}>
+          Build a new kit
+        </div>
+        <div className="rd-dual" style={{ marginTop: 8 }}>
+          <div className="rd-panel">
+            <div className="t">Kit details</div>
+            <label className="rd-section-k" htmlFor="kit-label">
+              Label
+            </label>
+            <input
+              id="kit-label"
+              type="text"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              required
+              style={{ padding: "8px 10px", borderRadius: 6, width: "100%" }}
+            />
+            <label
+              className="rd-section-k"
+              htmlFor="kit-target"
+              style={{ marginTop: 10, display: "block" }}
+            >
+              Target role (optional)
+            </label>
+            <input
+              id="kit-target"
+              type="text"
+              value={targetRole}
+              onChange={(e) => setTargetRole(e.target.value)}
+              style={{ padding: "8px 10px", borderRadius: 6, width: "100%" }}
+            />
+          </div>
+          <div className="rd-panel">
+            <div className="t">Source rows (optional)</div>
+            <label className="rd-section-k" htmlFor="kit-jd">
+              JD from library
+            </label>
+            <select
+              id="kit-jd"
+              value={jdId}
+              onChange={(e) => setJdId(e.target.value)}
+              style={{ padding: "8px 10px", borderRadius: 6, width: "100%" }}
+            >
+              <option value="">— none —</option>
+              {(jdLibrary ?? []).map((j) => (
+                <option key={j.id} value={j.id}>
+                  {j.title}
+                </option>
+              ))}
+            </select>
+            <label
+              className="rd-section-k"
+              htmlFor="kit-mock"
+              style={{ marginTop: 10, display: "block" }}
+            >
+              Mock session
+            </label>
+            <select
+              id="kit-mock"
+              value={mockId}
+              onChange={(e) => setMockId(e.target.value)}
+              style={{ padding: "8px 10px", borderRadius: 6, width: "100%" }}
+            >
+              <option value="">— none —</option>
+              {(mockSessions ?? []).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.target_role ?? m.mode} · {relativeTime(m.created_at)}
+                </option>
+              ))}
+            </select>
+            <label
+              className="rd-section-k"
+              htmlFor="kit-autopsy"
+              style={{ marginTop: 10, display: "block" }}
+            >
+              Portfolio autopsy
+            </label>
+            <select
+              id="kit-autopsy"
+              value={autopsyId}
+              onChange={(e) => setAutopsyId(e.target.value)}
+              style={{ padding: "8px 10px", borderRadius: 6, width: "100%" }}
+            >
+              <option value="">— none —</option>
+              {(autopsies ?? []).map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.project_title}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="rd-footer">
-          <button type="button" className="btn primary" onClick={startExport}>
-            Export application kit
+          <button
+            type="button"
+            className="btn primary"
+            onClick={handleBuild}
+            disabled={buildKit.isPending || label.trim().length === 0}
+          >
+            {buildKit.isPending ? "Starting…" : "Build kit"}
           </button>
           <button
             type="button"
@@ -1180,76 +2180,7 @@ function KitView({ open, active }: ViewProps) {
             Return to overview
           </button>
         </div>
-        <div className="rd-helper">
-          Recommended default loop: Overview → Resume Lab → JD Match → Interview
-          Coach → Application Kit.
-        </div>
       </section>
-
-      {showOverlay ? (
-        <ExportOverlay
-          pct={pct}
-          ringStyle={ringStyle}
-          stepStates={stepStates}
-          done={done}
-          onClose={closeOverlay}
-          onDownload={download}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-interface ExportOverlayProps {
-  pct: number;
-  ringStyle: CSSProperties;
-  stepStates: ReadonlyArray<boolean>;
-  done: boolean;
-  onClose: () => void;
-  onDownload: () => void;
-}
-
-function ExportOverlay({
-  pct,
-  ringStyle,
-  stepStates,
-  done,
-  onClose,
-  onDownload,
-}: ExportOverlayProps): ReactNode {
-  return (
-    <div className="export-overlay show" role="dialog" aria-modal="true">
-      <div className="export-card">
-        <div className="export-ring" style={ringStyle}>
-          <span>{pct}%</span>
-        </div>
-        <b>Building your application kit</b>
-        <div className="export-steps">
-          {EXPORT_STEPS.map((label, i) => (
-            <div
-              key={label}
-              className={`export-step${stepStates[i] ? " done" : ""}`}
-            >
-              {label}
-            </div>
-          ))}
-          {done ? (
-            <div className="export-step done">Download ready</div>
-          ) : null}
-        </div>
-        <div className="rd-footer" style={{ marginTop: 14 }}>
-          {done ? (
-            <button type="button" className="btn primary" onClick={onDownload}>
-              Download kit
-            </button>
-          ) : null}
-          {done ? (
-            <button type="button" className="btn ghost" onClick={onClose}>
-              Close
-            </button>
-          ) : null}
-        </div>
-      </div>
     </div>
   );
 }

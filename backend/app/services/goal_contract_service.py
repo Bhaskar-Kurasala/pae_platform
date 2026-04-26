@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,6 +7,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.goal_contract import GoalContract
 from app.models.user import User
 from app.schemas.goal_contract import GoalContractCreate, GoalContractUpdate
+
+DAYS_PER_MONTH = 30
+
+
+def days_remaining(contract: GoalContract, *, now: datetime | None = None) -> int:
+    """Days left until the goal deadline, floored at 0.
+
+    Computed from `created_at + deadline_months * 30 days - now`. Naïve but
+    explicit — calendar months would inflate variance for the same input.
+    """
+    current = now or datetime.now(UTC)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=UTC)
+    created = contract.created_at
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    deadline_total_days = int(contract.deadline_months) * DAYS_PER_MONTH
+    elapsed_days = (current - created).days
+    return max(0, deadline_total_days - elapsed_days)
 
 log = structlog.get_logger()
 
@@ -54,6 +75,7 @@ class GoalContractService:
             existing.deadline_months = payload.deadline_months
             existing.success_statement = payload.success_statement
             existing.weekly_hours = payload.weekly_hours
+            existing.target_role = payload.target_role
             await self.db.flush()
             await self.db.refresh(existing)
             log.info(
@@ -71,6 +93,7 @@ class GoalContractService:
             deadline_months=payload.deadline_months,
             success_statement=payload.success_statement,
             weekly_hours=payload.weekly_hours,
+            target_role=payload.target_role,
         )
         self.db.add(contract)
         await self.db.flush()

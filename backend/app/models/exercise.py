@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import JSON, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -30,6 +31,13 @@ class Exercise(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         ForeignKey("skills.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
+    )
+    is_capstone: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    pass_score: Mapped[int] = mapped_column(Integer, nullable=False, default=70)
+    due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     lesson: Mapped["Lesson"] = relationship(back_populates="exercises")

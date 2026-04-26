@@ -34,11 +34,18 @@ class DailyCompletion(BaseModel):
 class ProgressResponse(BaseModel):
     courses: list[CourseProgress]
     overall_progress: float
+    lessons_completed_total: int = 0
+    lessons_total: int = 0
     exercises_completed: int = 0
     total_exercises: int = 0
     exercise_completion_rate: float = 0.0
     watch_time_minutes: int = 0
     completions_by_day: list[DailyCompletion] = []
+    active_course_id: uuid.UUID | None = None
+    active_course_title: str | None = None
+    next_lesson_id: uuid.UUID | None = None
+    next_lesson_title: str | None = None
+    today_unlock_percentage: float = 0.0
 
 
 # Legacy flat schema used by complete_lesson endpoint

@@ -9,7 +9,12 @@ from app.schemas.goal_contract import (
     GoalContractResponse,
     GoalContractUpdate,
 )
-from app.services.goal_contract_service import GoalContractService
+from app.services.goal_contract_service import GoalContractService, days_remaining
+
+
+def _to_response(contract) -> GoalContractResponse:  # type: ignore[no-untyped-def]
+    base = GoalContractResponse.model_validate(contract)
+    return base.model_copy(update={"days_remaining": days_remaining(contract)})
 
 router = APIRouter(prefix="/goals", tags=["goals"])
 
@@ -29,7 +34,7 @@ async def get_my_goal(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No goal contract set for this user",
         )
-    return GoalContractResponse.model_validate(contract)
+    return _to_response(contract)
 
 
 @router.post("/me", response_model=GoalContractResponse)
@@ -43,7 +48,7 @@ async def upsert_my_goal(
     response.status_code = (
         status.HTTP_201_CREATED if created else status.HTTP_200_OK
     )
-    return GoalContractResponse.model_validate(contract)
+    return _to_response(contract)
 
 
 @router.patch("/me", response_model=GoalContractResponse)
@@ -58,4 +63,4 @@ async def patch_my_goal(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No goal contract set for this user",
         )
-    return GoalContractResponse.model_validate(contract)
+    return _to_response(contract)

@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import DateTime, ForeignKey, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -44,6 +44,17 @@ class NotebookEntry(Base, UUIDMixin):
     # Spaced-review tracking — NULL means never reviewed
     last_reviewed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    # P-Today2 (2026-04-26): graduation gate. Stamped by
+    # `notebook_service.maybe_graduate` once the SRS card backing this entry
+    # has `repetitions >= 2`. NULL means the note is still in active review.
+    graduated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Free-form student tags. PG VARCHAR[] (already present in the prod DB
+    # from an earlier branch). Mirrors as a Python list for callers.
+    tags: Mapped[list[str]] = mapped_column(
+        ARRAY(String), nullable=False, default=list, server_default="{}"
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

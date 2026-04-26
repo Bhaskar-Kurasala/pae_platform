@@ -12,10 +12,12 @@ from collections.abc import Iterable
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_action import AgentAction
+from app.models.exercise_submission import ExerciseSubmission
+from app.models.student_progress import StudentProgress
 
 _WINDOW_DAYS = 7
 
@@ -60,18 +62,43 @@ async def load_consistency(
     now: datetime | None = None,
     window_days: int = _WINDOW_DAYS,
 ) -> tuple[int, int]:
-    """Return (days_active, window_days) for a user over the last N days."""
+    """Return (days_active, window_days) for a user over the last N days.
+
+    A "show-up" is any of: an agent action, a completed lesson, or an
+    exercise submission. Unioning the three sources fixes the false-zero
+    case where a learner watches videos and submits exercises without
+    triggering an agent (the original implementation only counted
+    `agent_actions`).
+    """
     current = now or datetime.now(UTC)
     start, end = window_bounds(current, window_days=window_days)
-    # DATE(created_at) collapses multiple actions within the same day
-    # to a single row, so COUNT(DISTINCT ...) gives us the show-up count.
-    day_expr = func.date(AgentAction.created_at)
+
+    agent_q = select(
+        func.date(AgentAction.created_at).label("d"),
+    ).where(
+        AgentAction.student_id == user_id,
+        AgentAction.created_at >= start,
+        AgentAction.created_at <= end,
+    )
+    progress_q = select(
+        func.date(StudentProgress.completed_at).label("d"),
+    ).where(
+        StudentProgress.student_id == user_id,
+        StudentProgress.completed_at.is_not(None),
+        StudentProgress.completed_at >= start,
+        StudentProgress.completed_at <= end,
+    )
+    submission_q = select(
+        func.date(ExerciseSubmission.created_at).label("d"),
+    ).where(
+        ExerciseSubmission.student_id == user_id,
+        ExerciseSubmission.created_at >= start,
+        ExerciseSubmission.created_at <= end,
+    )
+
+    union_q = union_all(agent_q, progress_q, submission_q).subquery()
     result = await db.execute(
-        select(func.count(func.distinct(day_expr))).where(
-            AgentAction.student_id == user_id,
-            AgentAction.created_at >= start,
-            AgentAction.created_at <= end,
-        )
+        select(func.count(func.distinct(union_q.c.d)))
     )
     count = result.scalar() or 0
     return int(count), window_days

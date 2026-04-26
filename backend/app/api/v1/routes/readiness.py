@@ -38,7 +38,10 @@ from app.schemas.readiness import (
     TurnResponse,
     VerdictPayload,
 )
+from app.schemas.readiness_overview import OverviewResponse, ProofResponse
 from app.services.readiness_memory_service import list_past_diagnoses
+from app.services.readiness_overview_service import load_overview
+from app.services.readiness_proof_service import load_proof
 from app.services.readiness_north_star import (
     SessionMissingVerdictError,
     check_completion,
@@ -61,6 +64,31 @@ router = APIRouter(
     prefix="/readiness/diagnostic",
     tags=["readiness-diagnostic"],
 )
+
+# Separate router for the workspace aggregators — different prefix so we
+# don't collide with the diagnostic conversation surface above.
+overview_router = APIRouter(
+    prefix="/readiness",
+    tags=["readiness-overview"],
+)
+
+
+@overview_router.get("/overview", response_model=OverviewResponse)
+async def get_readiness_overview(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> OverviewResponse:
+    """One-shot payload for the Job Readiness Overview view."""
+    return await load_overview(db, user=current_user)
+
+
+@overview_router.get("/proof", response_model=ProofResponse)
+async def get_readiness_proof(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ProofResponse:
+    """One-shot payload for the Proof Portfolio view."""
+    return await load_proof(db, user=current_user)
 
 
 def _require_flag() -> None:

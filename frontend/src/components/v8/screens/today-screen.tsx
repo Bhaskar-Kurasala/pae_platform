@@ -1,25 +1,28 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSetV8Topbar } from "@/components/v8/v8-topbar-context";
 import { v8Toast } from "@/components/v8/v8-toast";
 import { useDueCards, useReviewCard } from "@/lib/hooks/use-srs";
-import { useMyProgress } from "@/lib/hooks/use-progress";
-import { useMyGoal } from "@/lib/hooks/use-goal";
-import { useConsistency } from "@/lib/hooks/use-today";
+import {
+  useMarkSessionStep,
+  useMyIntention,
+  useSetIntention,
+  useTodaySummary,
+} from "@/lib/hooks/use-today";
 import { useAuthStore } from "@/stores/auth-store";
 
 type StepState = "active" | "locked" | "done";
 
-interface FallbackCard {
+interface DisplayCard {
   id: string;
   prompt: string;
   answer: string;
   hint: string;
 }
 
-const FALLBACK_CARDS: ReadonlyArray<FallbackCard> = [
+const FALLBACK_CARDS: ReadonlyArray<DisplayCard> = [
   {
     id: "fallback-1",
     prompt:
@@ -50,59 +53,127 @@ const QUALITY: Record<"easy" | "hard" | "forgot", number> = {
   forgot: 1,
 };
 
+const DEFAULT_HINT = "Say the idea out loud first, then click reveal.";
+const DEFAULT_ANSWER =
+  "Restate the core idea in your own words and name one place you'd reach for it.";
+
+function stripLeadingHandle(handle: string, label: string): string {
+  // The cohort_events recorder may include the actor name at the start of
+  // the label (so non-UI consumers get a self-contained sentence). The UI
+  // already prepends <b>{handle}</b>, so trim a leading match to avoid
+  // "Priya K. Priya K. promoted to …".
+  const trimmed = label.trimStart();
+  if (handle && trimmed.startsWith(handle)) {
+    return trimmed.slice(handle.length).trimStart();
+  }
+  return trimmed;
+}
+
+function relativeTime(iso: string): string {
+  const t = new Date(iso).getTime();
+  const diffSec = Math.max(1, Math.floor((Date.now() - t) / 1000));
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay}d ago`;
+}
+
 export function TodayScreen() {
-  const { user } = useAuthStore();
+  const { user, isAuthenticated } = useAuthStore();
+  const summaryQ = useTodaySummary();
+  const summary = summaryQ.data;
   const { data: dueCards } = useDueCards(7);
-  const { data: progress } = useMyProgress();
-  const { data: goal } = useMyGoal();
-  const { data: consistency } = useConsistency();
   const reviewCard = useReviewCard();
+  const intentionQ = useMyIntention();
+  const setIntention = useSetIntention();
+  const markStep = useMarkSessionStep();
 
-  const dueCount = dueCards?.length ?? 7;
-  const streak = consistency?.days_this_week ?? 0;
-  const overallProgress = Math.round(progress?.overall_progress ?? 34);
-  const deadlineDays = goal?.deadline_months
-    ? Math.max(1, Math.round(goal.deadline_months * 30))
-    : 58;
+  const dueCount = summary?.due_card_count ?? dueCards?.length ?? 0;
+  const daysActive = summary?.consistency.days_active ?? 0;
+  const windowDays = summary?.consistency.window_days ?? 7;
+  const overallProgress = Math.round(summary?.progress.overall_percentage ?? 0);
+  const deadlineDays = summary?.goal.days_remaining ?? 0;
+  const sessionOrdinal = summary?.session.ordinal ?? 1;
+  const targetRole =
+    summary?.next_milestone.label || summary?.goal.target_role || "your next role";
+  const lessonsCompleted = summary?.progress.lessons_completed_total ?? 0;
+  const lessonsTotal = summary?.progress.lessons_total ?? 0;
+  const lessonsLeft = Math.max(0, lessonsTotal - lessonsCompleted);
+  const todayUnlock = Math.round(summary?.progress.today_unlock_percentage ?? 0);
+  const focusName = summary?.current_focus.skill_name ?? "Today's focus";
+  const focusBlurb =
+    summary?.current_focus.skill_blurb ??
+    "Pick today's lesson and the focus chip will update.";
+  const capstone = summary?.capstone;
+  const draftQuality = capstone?.draft_quality ?? null;
+  const draftsCount = capstone?.drafts_count ?? 0;
+  const capstoneTitle = capstone?.title ?? "Your capstone draft";
+  const capstoneDays = capstone?.days_to_due ?? null;
+  const readinessDelta = summary?.readiness.delta_week ?? 0;
+  const readinessCurrent = summary?.readiness.current ?? 0;
+  const peersAtLevel = summary?.peers_at_level ?? 0;
+  const promotionsToday = summary?.promotions_today ?? 0;
+  const microWins = summary?.micro_wins ?? [];
+  const cohortEvents = summary?.cohort_events ?? [];
+  const intentionText = summary?.intention.text ?? intentionQ.data?.text ?? "";
 
-  const { weekday, monthDay, sessionNumber } = useMemo(() => {
+  const { weekday, monthDay } = useMemo(() => {
     const now = new Date();
     return {
       weekday: now.toLocaleDateString("en-US", { weekday: "long" }),
       monthDay: now.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-      sessionNumber: 14,
     };
   }, []);
 
   useSetV8Topbar({
-    eyebrow: `${weekday} · ${monthDay} · Session ${sessionNumber}`,
+    eyebrow: `${weekday} · ${monthDay} · Session ${sessionOrdinal}`,
     titleHtml: "A modern learning flow that feels <i>alive</i>.",
     chips: [
-      { label: `Day ${streak} streak`, variant: "forest" },
+      { label: `Active ${daysActive} of ${windowDays} days`, variant: "forest" },
       { label: `${dueCount} review cards`, variant: "gold" },
       { label: "One clear next action", variant: "ink" },
     ],
     progress: overallProgress,
   });
 
-  const cards: ReadonlyArray<FallbackCard> = useMemo(() => {
-    if (!dueCards || dueCards.length === 0) return FALLBACK_CARDS;
-    return dueCards.slice(0, 7).map((c, i) => ({
+  const cards: ReadonlyArray<DisplayCard> = useMemo(() => {
+    if (!isAuthenticated || !dueCards || dueCards.length === 0) {
+      return FALLBACK_CARDS;
+    }
+    return dueCards.slice(0, 7).map((c) => ({
       id: c.id,
       prompt: c.prompt,
-      answer: "Recall the concept and grade your honesty.",
-      hint: FALLBACK_CARDS[i % FALLBACK_CARDS.length]?.hint ?? "Reveal when ready.",
+      answer: c.answer || DEFAULT_ANSWER,
+      hint: c.hint || DEFAULT_HINT,
     }));
-  }, [dueCards]);
+  }, [dueCards, isAuthenticated]);
 
   const totalCards = Math.max(cards.length, 1);
-  const [cardIndex, setCardIndex] = useState(3);
+  const [cardIndex, setCardIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
-  const [steps, setSteps] = useState<{ warm: StepState; lesson: StepState; reflect: StepState }>({
-    warm: "active",
-    lesson: "locked",
-    reflect: "locked",
-  });
+
+  // Local mirror of session step state — we hydrate from the summary so a
+  // refresh after a partial session keeps us in the right column.
+  const initialSteps = useMemo<{
+    warm: StepState;
+    lesson: StepState;
+    reflect: StepState;
+  }>(() => {
+    const s = summary?.session;
+    if (!s) return { warm: "active", lesson: "locked", reflect: "locked" };
+    if (s.reflect_done_at) return { warm: "done", lesson: "done", reflect: "done" };
+    if (s.lesson_done_at) return { warm: "done", lesson: "done", reflect: "active" };
+    if (s.warmup_done_at) return { warm: "done", lesson: "active", reflect: "locked" };
+    return { warm: "active", lesson: "locked", reflect: "locked" };
+  }, [summary]);
+  const [steps, setSteps] =
+    useState<{ warm: StepState; lesson: StepState; reflect: StepState }>(initialSteps);
+  useEffect(() => {
+    setSteps(initialSteps);
+  }, [initialSteps]);
 
   const activeCard = cards[Math.min(cardIndex, cards.length - 1)] ?? FALLBACK_CARDS[0];
   const cardsDone = Math.min(cardIndex, totalCards);
@@ -117,31 +188,59 @@ export function TodayScreen() {
       }
       v8Toast(`Marked ${grade.charAt(0).toUpperCase()}${grade.slice(1)}`);
       setRevealed(false);
-      setCardIndex((idx) => Math.min(idx + 1, totalCards));
+      setCardIndex((idx) => {
+        const next = Math.min(idx + 1, totalCards);
+        // Mark warm-up complete when we just reviewed the last card.
+        if (next === totalCards && steps.warm !== "done") {
+          markStep.mutate("warmup");
+          v8Toast("Warm-up complete. Lesson unlocked.");
+        }
+        return next;
+      });
     },
-    [cards, cardIndex, reviewCard, totalCards],
+    [cards, cardIndex, reviewCard, totalCards, steps.warm, markStep],
   );
 
-  const handleSimulateUnlock = useCallback(() => {
-    setSteps((prev) => {
-      if (prev.warm !== "done") {
-        v8Toast("Warm-up complete. Lesson unlocked.");
-        return { warm: "done", lesson: "active", reflect: "locked" };
-      }
-      if (prev.lesson !== "done") {
-        v8Toast("Lesson complete. Reflection unlocked.");
-        return { warm: "done", lesson: "done", reflect: "active" };
-      }
+  const handleAdvanceStep = useCallback(() => {
+    if (steps.warm !== "done") {
+      markStep.mutate("warmup");
+      v8Toast("Warm-up complete. Lesson unlocked.");
+      setSteps({ warm: "done", lesson: "active", reflect: "locked" });
+      return;
+    }
+    if (steps.lesson !== "done") {
+      markStep.mutate("lesson");
+      v8Toast("Lesson complete. Reflection unlocked.");
+      setSteps({ warm: "done", lesson: "done", reflect: "active" });
+      return;
+    }
+    if (steps.reflect !== "done") {
+      markStep.mutate("reflect");
       v8Toast("Session closed. See you tomorrow.");
-      return { warm: "done", lesson: "done", reflect: "done" };
-    });
-  }, []);
+      setSteps({ warm: "done", lesson: "done", reflect: "done" });
+    }
+  }, [steps, markStep]);
 
   const handleSeeLessonPlan = useCallback(() => {
     document.getElementById("lessonPlan")?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
-  const firstName = user?.full_name?.split(" ")[0] ?? "you";
+  const [intentionDraft, setIntentionDraft] = useState(intentionText);
+  useEffect(() => setIntentionDraft(intentionText), [intentionText]);
+  const handleSaveIntention = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      const trimmed = intentionDraft.trim();
+      if (!trimmed) return;
+      setIntention.mutate(trimmed, {
+        onSuccess: () => v8Toast("Today's intention saved"),
+      });
+    },
+    [intentionDraft, setIntention],
+  );
+
+  const firstName =
+    summary?.user.first_name || user?.full_name?.split(" ")[0] || "you";
 
   return (
     <section className="screen active" id="screen-today">
@@ -155,13 +254,52 @@ export function TodayScreen() {
                   Warm up. Build. <i>Leave stronger</i> than you arrived.
                 </h3>
                 <p className="narrative-line" id="narrativeLine">
-                  You&apos;re 4 lessons closer to {goal?.success_statement ?? "your next role"} than you were a week ago.
+                  You&apos;re {lessonsCompleted} lessons closer to {targetRole} than when you started.
                 </p>
                 <p>
                   This version adds modern motion where it helps students: entering focus,
                   understanding what changed, feeling unlock moments, and moving toward a role
                   with calm confidence.
                 </p>
+
+                <form
+                  onSubmit={handleSaveIntention}
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                    margin: "16px 0 4px",
+                    flexWrap: "wrap",
+                  }}
+                  aria-label="Today's intention"
+                >
+                  <label
+                    htmlFor="todayIntention"
+                    className="eyebrow"
+                    style={{ fontSize: 11 }}
+                  >
+                    Today I want to
+                  </label>
+                  <input
+                    id="todayIntention"
+                    type="text"
+                    value={intentionDraft}
+                    onChange={(e) => setIntentionDraft(e.target.value)}
+                    placeholder="ship one async client and grade it"
+                    aria-label="What do you want to do today"
+                    style={{
+                      flex: "1 1 280px",
+                      padding: "8px 10px",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 6,
+                      fontSize: 13,
+                    }}
+                  />
+                  <button className="btn ghost" type="submit" disabled={!intentionDraft.trim()}>
+                    Save
+                  </button>
+                </form>
+
                 <div
                   style={{
                     display: "flex",
@@ -171,28 +309,30 @@ export function TodayScreen() {
                     margin: "18px 0 4px",
                   }}
                 >
-                  <span className="peer-chip">
-                    <span className="peer-dot" />
-                    <span>12 peers at your level today</span>
-                    <span className="peer-faces">
-                      <span className="peer-face">A</span>
-                      <span className="peer-face">N</span>
-                      <span className="peer-face">M</span>
+                  {peersAtLevel > 0 && (
+                    <span className="peer-chip">
+                      <span className="peer-dot" />
+                      <span>{peersAtLevel} peers at your level today</span>
                     </span>
-                  </span>
-                  <span
-                    className="peer-chip"
-                    style={{
-                      background:
-                        "linear-gradient(95deg, rgba(184,134,45,0.10), rgba(184,134,45,0.04))",
-                      borderColor: "rgba(184,134,45,0.25)",
-                      color: "#8d621b",
-                    }}
-                  >
-                    <span className="peer-dot" style={{ background: "#b8862d" }} />
-                    <span>3 just promoted to Data Analyst</span>
-                  </span>
+                  )}
+                  {promotionsToday > 0 && (
+                    <span
+                      className="peer-chip"
+                      style={{
+                        background:
+                          "linear-gradient(95deg, rgba(184,134,45,0.10), rgba(184,134,45,0.04))",
+                        borderColor: "rgba(184,134,45,0.25)",
+                        color: "#8d621b",
+                      }}
+                    >
+                      <span className="peer-dot" style={{ background: "#b8862d" }} />
+                      <span>
+                        {promotionsToday} just promoted to {targetRole}
+                      </span>
+                    </span>
+                  )}
                 </div>
+
                 <div className="hero-actions">
                   <Link href="/studio" className="btn primary">
                     Continue lesson
@@ -201,14 +341,20 @@ export function TodayScreen() {
                     See lesson plan
                   </button>
                 </div>
-                <div className="moment-ribbon">
-                  <span className="moment-dot" />
-                  <span>
-                    {firstName}&apos;s job readiness rose <b>+8</b> this week. One more lesson
-                    likely lifts it above 65% — the threshold where recruiter replies jump in
-                    cohort data.
-                  </span>
-                </div>
+
+                {readinessDelta !== 0 && (
+                  <div className="moment-ribbon">
+                    <span className="moment-dot" />
+                    <span>
+                      {firstName}&apos;s job readiness {readinessDelta > 0 ? "rose" : "moved"}{" "}
+                      <b>
+                        {readinessDelta > 0 ? "+" : ""}
+                        {readinessDelta}
+                      </b>{" "}
+                      this week. Currently at {readinessCurrent}% on the north-star metric.
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="hero-aside">
                 <div className="kpi reveal delay-1">
@@ -219,29 +365,27 @@ export function TodayScreen() {
                     </span>{" "}
                     days
                   </div>
-                  <div className="sub">
-                    to Data Analyst if you keep a steady three sessions each week.
-                  </div>
+                  <div className="sub">to {targetRole} at this pace.</div>
                 </div>
                 <div className="kpi reveal delay-2">
                   <div className="label">Today unlocks</div>
-                  <div className="value">+17%</div>
+                  <div className="value">+{todayUnlock}%</div>
                   <div className="sub">
-                    toward finishing Level 1 and opening your capstone gate.
+                    progress in {summary?.progress.active_course_title ?? "your active course"}.
                   </div>
                 </div>
                 <div className="kpi reveal delay-3">
                   <div className="label">Current focus</div>
-                  <div className="value">APIs</div>
-                  <div className="sub">
-                    async requests, retries, and handling failure without losing flow.
-                  </div>
+                  <div className="value">{focusName}</div>
+                  <div className="sub">{focusBlurb}</div>
                 </div>
                 <div className="kpi reveal delay-4">
                   <div className="label">Proof created</div>
-                  <div className="value">1 draft</div>
+                  <div className="value">
+                    {draftsCount} {draftsCount === 1 ? "draft" : "drafts"}
+                  </div>
                   <div className="sub">
-                    your CLI AI tool becomes evidence for promotion, not just practice.
+                    {capstoneTitle} becomes evidence for promotion, not just practice.
                   </div>
                 </div>
               </div>
@@ -269,7 +413,7 @@ export function TodayScreen() {
                   </div>
                   <h5>Review what you nearly lost</h5>
                   <p>
-                    Seven spaced-repetition cards from prior lessons. Fast enough to begin.
+                    {totalCards} spaced-repetition cards from prior lessons. Fast enough to begin.
                     Strong enough to re-open memory.
                   </p>
                   <div className="step-meta">
@@ -292,8 +436,9 @@ export function TodayScreen() {
                   </div>
                   <h5>Build today&apos;s lesson</h5>
                   <p>
-                    One practical outcome: write an async API client with retries and
-                    environment-based auth.
+                    {summary?.progress.next_lesson_title
+                      ? `Next up: ${summary.progress.next_lesson_title}.`
+                      : "One practical outcome that compounds into your capstone."}
                   </p>
                   <div className="step-meta">
                     <span className="mini-chip">45 min</span>
@@ -406,9 +551,12 @@ export function TodayScreen() {
 
               <section className="capstone-trailer reveal">
                 <div className="trailer-eyebrow">
-                  ★ Your capstone — the proof of Python Developer
+                  ★ Your capstone — the proof of {targetRole}
                 </div>
-                <div className="trailer-title">CLI AI tool · 5 days from now</div>
+                <div className="trailer-title">
+                  {capstoneTitle}
+                  {capstoneDays !== null ? ` · ${capstoneDays} days from now` : ""}
+                </div>
                 <div className="trailer-frames">
                   <div className="trailer-frame">
                     <div className="step-num">01</div>
@@ -434,8 +582,9 @@ export function TodayScreen() {
                 </div>
                 <div className="trailer-foot">
                   <div className="trailer-built-by">
-                    &ldquo;Building this changed how I read other people&apos;s code.&rdquo; — Nisha,
-                    promoted Apr 18
+                    {draftsCount > 0
+                      ? `${draftsCount} draft${draftsCount > 1 ? "s" : ""} captured. Keep moving.`
+                      : "Start your first draft and the trailer fills in."}
                   </div>
                   <button
                     className="btn primary"
@@ -461,14 +610,16 @@ export function TodayScreen() {
                 </div>
                 <div className="score">
                   <div className="score-num">
-                    <span className="count" data-to="84">
-                      84
+                    <span className="count" data-to={draftQuality ?? 0}>
+                      {draftQuality ?? "—"}
                     </span>
                   </div>
                   <div>
                     <strong>Current draft quality</strong>
                     <div className="small">
-                      Good fundamentals. Two gaps separate this from a strong senior submission.
+                      {draftQuality !== null
+                        ? "Good fundamentals. Two gaps separate this from a strong senior submission."
+                        : "Your first capstone submission seeds this score."}
                     </div>
                   </div>
                 </div>
@@ -516,7 +667,10 @@ export function TodayScreen() {
                 </span>
               </div>
               <div className="small" style={{ marginTop: 8 }}>
-                days to Data Analyst if you keep this pace.
+                days to {targetRole} if you keep this pace.
+              </div>
+              <div className="small" style={{ marginTop: 4 }}>
+                {lessonsLeft} lessons left across enrolled courses.
               </div>
             </section>
 
@@ -546,7 +700,11 @@ export function TodayScreen() {
                   </div>
                   <div className="t-content">
                     <h6>Lesson</h6>
-                    <p>Build an async API client with retry logic and env auth.</p>
+                    <p>
+                      {summary?.progress.next_lesson_title
+                        ? summary.progress.next_lesson_title
+                        : "Build the next practical outcome in Studio."}
+                    </p>
                   </div>
                 </div>
                 <div className="t-row">
@@ -565,6 +723,24 @@ export function TodayScreen() {
               </div>
             </section>
 
+            {microWins.length > 0 && (
+              <section className="card rail-card reveal delay-2">
+                <div className="section-title" style={{ marginBottom: 8 }}>
+                  <div>
+                    <h4 style={{ fontSize: 20 }}>Yesterday&apos;s wins</h4>
+                  </div>
+                </div>
+                <div className="cohort-stream">
+                  {microWins.map((w) => (
+                    <div className="cohort-item" key={`${w.kind}-${w.occurred_at}`}>
+                      <span className="live-dot" />
+                      <span>{w.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
             <section className="card rail-card reveal delay-2">
               <div className="section-title" style={{ marginBottom: 8 }}>
                 <div>
@@ -572,24 +748,26 @@ export function TodayScreen() {
                 </div>
               </div>
               <div className="cohort-stream">
-                <div className="cohort-item">
-                  <span className="live-dot" />
-                  <span>
-                    <b>Priya</b> passed Python Developer to Data Analyst two minutes ago.
-                  </span>
-                </div>
-                <div className="cohort-item">
-                  <span className="live-dot" />
-                  <span>
-                    <b>Marcus</b> shipped a capstone revision with retry logic.
-                  </span>
-                </div>
-                <div className="cohort-item">
-                  <span className="live-dot" />
-                  <span>
-                    <b>Nisha</b> unlocked Lesson 3 and started Studio.
-                  </span>
-                </div>
+                {cohortEvents.length === 0 ? (
+                  <div className="cohort-item">
+                    <span className="live-dot" />
+                    <span>Quiet right now. Be the first move today.</span>
+                  </div>
+                ) : (
+                  cohortEvents.map((e, i) => (
+                    <div className="cohort-item" key={`${e.actor_handle}-${i}`}>
+                      <span className="live-dot" />
+                      <span>
+                        <b>{e.actor_handle}</b>{" "}
+                        {stripLeadingHandle(e.actor_handle, e.label)}
+                        <span className="small" style={{ marginLeft: 6, color: "#94a3b8" }}>
+                          {" "}
+                          · {relativeTime(e.occurred_at)}
+                        </span>
+                      </span>
+                    </div>
+                  ))
+                )}
               </div>
             </section>
           </aside>
@@ -605,8 +783,14 @@ export function TodayScreen() {
               strongest draft.
             </p>
           </div>
-          <button className="btn gold" onClick={handleSimulateUnlock} type="button">
-            Simulate unlock
+          <button className="btn gold" onClick={handleAdvanceStep} type="button">
+            {steps.warm !== "done"
+              ? "Mark warm-up done"
+              : steps.lesson !== "done"
+                ? "Mark lesson done"
+                : steps.reflect !== "done"
+                  ? "Mark reflection done"
+                  : "Session complete"}
           </button>
         </div>
       </div>

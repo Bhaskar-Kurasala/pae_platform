@@ -1092,3 +1092,49 @@ async def trigger_quiz_pregeneration(
         _quiz_log.info("quiz_pregenerate.enqueued", message_id=message_id)
 
     return {"status": "accepted"}
+
+
+# ---------------------------------------------------------------------------
+# Welcome prompts (Tutor refactor 2026-04-26)
+# ---------------------------------------------------------------------------
+
+
+from app.schemas.chat_welcome import (  # noqa: E402
+    WelcomePromptItem,
+    WelcomePromptsResponse,
+)
+from app.services.welcome_prompt_service import (  # noqa: E402
+    ChatMode,
+    build_welcome_prompts,
+)
+
+
+@router.get("/welcome-prompts", response_model=WelcomePromptsResponse)
+async def get_welcome_prompts(
+    mode: str = Query(default="auto", max_length=16),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> WelcomePromptsResponse:
+    """Personalized starter prompts for the chat WelcomeScreen.
+
+    `mode` mirrors the chat mode chips: auto / tutor / code / career / quiz.
+    Falls back to a curated default set when the user has no signal.
+    """
+    valid_modes: set[str] = {"auto", "tutor", "code", "career", "quiz"}
+    if mode not in valid_modes:
+        mode = "auto"
+    chosen = await build_welcome_prompts(
+        db, user=current_user, mode=mode  # type: ignore[arg-type]
+    )
+    return WelcomePromptsResponse(
+        mode=mode,  # type: ignore[arg-type]
+        prompts=[
+            WelcomePromptItem(
+                text=p.text,
+                icon=p.icon,
+                kind=p.kind,
+                rationale=p.rationale,
+            )
+            for p in chosen
+        ],
+    )

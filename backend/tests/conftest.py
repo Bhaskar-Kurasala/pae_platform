@@ -1,11 +1,24 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.compiler import compiles
 
 from app.core.database import Base, get_db
 from app.main import app
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+
+
+# ── SQLite ARRAY shim (DISC-SQLite-ARRAY 2026-04-26) ──────────────────────
+# `notebook_entries.tags` is `ARRAY(String)` (Postgres-only). The in-memory
+# SQLite test DB can't render ARRAY columns and crashes at create_all() with
+# `'SQLiteTypeCompiler' object has no attribute 'visit_ARRAY'`. Rather than
+# require every test file to monkey-patch around it, register a fallback
+# compiler at conftest import time so SQLite renders ARRAY as a JSON column.
+@compiles(ARRAY, "sqlite")
+def _array_to_json_on_sqlite(_type, _compiler, **_kw):  # type: ignore[no-untyped-def]
+    return "JSON"
 
 
 @pytest.fixture(scope="session")

@@ -93,8 +93,11 @@ class Settings(BaseSettings):
 
     # Feature flags
     feature_tailored_resume_agent: bool = False
-    feature_readiness_diagnostic: bool = False
-    feature_jd_decoder: bool = False
+    # Defaults flipped to True 2026-04-26 with the readiness workspace
+    # production refactor — these are no longer experimental. Set the env
+    # vars to "false" to use the legacy fallback paths.
+    feature_readiness_diagnostic: bool = True
+    feature_jd_decoder: bool = True
 
     # Chat attachments (P1-6). Local dev stores attachment bytes on disk under
     # `attachments_dir`; created lazily on first upload. In production this

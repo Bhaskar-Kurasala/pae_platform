@@ -107,6 +107,7 @@ def create_app() -> FastAPI:
     # API v1
     from app.api.v1.routes.admin import router as admin_router
     from app.api.v1.routes.agents import router as agents_router
+    from app.api.v1.routes.application_kit import router as application_kit_router
     from app.api.v1.routes.auth import router as auth_router
     from app.api.v1.routes.billing import router as billing_router
     from app.api.v1.routes.courses import router as courses_router
@@ -146,7 +147,13 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.mock_interview import router as mock_interview_router
     from app.api.v1.routes.tailored_resume import router as tailored_resume_router
     from app.api.v1.routes.jd_decoder import router as jd_decoder_router
-    from app.api.v1.routes.readiness import router as readiness_router
+    from app.api.v1.routes.readiness import (
+        overview_router as readiness_overview_router,
+        router as readiness_router,
+    )
+    from app.api.v1.routes.readiness_events import (
+        router as readiness_events_router,
+    )
     from app.api.v1.routes.resources import router as resources_router
     from app.api.v1.routes.practice import router as practice_router
 
@@ -191,6 +198,9 @@ def create_app() -> FastAPI:
         mock_interview_router,
         jd_decoder_router,
         readiness_router,
+        readiness_overview_router,
+        readiness_events_router,
+        application_kit_router,
         resources_router,
         practice_router,
     ]
