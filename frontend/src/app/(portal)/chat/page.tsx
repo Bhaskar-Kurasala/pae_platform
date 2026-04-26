@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { AlertTriangle, Archive, ArchiveRestore, ArrowDown, ArrowUp, AtSign, Bookmark, BookmarkCheck, BookOpen, Bot, BriefcaseBusiness, Check, ChevronLeft, ChevronRight, Clock, Code2, Copy, Download, FileCode, FileText, GraduationCap, ImageIcon, ListChecks, Lock, Menu, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Puzzle, RefreshCw, RotateCw, Search, Sparkles, Square, Timer, Trash2, User, X } from "lucide-react";
+import { AlertTriangle, Archive, ArchiveRestore, ArrowDown, ArrowUp, AtSign, Bookmark, BookmarkCheck, BookOpen, Bot, BriefcaseBusiness, Check, ChevronLeft, ChevronRight, Clock, Code2, Copy, Download, FileCode, FileText, GraduationCap, ImageIcon, ListChecks, Lock, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Puzzle, RefreshCw, RotateCw, Search, Sparkles, Square, Timer, Trash2, User, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MarkdownRenderer } from "@/components/features/markdown-renderer";
 import {
@@ -37,6 +37,7 @@ import { ChatSkeleton } from "./chat-skeleton";
 import { FeedbackControls } from "./feedback-controls";
 import { SaveNoteModal } from "@/components/features/notebook/save-note-modal";
 import { MakeFlashcardsModal } from "@/components/features/flashcards/make-flashcards-modal";
+import { TutorScreen } from "@/components/v8/screens/tutor-screen";
 import {
   getAgentLabel,
   getAgentGroups,
@@ -4319,93 +4320,61 @@ function ChatPageInner() {
     }
   };
 
+  // P-Tutor1 (2026-04-26) — `isEmpty` controls whether TutorScreen shows
+  // the editorial opener cards. We're empty when there's no active
+  // conversation AND no hydrated history — which matches "fresh thread,
+  // nothing typed yet". Once a stream starts, ChatArea owns the messages
+  // and the opener row collapses naturally on the next render.
+  const tutorIsEmpty =
+    activeConvId === null && (!hydratedMessages || hydratedMessages.length === 0);
+
+  // P-Tutor1 — opener click pre-fills the existing composer. ChatArea reads
+  // `initialInput` only on mount, so we bump `chatKey` to force a remount
+  // and seed the composer with the prompt text. Cheap (the page is empty
+  // when opener cards are visible, so there's no streaming state to lose).
+  const handleOpenerPrompt = (text: string) => {
+    setComposerInput(text);
+    setHydratedMessages(undefined);
+    setActiveConvId(null);
+    setChatKey((k) => k + 1);
+  };
+
   return (
-    <div className="flex h-full overflow-hidden bg-background">
-      {/* Desktop sidebar — unchanged visual layout */}
-      <aside className="hidden lg:flex flex-col w-64 xl:w-72 border-r bg-card/50 shrink-0">
-        <ChatSidebar {...sidebarProps} />
-      </aside>
-
-      {/* P2-6 — mobile drawer overlay. Only mounted while open so we
-          don't duplicate the sidebar DOM (the desktop `<aside>` above is
-          `hidden lg:flex` via CSS only — it is still in the DOM). The
-          `translate-x-*` classes drive the slide-in animation; hidden
-          entirely on desktop via `lg:hidden`. */}
-      {drawerOpen && (
-        <div
-          className="lg:hidden fixed inset-0 z-40"
-          data-testid="mobile-drawer-overlay"
-        >
-          {/* Backdrop — tap to close */}
-          <button
-            type="button"
-            aria-label="Close conversations"
-            onClick={() => setDrawerOpen(false)}
-            className="absolute inset-0 bg-black/50 transition-opacity duration-200"
-          />
-          {/* Slide-in drawer */}
-          <aside
-            data-testid="mobile-conversations-drawer"
-            onTouchStart={handleDrawerTouchStart}
-            onTouchEnd={handleDrawerTouchEnd}
-            className={cn(
-              "absolute left-0 top-0 h-full w-80 max-w-[85vw] border-r bg-card shadow-xl",
-              "transition-transform duration-200 ease-out will-change-transform translate-x-0",
-            )}
-          >
-            <ChatSidebar {...sidebarProps} />
-          </aside>
-        </div>
-      )}
-
-      <div className="flex flex-col flex-1 overflow-hidden min-w-0">
-        {/* Mobile top bar */}
-        <header className="lg:hidden flex items-center justify-between h-14 px-4 border-b bg-card/80 backdrop-blur shrink-0">
-          <div className="flex items-center gap-2">
-            {/* P2-6 — hamburger opens the conversations drawer */}
-            <button
-              type="button"
-              onClick={() => setDrawerOpen(true)}
-              aria-label="Open conversations"
-              className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground"
-            >
-              <Menu className="h-4 w-4" aria-hidden="true" />
-            </button>
-            <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
-              <Bot className="h-4 w-4 text-white" aria-hidden="true" />
-            </div>
-            <span className="font-semibold text-sm">AI Tutor</span>
-          </div>
-          <button onClick={handleNew} aria-label="New conversation" className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground">
-            <Plus className="h-4 w-4" aria-hidden="true" />
-          </button>
-        </header>
-
-        <div className="flex-1 overflow-hidden">
-          <ChatArea
-            key={chatKey}
-            mode={currentMode}
-            onFirstMessage={handleFirstMessage}
-            onConversationId={handleConversationId}
-            onModeChange={handleModeChange}
-            onRequestStartNew={handleRequestStartNew}
-            prefill={prefill}
-            initialMessages={hydratedMessages}
-            initialConversationId={activeConvId ?? undefined}
-            initialInput={composerInput}
-            onInputChange={setComposerInput}
-          />
-        </div>
-      </div>
+    <>
+      <TutorScreen
+        conversations={conversations}
+        conversationsLoading={conversationsLoading}
+        activeConversationId={activeConvId}
+        onSelectConversation={handleSelectConversation}
+        onNewConversation={handleNew}
+        mode={activeMode}
+        onModeChange={handleModeChange}
+        isEmpty={tutorIsEmpty}
+        onOpenerPrompt={handleOpenerPrompt}
+      >
+        <ChatArea
+          key={chatKey}
+          mode={currentMode}
+          onFirstMessage={handleFirstMessage}
+          onConversationId={handleConversationId}
+          onModeChange={handleModeChange}
+          onRequestStartNew={handleRequestStartNew}
+          prefill={prefill}
+          initialMessages={hydratedMessages}
+          initialConversationId={activeConvId ?? undefined}
+          initialInput={composerInput}
+          onInputChange={setComposerInput}
+        />
+      </TutorScreen>
 
       {/* P2-10 — confirm dialog for the composer's ⊕ "Start new conversation"
-          affordance. Rendered at the page root so it overlays the sidebar + the
-          transcript regardless of scroll position. */}
+          affordance. Rendered as a sibling so it overlays the editorial
+          shell + the transcript regardless of scroll position. */}
       <ConfirmStartNewDialog
         open={startNewOpen}
         onConfirm={handleConfirmStartNew}
         onCancel={handleCancelStartNew}
       />
-    </div>
+    </>
   );
 }
