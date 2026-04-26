@@ -140,6 +140,39 @@ export interface QuizGenerateResponse {
 }
 
 // P3-4 — notebook entry shape returned by the backend.
+export type NotebookGraduatedFilter = "all" | "graduated" | "in_review";
+export type NotebookSourceFilter = string | null;
+
+export interface NotebookSourceCount {
+  source: string;
+  count: number;
+}
+
+export interface NotebookSummaryResponse {
+  total: number;
+  graduated: number;
+  in_review: number;
+  graduation_percentage: number;
+  latest_graduated_at: string | null;
+  by_source: NotebookSourceCount[];
+  tags: string[];
+}
+
+export type WelcomePromptKind = "tutor" | "code" | "quiz" | "career" | "auto";
+export type ChatMode = "auto" | "tutor" | "code" | "career" | "quiz";
+
+export interface WelcomePromptItem {
+  text: string;
+  icon: string;
+  kind: WelcomePromptKind;
+  rationale: string;
+}
+
+export interface WelcomePromptsResponse {
+  mode: ChatMode;
+  prompts: WelcomePromptItem[];
+}
+
 export interface NotebookEntryOut {
   id: string;
   message_id: string;
@@ -149,8 +182,17 @@ export interface NotebookEntryOut {
   user_note: string | null;
   source_type: string | null;
   topic: string | null;
+  tags: string[];
   last_reviewed_at: string | null;
+  graduated_at: string | null;
   created_at: string;
+}
+
+// P-Today2 — `POST /chat/notebook/summarize` shape.
+export interface NoteSummarizeResponse {
+  summary: string;
+  suggested_tags: string[];
+  cached: boolean;
 }
 
 export const chatApi = {
@@ -214,6 +256,9 @@ export const chatApi = {
     );
   },
   // P3-4 — notebook: save / list / patch / delete / mark-reviewed bookmarked messages.
+  // P-Today2 — accepts an optional `userNote` (the rewritten note from
+  // SaveNoteModal) and `tags`. The raw assistant `content` is still saved
+  // alongside the rewrite so the detail drawer can show "Original".
   saveToNotebook: (entry: {
     messageId: string;
     conversationId: string;
@@ -221,6 +266,8 @@ export const chatApi = {
     title?: string;
     sourceType?: string;
     topic?: string;
+    userNote?: string;
+    tags?: string[];
   }) =>
     api.post<NotebookEntryOut>("/api/v1/chat/notebook", {
       message_id: entry.messageId,
@@ -229,11 +276,53 @@ export const chatApi = {
       title: entry.title ?? null,
       source_type: entry.sourceType ?? "chat",
       topic: entry.topic ?? null,
+      user_note: entry.userNote ?? null,
+      tags: entry.tags ?? [],
     }),
-  listNotebook: () => api.get<NotebookEntryOut[]>("/api/v1/chat/notebook"),
+  // P-Today2 — LLM summarization for the SaveNoteModal preview. Backend caches
+  // by (message_id, content_len) for 1h, so re-opening the modal on the same
+  // bubble is effectively free. Degrades to a head-of-text fallback on LLM
+  // failure — never throws so the modal can always render *something*.
+  summarizeForNotebook: (params: {
+    messageId: string;
+    content: string;
+    userQuestion?: string;
+  }) =>
+    api.post<NoteSummarizeResponse>("/api/v1/chat/notebook/summarize", {
+      message_id: params.messageId,
+      content: params.content,
+      user_question: params.userQuestion ?? null,
+    }),
+  listNotebook: (opts?: {
+    source?: string;
+    graduated?: NotebookGraduatedFilter;
+    tag?: string;
+    limit?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (opts?.source) params.set("source", opts.source);
+    if (opts?.graduated) params.set("graduated", opts.graduated);
+    if (opts?.tag) params.set("tag", opts.tag);
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    const qs = params.toString();
+    return api.get<NotebookEntryOut[]>(
+      `/api/v1/chat/notebook${qs ? `?${qs}` : ""}`,
+    );
+  },
+  notebookSummary: () =>
+    api.get<NotebookSummaryResponse>("/api/v1/chat/notebook/summary"),
+  welcomePrompts: (mode: ChatMode = "auto") =>
+    api.get<WelcomePromptsResponse>(
+      `/api/v1/chat/welcome-prompts?mode=${encodeURIComponent(mode)}`,
+    ),
   patchNotebookEntry: (
     entryId: string,
-    patch: { user_note?: string | null; title?: string | null; topic?: string | null },
+    patch: {
+      user_note?: string | null;
+      title?: string | null;
+      topic?: string | null;
+      tags?: string[] | null;
+    },
   ) => api.patch<NotebookEntryOut>(`/api/v1/chat/notebook/${entryId}`, patch),
   markNotebookReviewed: (entryId: string) =>
     api.post<NotebookEntryOut>(`/api/v1/chat/notebook/${entryId}/review`, {}),

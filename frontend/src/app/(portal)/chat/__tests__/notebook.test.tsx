@@ -16,6 +16,7 @@ import {
   type Mock,
 } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // ── Module mocks (hoisted) ───────────────────────────────────────
 
@@ -78,6 +79,10 @@ vi.mock("@/lib/chat-api", async () => {
       getMessage: vi.fn(),
       addFlashcards: vi.fn(),
       saveToNotebook: vi.fn(),
+      // P-Today2 — bookmark click now opens the SaveNoteModal which fires
+      // `summarizeForNotebook` immediately. Mock it so the modal can render
+      // its loading + summary states without a real network call.
+      summarizeForNotebook: vi.fn(),
       listNotebook: vi.fn(),
       deleteNotebookEntry: vi.fn(),
       getContextSuggestions: vi.fn(),
@@ -124,6 +129,7 @@ type ChatApiMock = {
   listConversations: Mock;
   getConversation: Mock;
   saveToNotebook: Mock;
+  summarizeForNotebook: Mock;
 };
 
 const mockedChatApi = chatApi as unknown as ChatApiMock;
@@ -192,6 +198,14 @@ describe("Chat page — P3-4 save to notebook", () => {
     mockedChatApi.listConversations.mockReset();
     mockedChatApi.getConversation.mockReset();
     mockedChatApi.saveToNotebook.mockReset();
+    mockedChatApi.summarizeForNotebook.mockReset();
+    // Default the summarize mock to a fast resolved value so the modal can
+    // render its post-summarize state in tests that don't override it.
+    mockedChatApi.summarizeForNotebook.mockResolvedValue({
+      summary: "- summary bullet",
+      suggested_tags: ["python"],
+      cached: false,
+    });
     mockToastSuccess.mockReset();
     mockToastError.mockReset();
     currentSearchParams = new URLSearchParams();
@@ -212,7 +226,19 @@ describe("Chat page — P3-4 save to notebook", () => {
     setSearchParamsFromPath("/chat?c=c1");
     mockedChatApi.listConversations.mockResolvedValue([makeConversation("c1")]);
     mockedChatApi.getConversation.mockResolvedValue(makeConversationDetail("c1"));
-    render(<ChatPage />);
+    // ChatSidebar fires `useDueCards` on render, so we need a QueryClient
+    // even before the SaveNoteModal's mutation kicks in.
+    const qc = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <ChatPage />
+      </QueryClientProvider>,
+    );
     await waitFor(() => {
       expect(screen.getByText("What are generators?")).toBeInTheDocument();
     });
@@ -227,7 +253,36 @@ describe("Chat page — P3-4 save to notebook", () => {
     expect(bookmarkBtns.length).toBeGreaterThan(0);
   });
 
-  it("calls saveToNotebook with the message id and content on click", async () => {
+  it("opens the SaveNoteModal on click and seeds the summarize call", async () => {
+    await renderHydrated();
+
+    const bookmarkBtn = await screen.findByRole("button", {
+      name: /save to notebook/i,
+    });
+    await act(async () => {
+      fireEvent.click(bookmarkBtn);
+    });
+
+    // Modal opens with the dialog title.
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: /save to notebook/i }),
+      ).toBeInTheDocument();
+    });
+
+    // Summarize is called immediately for the assistant message + question.
+    await waitFor(() => {
+      expect(mockedChatApi.summarizeForNotebook).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messageId: "m-asst-1",
+          content: "Generators are lazy iterators in Python.",
+          userQuestion: "What are generators?",
+        }),
+      );
+    });
+  });
+
+  it("clicking 'Save to notebook' inside the modal posts the rewritten note", async () => {
     mockedChatApi.saveToNotebook.mockResolvedValue({ id: "nb-1" });
     await renderHydrated();
 
@@ -236,31 +291,35 @@ describe("Chat page — P3-4 save to notebook", () => {
     });
     await act(async () => {
       fireEvent.click(bookmarkBtn);
+    });
+
+    // Wait for the modal's textarea to be populated by the summary.
+    const ta = (await screen.findByLabelText(
+      /your note/i,
+    )) as HTMLTextAreaElement;
+    await waitFor(() => expect(ta.value).toContain("summary bullet"));
+
+    // The chat bubble's bookmark button is also "Save to notebook" — scope the
+    // dialog's save button to the dialog role so we click the right one.
+    const dialog = await screen.findByRole("dialog");
+    const saveBtns = await screen.findAllByRole("button", {
+      name: /^save to notebook$/i,
+    });
+    const dialogSaveBtn = saveBtns.find((b) => dialog.contains(b));
+    expect(dialogSaveBtn).toBeDefined();
+    await act(async () => {
+      fireEvent.click(dialogSaveBtn!);
     });
 
     await waitFor(() => {
       expect(mockedChatApi.saveToNotebook).toHaveBeenCalledWith(
         expect.objectContaining({
           messageId: "m-asst-1",
-          content: "Generators are lazy iterators in Python.",
           conversationId: "c1",
+          content: "Generators are lazy iterators in Python.",
+          userNote: expect.stringContaining("summary bullet"),
         }),
       );
-    });
-  });
-
-  it("shows a success toast after saving to notebook", async () => {
-    mockedChatApi.saveToNotebook.mockResolvedValue({ id: "nb-1" });
-    await renderHydrated();
-
-    const bookmarkBtn = await screen.findByRole("button", {
-      name: /save to notebook/i,
-    });
-    await act(async () => {
-      fireEvent.click(bookmarkBtn);
-    });
-
-    await waitFor(() => {
       expect(mockToastSuccess).toHaveBeenCalledWith("Saved to notebook");
     });
   });

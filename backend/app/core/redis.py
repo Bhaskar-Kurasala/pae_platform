@@ -15,6 +15,7 @@ _KEY_CATEGORIES = frozenset(
         "courses",  # published course list cache
         "interview",  # mock-interview session store
         "quiz",  # pre-generated quiz versions keyed by message_id
+        "notebook",  # P-Today2: bookmark summarization cache by message_id
     }
 )
 

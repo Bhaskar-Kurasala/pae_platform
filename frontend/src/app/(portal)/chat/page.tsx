@@ -17,6 +17,7 @@ import {
 import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { exercisesApi, srsApi } from "@/lib/api-client";
 import { useDueCards } from "@/lib/hooks/use-srs";
+import { useWelcomePrompts } from "@/lib/hooks/use-welcome-prompts";
 import {
   chatApi,
   exportConversationMarkdown,
@@ -34,6 +35,7 @@ import {
 import { toast } from "@/lib/toast";
 import { ChatSkeleton } from "./chat-skeleton";
 import { FeedbackControls } from "./feedback-controls";
+import { SaveNoteModal } from "@/components/features/notebook/save-note-modal";
 import {
   getAgentLabel,
   getAgentGroups,
@@ -683,16 +685,31 @@ function ChatSidebar({
 }
 
 // ── Welcome screen ───────────────────────────────────────────────
-const SUGGESTED_PROMPTS = [
-  { text: "What is RAG and how does it work?",                    icon: "🔍" },
-  { text: "Review my Python code for production readiness",       icon: "🐍" },
-  { text: "Quiz me on LangGraph concepts",                        icon: "⚡" },
-  { text: "Help me build my AI engineering portfolio",            icon: "🚀" },
-  { text: "Explain the difference between ReAct and CoT",         icon: "🧠" },
-  { text: "How do I deploy a LangGraph agent to production?",     icon: "☁️" },
-];
+// Welcome prompts now come from `useWelcomePrompts(mode)` — the backend
+// personalizes them from the user's last lesson, last failed exercise,
+// last touched skill, and recent misconceptions. The hook ships a curated
+// fallback so anonymous / loading users still see something useful.
+function modeAgentToHookMode(
+  agentName: ModeAgent,
+): "auto" | "tutor" | "code" | "career" | "quiz" {
+  switch (agentName) {
+    case "socratic_tutor":
+      return "tutor";
+    case "coding_assistant":
+      return "code";
+    case "career_coach":
+      return "career";
+    case "adaptive_quiz":
+      return "quiz";
+    default:
+      return "auto";
+  }
+}
 
 function WelcomeScreen({ mode, onPrompt }: { mode: typeof MODES[number]; onPrompt: (text: string) => void }) {
+  const hookMode = modeAgentToHookMode(mode.agentName);
+  const { data: promptsData } = useWelcomePrompts(hookMode);
+  const prompts = promptsData.prompts;
   return (
     <div className="flex flex-col items-center justify-center h-full px-6 py-12 gap-8">
       <div className="relative">
@@ -716,11 +733,12 @@ function WelcomeScreen({ mode, onPrompt }: { mode: typeof MODES[number]; onPromp
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 w-full max-w-4xl">
-        {SUGGESTED_PROMPTS.map((p) => (
+        {prompts.map((p) => (
           <button
             key={p.text}
             onClick={() => onPrompt(p.text)}
             aria-label={`Suggested prompt: ${p.text}`}
+            data-prompt-rationale={p.rationale}
             className="group flex items-start gap-3 rounded-2xl border border-border/60 bg-card/80 px-4 py-3.5 text-left hover:border-primary/40 hover:bg-primary/5 hover:shadow-sm transition-all duration-150"
           >
             <span className="text-lg leading-none mt-0.5 shrink-0">{p.icon}</span>
@@ -2898,24 +2916,47 @@ function ChatArea({
   // P3-4 — tracks which message ids have been bookmarked this session.
   const [savedMessageIds, setSavedMessageIds] = useState<Set<string>>(new Set());
 
+  // P-Today2 (2026-04-26) — bookmark now opens the SaveNoteModal instead of
+  // firing an immediate POST. The modal handles summarization, edit, and the
+  // actual saveToNotebook call; it tells us via `onSaved` so we can mark the
+  // message as bookmarked in this session.
+  const [savePromptTarget, setSavePromptTarget] = useState<{
+    messageId: string;
+    content: string;
+    userQuestion: string | undefined;
+  } | null>(null);
+
   const handleSaveToNotebook = useCallback(
-    async (messageId: string, msgContent: string): Promise<void> => {
+    (messageId: string, msgContent: string): void => {
       if (!conversationId) return;
-      try {
-        await chatApi.saveToNotebook({
-          messageId,
-          conversationId,
-          content: msgContent,
-        });
-        setSavedMessageIds((prev) => new Set([...prev, messageId]));
-        toast.success("Saved to notebook");
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error("[chat] save to notebook failed", err);
-        toast.error("Could not save — try again");
+      // Find the immediately preceding user turn to give the summarizer
+      // (and the title heuristic) better context. Fall back to undefined
+      // when the assistant message is somehow first in the list.
+      const idx = messages.findIndex((m) => m.id === messageId);
+      let userQuestion: string | undefined;
+      for (let i = idx - 1; i >= 0; i--) {
+        if (messages[i]?.role === "user") {
+          userQuestion = messages[i]?.content;
+          break;
+        }
+      }
+      setSavePromptTarget({
+        messageId,
+        content: msgContent,
+        userQuestion,
+      });
+    },
+    [conversationId, messages],
+  );
+
+  const handleNoteSaved = useCallback(
+    (_entryId: string) => {
+      const target = savePromptTarget;
+      if (target) {
+        setSavedMessageIds((prev) => new Set([...prev, target.messageId]));
       }
     },
-    [conversationId],
+    [savePromptTarget],
   );
 
   // P3-3 — quiz panel state. Non-null when the quiz panel is open.
@@ -3327,6 +3368,20 @@ function ChatArea({
           panel={quizPanel}
           onClose={() => setQuizPanel(null)}
           onUpdatePanel={setQuizPanel}
+        />
+      )}
+
+      {savePromptTarget && conversationId && (
+        <SaveNoteModal
+          open={true}
+          onOpenChange={(next) => {
+            if (!next) setSavePromptTarget(null);
+          }}
+          messageId={savePromptTarget.messageId}
+          conversationId={conversationId}
+          content={savePromptTarget.content}
+          userQuestion={savePromptTarget.userQuestion}
+          onSaved={handleNoteSaved}
         />
       )}
 
