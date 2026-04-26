@@ -1,0 +1,1458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CareerForge — v2</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#0E0F0C; --ink-2:#1a1c18; --ink-3:#2a2d28;
+  --paper:#F7F3EC; --paper-2:#EFEADF; --paper-3:#E6DFD0;
+  --line:#D9D2C1; --line-2:#C9C0AC;
+  --mute:#6B6860; --mute-2:#9A958A;
+  --forest:#2A5D3F; --forest-2:#1D4A31; --forest-3:#3D7A53;
+  --moss:#D8E6D1; --moss-2:#E9F0E2;
+  --gold:#A8741F; --gold-2:#C89748; --gold-soft:#F4E6C4;
+  --rose:#8C3B2B;
+  --serif:'Fraunces',Georgia,serif;
+  --sans:'Inter',system-ui,sans-serif;
+  --mono:'JetBrains Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:var(--paper);font-family:var(--sans);font-size:14px;color:var(--ink);-webkit-font-smoothing:antialiased}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,textarea{font-family:inherit;color:inherit}
+
+/* SHELL */
+.shell{display:flex;height:100vh}
+.sb{width:232px;background:var(--ink);color:var(--paper);display:flex;flex-direction:column;flex-shrink:0;border-right:1px solid var(--ink-2)}
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+
+/* SIDEBAR */
+.sb-head{padding:22px 22px 18px;border-bottom:1px solid var(--ink-2)}
+.sb-logo{font-family:var(--serif);font-size:22px;font-weight:500;letter-spacing:-0.02em;line-height:1}
+.sb-logo i{font-style:italic;color:var(--forest-3)}
+.sb-tag{font-size:10px;letter-spacing:0.18em;text-transform:uppercase;color:var(--mute-2);margin-top:6px}
+.sb-nav{flex:1;overflow-y:auto;padding:16px 14px}
+.sb-group{font-size:10px;letter-spacing:0.18em;text-transform:uppercase;color:var(--mute-2);padding:14px 10px 6px}
+.sb-i{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:6px;font-size:13px;color:#b8b4a9;cursor:pointer;transition:all .15s}
+.sb-i:hover{background:rgba(255,255,255,.04);color:var(--paper)}
+.sb-i.on{background:rgba(255,255,255,.06);color:var(--paper)}
+.sb-i.on::before{content:"";width:3px;height:14px;background:var(--forest-3);border-radius:2px;position:absolute;margin-left:-14px}
+.sb-i{position:relative}
+.sb-i .dot{width:5px;height:5px;border-radius:50%;background:var(--gold-2);margin-left:auto}
+.sb-foot{padding:14px 16px;border-top:1px solid var(--ink-2)}
+.sb-role{padding:12px 14px;background:rgba(42,93,63,.18);border:1px solid rgba(61,122,83,.3);border-radius:10px;margin-bottom:12px;position:relative;overflow:hidden}
+.sb-role::before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 90% 0%,rgba(61,122,83,.25),transparent 60%);pointer-events:none}
+.sb-role-k{font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:var(--forest-3);margin-bottom:4px}
+.sb-role-n{font-family:var(--serif);font-size:17px;font-weight:500;letter-spacing:-0.01em;margin-bottom:3px}
+.sb-role-next{font-size:11px;color:#b8b4a9;display:flex;align-items:center;gap:5px}
+.sb-user{display:flex;align-items:center;gap:10px}
+.sb-av{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--forest-3),var(--gold-2));display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--ink)}
+.sb-user-n{font-size:12.5px;font-weight:600;color:var(--paper)}
+.sb-user-r{font-size:10.5px;color:var(--mute-2)}
+
+/* TOPBAR */
+.topbar{padding:18px 28px;border-bottom:1px solid var(--line);background:var(--paper);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.tb-l .eyebrow{font-size:10.5px;letter-spacing:0.2em;text-transform:uppercase;color:var(--mute);margin-bottom:4px}
+.tb-l h1{font-family:var(--serif);font-size:22px;font-weight:500;letter-spacing:-0.02em;line-height:1.1}
+.tb-l h1 i{font-style:italic;color:var(--forest)}
+.tb-r{display:flex;gap:8px;align-items:center}
+.chip{font-size:11px;padding:5px 11px;border-radius:20px;font-weight:500;letter-spacing:0.02em;border:1px solid var(--line)}
+.chip-forest{background:var(--moss-2);color:var(--forest-2);border-color:#b7cdb4}
+.chip-gold{background:var(--gold-soft);color:var(--gold);border-color:#e0ca94}
+.chip-ink{background:var(--paper-2);color:var(--ink-3);border-color:var(--line)}
+
+/* CONTENT */
+.screen{display:none;flex:1;overflow-y:auto}
+.screen.on{display:block}
+.pad{padding:28px 32px 48px;max-width:1280px}
+
+/* ── TODAY ─────────────────────────────── */
+.today-grid{display:grid;grid-template-columns:1fr 280px;gap:32px}
+.hero-quest{background:var(--ink);color:var(--paper);border-radius:20px;padding:32px 36px;position:relative;overflow:hidden;margin-bottom:24px}
+.hero-quest::before{content:"";position:absolute;top:-40%;right:-10%;width:60%;height:180%;background:radial-gradient(circle,rgba(61,122,83,.25),transparent 60%);pointer-events:none}
+.hq-eye{font-size:10.5px;letter-spacing:0.22em;text-transform:uppercase;color:var(--forest-3);margin-bottom:14px;display:flex;align-items:center;gap:10px}
+.hq-eye::before{content:"";width:24px;height:1px;background:var(--forest-3)}
+.hq-title{font-family:var(--serif);font-size:42px;font-weight:400;letter-spacing:-0.02em;line-height:1.05;margin-bottom:10px;max-width:560px}
+.hq-title i{font-style:italic;color:var(--forest-3)}
+.hq-sub{font-size:14px;color:#b8b4a9;max-width:480px;line-height:1.55;margin-bottom:24px}
+.hq-meta{display:flex;gap:20px;margin-bottom:28px;padding:14px 0;border-top:1px solid rgba(255,255,255,.08);border-bottom:1px solid rgba(255,255,255,.08)}
+.hq-m{display:flex;flex-direction:column;gap:2px}
+.hq-m-k{font-size:10px;letter-spacing:0.18em;text-transform:uppercase;color:var(--mute-2)}
+.hq-m-v{font-family:var(--serif);font-size:17px;font-weight:500;color:var(--paper)}
+.hq-cta{display:flex;gap:10px;align-items:center;position:relative;z-index:1}
+.btn{padding:11px 20px;border-radius:8px;font-size:13px;font-weight:600;letter-spacing:0.01em;transition:all .15s;display:inline-flex;align-items:center;gap:8px}
+.btn-forest{background:var(--forest-3);color:var(--paper)}
+.btn-forest:hover{background:var(--forest)}
+.btn-paper{background:var(--paper);color:var(--ink)}
+.btn-paper:hover{background:#fff}
+.btn-ghost-d{background:transparent;color:#b8b4a9;border:1px solid rgba(255,255,255,.14)}
+.btn-ghost-d:hover{background:rgba(255,255,255,.04);color:var(--paper)}
+.btn-ghost{background:transparent;color:var(--mute);border:1px solid var(--line)}
+.btn-ghost:hover{background:var(--paper-2)}
+.btn-ink{background:var(--ink);color:var(--paper)}
+
+.section-h{font-family:var(--serif);font-size:20px;font-weight:500;letter-spacing:-0.01em;margin-bottom:14px;display:flex;align-items:baseline;justify-content:space-between}
+.section-h .count{font-family:var(--sans);font-size:11px;color:var(--mute);font-weight:400;letter-spacing:0.1em;text-transform:uppercase}
+
+/* Rituals */
+.ritual-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:14px}
+.ritual-top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px}
+.ritual-k{font-size:10px;letter-spacing:0.2em;text-transform:uppercase;color:var(--forest);margin-bottom:5px;font-weight:600}
+.ritual-q{font-family:var(--serif);font-size:20px;font-weight:400;letter-spacing:-0.01em;line-height:1.3}
+.ritual-a{font-size:12.5px;color:var(--mute);margin-top:6px;line-height:1.5}
+.review-btns{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.rbtn{padding:10px;border-radius:8px;font-size:12px;font-weight:600;border:1px solid;letter-spacing:0.02em;transition:all .12s}
+.rbtn:hover{transform:translateY(-1px)}
+.rbtn-f{background:#fcf1ee;border-color:#e8c4bb;color:var(--rose)}
+.rbtn-h{background:var(--gold-soft);border-color:#e0ca94;color:var(--gold)}
+.rbtn-e{background:var(--moss-2);border-color:#b7cdb4;color:var(--forest)}
+
+/* Reflect */
+.mood-row{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+.mood{padding:7px 14px;border-radius:20px;font-size:12px;font-weight:500;border:1px solid var(--line);background:var(--paper);color:var(--mute);transition:all .12s}
+.mood.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.mood:hover:not(.on){border-color:var(--ink);color:var(--ink)}
+.rf-ta{width:100%;margin-top:12px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:13px;background:var(--paper-2);resize:none;height:60px}
+
+/* Right rail */
+.rail{display:flex;flex-direction:column;gap:20px}
+.rail-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+.rail-k{font-size:10px;letter-spacing:0.2em;text-transform:uppercase;color:var(--mute);margin-bottom:12px;font-weight:600}
+
+/* Goal ring */
+.goal-ring{display:flex;align-items:center;gap:14px}
+.ring{width:76px;height:76px;flex-shrink:0;position:relative}
+.ring svg{transform:rotate(-90deg)}
+.ring-n{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:20px;font-weight:500;color:var(--forest)}
+.goal-info .goal-r{font-family:var(--serif);font-size:16px;font-weight:500;letter-spacing:-0.01em}
+.goal-info .goal-d{font-size:11px;color:var(--mute);margin-top:2px}
+
+/* Streak garden */
+.garden{display:flex;align-items:flex-end;gap:4px;height:56px;margin-bottom:8px}
+.stalk{flex:1;background:linear-gradient(to top,var(--forest-3),var(--forest));border-radius:3px 3px 0 0;opacity:.9;position:relative}
+.stalk.off{background:var(--paper-3);opacity:.5}
+.stalk.today{background:linear-gradient(to top,var(--gold),var(--gold-2));box-shadow:0 0 0 2px rgba(200,151,72,.2)}
+.stalk-lbl{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font-size:9px;color:var(--mute-2);text-align:center}
+.streak-meta{font-size:11px;color:var(--mute);margin-top:8px;font-family:var(--serif);font-style:italic}
+
+/* Peers */
+.peers{display:flex;align-items:center;gap:-6px;margin-bottom:10px}
+.peer-av{width:26px;height:26px;border-radius:50%;border:2px solid #fff;background:var(--paper-3);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--ink);margin-left:-6px}
+.peer-av:first-child{margin-left:0}
+.peer-av.a{background:#d4c5a8}.peer-av.b{background:#b7cdb4}.peer-av.c{background:#e0ca94}.peer-av.d{background:#d4c4b8}
+.peer-t{font-size:12px;color:var(--ink);line-height:1.5}
+.peer-t b{font-weight:600}
+.peer-stuck{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:11px;color:var(--mute);line-height:1.5}
+
+/* ── DASHBOARD / CONSTELLATION ─────────── */
+.ladder-wrap{background:var(--ink);color:var(--paper);border-radius:20px;padding:36px 40px;margin-bottom:28px;position:relative;overflow:hidden}
+.ladder-wrap::before{content:"";position:absolute;inset:0;background:radial-gradient(ellipse at 20% 30%,rgba(61,122,83,.2),transparent 50%),radial-gradient(ellipse at 80% 80%,rgba(168,116,31,.12),transparent 50%);pointer-events:none}
+.lw-eye{font-size:10.5px;letter-spacing:0.22em;text-transform:uppercase;color:var(--forest-3);margin-bottom:12px}
+.lw-h{font-family:var(--serif);font-size:32px;font-weight:400;letter-spacing:-0.02em;line-height:1.15;max-width:620px;margin-bottom:6px}
+.lw-h i{font-style:italic;color:var(--forest-3)}
+.lw-sub{font-size:13px;color:#b8b4a9;max-width:540px;margin-bottom:36px}
+.constellation{position:relative;height:180px;margin:0 -8px}
+.c-line{position:absolute;top:50%;left:0;right:0;height:1px;background:repeating-linear-gradient(to right,rgba(255,255,255,.15) 0 6px,transparent 6px 12px)}
+.c-line-fill{position:absolute;top:50%;left:0;height:1px;background:var(--forest-3);width:17%}
+.c-stars{position:relative;display:flex;justify-content:space-between;align-items:center;padding-top:50px}
+.cstar{position:relative;display:flex;flex-direction:column;align-items:center;flex:1}
+.cnode{width:54px;height:54px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:18px;font-weight:500;position:relative;z-index:1;transition:all .2s}
+.cnode.done{background:var(--forest-3);color:var(--paper)}
+.cnode.now{background:var(--paper);color:var(--ink);box-shadow:0 0 0 1px var(--paper),0 0 0 6px rgba(247,243,236,.18),0 0 40px rgba(247,243,236,.3)}
+.cnode.next{background:transparent;color:var(--paper);border:1px solid rgba(247,243,236,.4)}
+.cnode.locked{background:transparent;color:rgba(247,243,236,.3);border:1px dashed rgba(247,243,236,.15)}
+.cnode.goal{background:var(--gold-2);color:var(--ink);box-shadow:0 0 24px rgba(200,151,72,.4)}
+.cstar-l{margin-top:14px;text-align:center;font-family:var(--serif);font-size:13px;font-weight:500;letter-spacing:-0.01em;line-height:1.25}
+.cstar-l.muted{color:rgba(247,243,236,.4)}
+.cstar-l.gold{color:var(--gold-2)}
+.cstar-sub{font-size:9.5px;letter-spacing:0.15em;text-transform:uppercase;color:var(--mute-2);margin-top:3px}
+
+/* Dashboard second row */
+.d-row{display:grid;grid-template-columns:2fr 1fr;gap:20px;margin-bottom:24px}
+.d-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 24px}
+.d-card-h{font-family:var(--serif);font-size:18px;font-weight:500;letter-spacing:-0.01em;margin-bottom:4px}
+.d-card-s{font-size:12px;color:var(--mute);margin-bottom:16px}
+.skill-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}
+.skill-tile{padding:10px 12px;border-radius:10px;background:var(--paper-2);border:1px solid var(--line);font-size:11.5px;position:relative;overflow:hidden}
+.skill-tile.lit{background:var(--moss-2);border-color:#b7cdb4}
+.skill-tile.dim{opacity:.5;filter:blur(.4px)}
+.skill-n{font-weight:600;color:var(--ink);margin-bottom:4px}
+.skill-meta{font-size:10px;color:var(--mute);letter-spacing:0.04em}
+.skill-lit-dot{position:absolute;top:8px;right:8px;width:6px;height:6px;border-radius:50%;background:var(--forest-3)}
+
+.mentor-list{display:flex;flex-direction:column;gap:2px}
+.mentor-r{display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid var(--line)}
+.mentor-r:last-child{border-bottom:none}
+.mentor-dot{width:34px;height:34px;border-radius:10px;background:var(--paper-2);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.mentor-n{font-family:var(--serif);font-size:15px;font-weight:500;letter-spacing:-0.01em}
+.mentor-d{font-size:11.5px;color:var(--mute);margin-top:1px;line-height:1.4}
+
+/* Stats strip */
+.stat-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:24px}
+.stat-cell{background:#fff;padding:18px 22px}
+.stat-k{font-size:10px;letter-spacing:0.2em;text-transform:uppercase;color:var(--mute);margin-bottom:8px;font-weight:600}
+.stat-v{font-family:var(--serif);font-size:28px;font-weight:500;letter-spacing:-0.02em;line-height:1}
+.stat-t{font-size:11px;color:var(--forest);margin-top:4px;font-weight:500}
+
+/* ── MY PATH ──────────────────────────── */
+.path-wrap{max-width:920px}
+.level-block{margin-bottom:28px}
+.level-header{display:flex;align-items:flex-start;gap:18px;margin-bottom:14px}
+.level-chip{width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:22px;font-weight:500;flex-shrink:0}
+.level-chip.now{background:var(--ink);color:var(--paper);box-shadow:0 0 0 4px var(--moss)}
+.level-chip.locked{background:var(--paper-2);color:var(--mute-2);border:1px dashed var(--line-2)}
+.level-chip.goal{background:var(--gold-2);color:var(--ink)}
+.level-meta{flex:1;padding-top:4px}
+.level-eye{font-size:10px;letter-spacing:0.2em;text-transform:uppercase;color:var(--mute);margin-bottom:4px;font-weight:600}
+.level-eye.active{color:var(--forest)}
+.level-eye.gold{color:var(--gold)}
+.level-t{font-family:var(--serif);font-size:24px;font-weight:500;letter-spacing:-0.02em;line-height:1.1}
+.level-t.muted{color:var(--mute-2)}
+.level-t.gold{color:var(--gold)}
+.level-d{font-size:12.5px;color:var(--mute);margin-top:4px;max-width:540px;line-height:1.5}
+.level-pct{text-align:right;font-family:var(--serif);font-size:24px;font-weight:500;color:var(--forest);letter-spacing:-0.02em}
+.level-pct-sub{font-size:10px;color:var(--mute);letter-spacing:0.1em;text-transform:uppercase;margin-top:2px}
+
+.level-body{margin-left:74px;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.lesson{display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:1px solid var(--line)}
+.lesson:last-of-type{border-bottom:none}
+.lesson.active-l{background:linear-gradient(90deg,var(--moss-2),transparent)}
+.l-marker{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:10px;font-weight:700}
+.l-marker.done{background:var(--forest-3);color:var(--paper)}
+.l-marker.now{background:var(--ink);color:var(--paper)}
+.l-marker.up{border:1px dashed var(--line-2);color:var(--mute-2)}
+.l-title{flex:1;font-size:14px;font-weight:500}
+.l-title.done{color:var(--mute-2);text-decoration:line-through;text-decoration-color:var(--mute-2)}
+.l-title.now{font-weight:600}
+.l-title.up{color:var(--mute)}
+.l-meta{font-size:11px;color:var(--mute);letter-spacing:0.04em}
+.l-tag{font-size:9.5px;padding:3px 8px;border-radius:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase}
+.l-tag.req{background:var(--moss);color:var(--forest)}
+.l-tag.opt{background:var(--paper-2);color:var(--mute)}
+
+.capstone-band{background:linear-gradient(90deg,var(--gold-soft),transparent);padding:16px 22px;display:flex;align-items:center;gap:14px;border-top:1px solid var(--line)}
+.cb-star{width:28px;height:28px;border-radius:50%;background:var(--gold-2);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--ink);font-family:var(--serif);font-size:14px;font-weight:600}
+.cb-info{flex:1}
+.cb-t{font-family:var(--serif);font-size:15px;font-weight:500;color:var(--ink)}
+.cb-s{font-size:11.5px;color:var(--gold);margin-top:2px}
+.cb-btn{padding:8px 14px;background:var(--ink);color:var(--paper);border-radius:7px;font-size:11.5px;font-weight:600}
+
+/* Blurred future preview */
+.future-preview{margin-left:74px;background:var(--paper-2);border:1px solid var(--line);border-radius:12px;padding:22px 24px;position:relative;overflow:hidden}
+.future-preview::after{content:"";position:absolute;inset:0;background:linear-gradient(to bottom,transparent 0%,transparent 30%,var(--paper-2) 95%);pointer-events:none}
+.fp-peek{font-family:var(--serif);font-size:14px;color:var(--ink-3);line-height:1.5;max-width:540px;filter:blur(0.6px);opacity:.75}
+.fp-cta{margin-top:14px;font-size:11.5px;color:var(--forest);font-weight:600;letter-spacing:0.02em;position:relative;z-index:1}
+
+/* ── STUDIO ───────────────────────────── */
+.studio-grid{display:grid;grid-template-columns:1fr 340px;flex:1;overflow:hidden;height:100%}
+.editor{background:#0b0d0a;color:#dcd8cf;display:flex;flex-direction:column;overflow:hidden;font-family:var(--mono)}
+.ed-bar{padding:12px 20px;border-bottom:1px solid #1a1c18;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.ed-tabs{display:flex;gap:4px}
+.ed-tab{padding:6px 12px;border-radius:6px;font-size:11.5px;font-family:var(--sans);color:#7a7a70;font-weight:500;cursor:pointer}
+.ed-tab.on{background:#1a1c18;color:#dcd8cf}
+.ed-actions{display:flex;gap:8px}
+.edb{padding:6px 12px;border-radius:6px;font-size:11.5px;font-family:var(--sans);font-weight:600}
+.edb-rev{background:transparent;color:#b7cdb4;border:1px solid #2a4a38}
+.edb-run{background:var(--forest-3);color:var(--paper)}
+.ed-files{padding:8px 20px;border-bottom:1px solid #1a1c18;display:flex;gap:14px;flex-shrink:0;font-size:11px;font-family:var(--sans)}
+.ed-file{color:#55544c;cursor:pointer;display:flex;align-items:center;gap:6px}
+.ed-file.on{color:#dcd8cf}
+.ed-file .mod{width:4px;height:4px;border-radius:50%;background:var(--gold-2)}
+.code{flex:1;overflow-y:auto;padding:18px 22px;font-size:12.5px;line-height:1.85}
+.cl{display:flex;gap:18px}
+.cn{color:#2d2f28;min-width:22px;text-align:right;user-select:none;font-size:11px}
+.cx{flex:1}
+.k{color:#c69ef0}.s{color:#a8d985}.fn{color:#8fb7e0}.cm{color:#45473e;font-style:italic}.nm{color:#e0a875}.vr{color:#dcd8cf}
+
+.ed-foot{border-top:1px solid #1a1c18;flex-shrink:0}
+.ed-foot-tabs{display:flex;padding:0 20px;font-family:var(--sans);gap:0}
+.eft{padding:9px 14px;font-size:11px;color:#55544c;border-bottom:2px solid transparent;font-weight:500;cursor:pointer}
+.eft.on{color:#b7cdb4;border-color:#3d7a53}
+.ed-out{padding:14px 20px;font-size:11.5px;color:#a8d985;line-height:1.6;min-height:70px;font-family:var(--mono)}
+
+/* Tutor */
+.tutor{background:#fff;border-left:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden}
+.tt-head{padding:16px 18px;border-bottom:1px solid var(--line);flex-shrink:0}
+.tt-mode-sel{display:flex;gap:4px;padding:4px;background:var(--paper-2);border-radius:8px;margin-top:10px}
+.tt-mode{flex:1;padding:7px;font-size:11px;font-weight:600;text-align:center;border-radius:6px;color:var(--mute);cursor:pointer;transition:all .1s}
+.tt-mode.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.tt-title{font-family:var(--serif);font-size:16px;font-weight:500;letter-spacing:-0.01em}
+.tt-sub{font-size:11.5px;color:var(--mute);margin-top:2px}
+.tt-body{flex:1;overflow-y:auto;padding:18px}
+.score-card{background:var(--moss-2);border:1px solid #b7cdb4;border-radius:12px;padding:16px 18px;margin-bottom:20px;display:flex;align-items:center;gap:16px}
+.sc-n{font-family:var(--serif);font-size:38px;font-weight:500;color:var(--forest-2);letter-spacing:-0.03em;line-height:1}
+.sc-r{flex:1}
+.sc-k{font-size:10.5px;letter-spacing:0.15em;text-transform:uppercase;color:var(--forest);font-weight:600}
+.sc-d{font-size:12px;color:var(--forest-2);margin-top:4px;line-height:1.4}
+.rev-sec{margin-bottom:20px}
+.rev-k{font-family:var(--serif);font-size:14px;font-weight:500;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.rev-k::before{content:"";width:3px;height:14px;border-radius:2px}
+.rev-k.good::before{background:var(--forest-3)}
+.rev-k.warn::before{background:var(--gold-2)}
+.rev-k.todo::before{background:var(--ink)}
+.rev-item{padding:10px 0;border-bottom:1px solid var(--paper-2);font-size:12.5px;line-height:1.5;color:var(--ink-3)}
+.rev-item:last-child{border-bottom:none}
+.rev-item code{font-family:var(--mono);font-size:11px;background:var(--paper-2);padding:1px 5px;border-radius:3px}
+.tt-input{border-top:1px solid var(--line);padding:12px 14px;flex-shrink:0}
+.tt-ta{width:100%;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:12.5px;background:var(--paper-2);resize:none;height:56px}
+
+/* ── INTERVIEW (BOSS FIGHT) ───────────── */
+.boss-card{background:var(--ink);color:var(--paper);border-radius:22px;padding:48px 52px;position:relative;overflow:hidden;margin-bottom:28px;border:1px solid var(--ink-3)}
+.boss-card::before{content:"";position:absolute;inset:0;background:radial-gradient(ellipse at 100% 0%,rgba(200,151,72,.2),transparent 60%),radial-gradient(ellipse at 0% 100%,rgba(42,93,63,.25),transparent 60%);pointer-events:none}
+.boss-eye{font-size:10.5px;letter-spacing:0.24em;text-transform:uppercase;color:var(--gold-2);margin-bottom:16px;display:flex;align-items:center;gap:12px}
+.boss-eye::before{content:"";width:32px;height:1px;background:var(--gold-2)}
+.boss-t{font-family:var(--serif);font-size:52px;font-weight:400;letter-spacing:-0.03em;line-height:1;margin-bottom:14px;max-width:620px}
+.boss-t i{font-style:italic;color:var(--gold-2)}
+.boss-s{font-size:15px;color:#b8b4a9;line-height:1.6;max-width:560px;margin-bottom:36px}
+.checklist{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:22px 26px;margin-bottom:28px;max-width:640px}
+.cl-k{font-size:10.5px;letter-spacing:0.2em;text-transform:uppercase;color:var(--mute-2);margin-bottom:14px;font-weight:600}
+.cl-row{display:flex;align-items:center;gap:14px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:13.5px}
+.cl-row:last-child{border-bottom:none}
+.cl-check{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700}
+.cl-check.on{background:var(--forest-3);color:var(--paper)}
+.cl-check.off{background:transparent;border:1px dashed rgba(255,255,255,.25);color:var(--mute-2)}
+.cl-label{flex:1;color:var(--paper)}
+.cl-label.off{color:var(--mute-2)}
+.cl-sub{font-size:11px;color:var(--mute-2);margin-top:2px}
+
+.boss-cta{display:flex;gap:12px;align-items:center;position:relative;z-index:1}
+.btn-gold{background:var(--gold-2);color:var(--ink);padding:14px 24px;border-radius:9px;font-size:14px;font-weight:700;letter-spacing:0.01em}
+.btn-gold:hover{background:var(--gold-soft)}
+.btn-gold.disabled{opacity:.35;cursor:not-allowed}
+
+.itabs{display:flex;gap:4px;padding:4px;background:var(--paper-2);border-radius:10px;width:fit-content;margin-bottom:20px}
+.itab{padding:9px 18px;font-size:12.5px;font-weight:600;border-radius:7px;color:var(--mute);cursor:pointer}
+.itab.on{background:var(--ink);color:var(--paper)}
+
+.practice-list{display:flex;flex-direction:column;gap:8px}
+.practice-row{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 20px;display:flex;align-items:center;gap:14px;transition:all .15s}
+.practice-row:hover{border-color:var(--ink-3)}
+.pr-n{font-family:var(--serif);font-size:16px;font-weight:500;letter-spacing:-0.01em}
+.pr-s{font-size:11.5px;color:var(--mute);margin-top:2px}
+
+/* WIN */
+.win-wrap{max-width:720px;margin:0 auto}
+.win-top{background:var(--ink);color:var(--paper);padding:60px 48px;text-align:center;border-radius:22px 22px 0 0;position:relative;overflow:hidden}
+.win-top::before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 50% 0%,rgba(200,151,72,.25),transparent 55%)}
+.win-seal{width:92px;height:92px;border-radius:50%;background:linear-gradient(135deg,var(--gold-2),var(--gold));margin:0 auto 24px;display:flex;align-items:center;justify-content:center;position:relative;z-index:1;box-shadow:0 0 40px rgba(200,151,72,.3)}
+.win-eye{font-size:11px;letter-spacing:0.24em;text-transform:uppercase;color:var(--gold-2);margin-bottom:14px;position:relative;z-index:1}
+.win-h{font-family:var(--serif);font-size:44px;font-weight:400;letter-spacing:-0.02em;line-height:1.1;margin-bottom:14px;position:relative;z-index:1}
+.win-h i{font-style:italic;color:var(--gold-2)}
+.win-d{font-size:14px;color:#b8b4a9;max-width:440px;margin:0 auto;line-height:1.65;position:relative;z-index:1}
+.win-body{background:#fff;padding:36px 44px;border-radius:0 0 22px 22px;border:1px solid var(--line);border-top:none}
+.win-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-bottom:28px;padding-bottom:28px;border-bottom:1px solid var(--line)}
+.ws-v{font-family:var(--serif);font-size:28px;font-weight:500;letter-spacing:-0.02em;line-height:1}
+.ws-k{font-size:11px;color:var(--mute);margin-top:6px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600}
+.win-actions{display:flex;gap:10px;flex-wrap:wrap}
+
+/* ── PROGRESS TIMELINE ────────────────── */
+.tl-wrap{max-width:860px;position:relative}
+.tl-stem{position:absolute;left:28px;top:60px;bottom:60px;width:1px;background:var(--line)}
+.tl-stem-fill{position:absolute;left:0;top:0;width:1px;background:var(--forest-3);height:12%}
+.tl-row{display:flex;gap:24px;margin-bottom:20px;position:relative;align-items:flex-start}
+.tl-mark{width:56px;display:flex;justify-content:center;flex-shrink:0;padding-top:12px}
+.tl-dot{width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:20px;font-weight:500;background:#fff;border:1px solid var(--line);position:relative;z-index:1}
+.tl-dot.done{background:var(--forest-3);color:var(--paper);border-color:var(--forest-3)}
+.tl-dot.now{background:var(--ink);color:var(--paper);border-color:var(--ink);box-shadow:0 0 0 6px var(--moss-2)}
+.tl-dot.future{color:var(--mute-2);background:var(--paper-2);border-style:dashed}
+.tl-dot.goal{background:var(--gold-2);color:var(--ink);border-color:var(--gold-2)}
+.tl-body{flex:1;padding:12px 0}
+.tl-role{font-family:var(--serif);font-size:22px;font-weight:500;letter-spacing:-0.02em}
+.tl-role.muted{color:var(--mute-2)}
+.tl-role.gold{color:var(--gold)}
+.tl-st{font-size:11.5px;margin-top:4px;font-weight:500;letter-spacing:0.02em}
+.tl-st.done{color:var(--forest)}
+.tl-st.now{color:var(--ink)}
+.tl-st.future{color:var(--mute-2)}
+.tl-skills{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}
+.tl-sk{font-size:10.5px;padding:3px 9px;border-radius:10px;font-weight:500}
+.tl-sk.e{background:var(--moss-2);color:var(--forest)}
+.tl-sk.f{background:var(--paper-2);color:var(--mute-2)}
+
+/* ── JOB READINESS ────────────────────── */
+.jr-hero{background:#fff;border:1px solid var(--line);border-radius:18px;padding:32px 36px;margin-bottom:22px;display:flex;gap:40px;align-items:center}
+.jr-ring{width:130px;height:130px;flex-shrink:0;position:relative}
+.jr-ring-n{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.jr-n{font-family:var(--serif);font-size:38px;font-weight:500;color:var(--forest);letter-spacing:-0.03em;line-height:1}
+.jr-pct{font-size:9.5px;letter-spacing:0.2em;text-transform:uppercase;color:var(--mute);margin-top:4px;font-weight:600}
+.jr-info{flex:1}
+.jr-h{font-family:var(--serif);font-size:22px;font-weight:500;letter-spacing:-0.02em;margin-bottom:6px}
+.jr-s{font-size:13px;color:var(--mute);line-height:1.5;margin-bottom:14px;max-width:480px}
+.jr-hint{font-size:12px;color:var(--forest);font-weight:500;padding:10px 14px;background:var(--moss-2);border-radius:8px;display:inline-block}
+
+.tools{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:22px}
+.tool{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 22px;cursor:pointer;transition:all .15s}
+.tool:hover{border-color:var(--ink-3);transform:translateY(-2px)}
+.tool-ic{width:40px;height:40px;border-radius:10px;background:var(--paper-2);display:flex;align-items:center;justify-content:center;margin-bottom:14px;font-family:var(--serif);font-size:18px;color:var(--ink);font-weight:600}
+.tool-n{font-family:var(--serif);font-size:16px;font-weight:500;letter-spacing:-0.01em;margin-bottom:4px}
+.tool-s{font-size:12px;color:var(--mute);line-height:1.45}
+.tool-foot{margin-top:16px;padding-top:12px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;font-size:11px}
+.tool-tag{color:var(--forest);font-weight:600;letter-spacing:0.04em}
+.tool-go{color:var(--mute);font-weight:600}
+
+.jr-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.resume{background:#fff;border:1px solid var(--line);border-radius:14px;padding:24px 26px}
+.res-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+.res-n{font-family:var(--serif);font-size:20px;font-weight:500;letter-spacing:-0.02em}
+.res-r{font-size:12px;color:var(--forest);font-weight:500;margin-top:2px}
+.res-sec{font-size:10px;letter-spacing:0.2em;text-transform:uppercase;color:var(--mute);margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--line);font-weight:600;margin-top:16px}
+.res-sec:first-of-type{margin-top:0}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.sk{font-size:11px;padding:4px 10px;border-radius:12px;font-weight:500}
+.sk.earned{background:var(--moss-2);color:var(--forest);border:1px solid #b7cdb4}
+.sk.man{background:var(--paper-2);color:var(--mute);border:1px solid var(--line)}
+
+.jd{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.jd-h{padding:18px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+.jd-t{font-family:var(--serif);font-size:17px;font-weight:500;letter-spacing:-0.02em}
+.jd-score{padding:20px 22px;display:flex;align-items:baseline;gap:14px;border-bottom:1px solid var(--line)}
+.jd-n{font-family:var(--serif);font-size:46px;font-weight:500;color:var(--forest);letter-spacing:-0.03em;line-height:1}
+.jd-role{font-family:var(--serif);font-size:15px;font-weight:500}
+.jd-co{font-size:11.5px;color:var(--mute);margin-top:2px}
+.jd-bar{height:5px;margin:16px 22px;background:var(--paper-2);border-radius:3px;overflow:hidden}
+.jd-fill{height:100%;background:var(--forest-3);border-radius:3px}
+.jd-gaps{padding:0 22px 20px}
+.jd-gk{font-size:10px;letter-spacing:0.2em;text-transform:uppercase;color:var(--mute);margin-bottom:10px;font-weight:600}
+.jd-g{padding:8px 0;font-size:12.5px;color:var(--ink-3);display:flex;gap:10px;align-items:flex-start;line-height:1.5}
+.jd-g .dot{width:6px;height:6px;border-radius:50%;background:var(--gold-2);margin-top:6px;flex-shrink:0}
+.jd-input{padding:16px 22px;border-top:1px solid var(--line)}
+.jd-ta{width:100%;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:12.5px;background:var(--paper-2);resize:none;height:70px}
+
+/* ── NOTEBOOK ─────────────────────────── */
+.nb-wrap{max-width:820px}
+.nb-filter{display:flex;gap:8px;margin-bottom:20px}
+.nb-f{padding:8px 14px;border-radius:8px;font-size:12px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--mute);cursor:pointer}
+.nb-f.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.note{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 26px;margin-bottom:14px}
+.note-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;font-size:10.5px;letter-spacing:0.12em;text-transform:uppercase}
+.note-src{color:var(--forest);font-weight:600;display:flex;align-items:center;gap:8px}
+.note-src .tag{background:var(--moss-2);padding:3px 8px;border-radius:8px;letter-spacing:0.04em;text-transform:none}
+.note-src .tag.blue{background:#e8eef3;color:#3a5a7a}
+.note-date{color:var(--mute-2);font-weight:400;letter-spacing:0.04em}
+.note-body{font-family:var(--serif);font-size:16px;font-weight:400;line-height:1.55;color:var(--ink);margin-bottom:16px;letter-spacing:-0.005em}
+.note-body code{font-family:var(--mono);font-size:12.5px;background:var(--paper-2);padding:1px 6px;border-radius:4px;font-weight:500}
+.take-k{font-size:10px;letter-spacing:0.2em;text-transform:uppercase;color:var(--mute);margin-bottom:6px;font-weight:600}
+.take-in{width:100%;border:1px dashed var(--line-2);border-radius:7px;padding:9px 12px;font-size:13px;background:var(--paper-2);color:var(--ink)}
+.take-in:focus{border-color:var(--forest);outline:none;background:#fff}
+
+/* EXERCISES */
+.ex-hero{background:#fff;border:1px solid var(--line);border-radius:16px;padding:28px 30px;margin-bottom:20px;border-left:4px solid var(--gold-2)}
+.ex-eye{font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:var(--gold);margin-bottom:8px;font-weight:600}
+.ex-t{font-family:var(--serif);font-size:24px;font-weight:500;letter-spacing:-0.02em;margin-bottom:6px}
+.ex-s{font-size:12.5px;color:var(--mute);margin-bottom:18px;line-height:1.5}
+.ex-row{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px 22px;display:flex;align-items:center;gap:16px;margin-bottom:8px}
+.ex-row-t{font-family:var(--serif);font-size:15px;font-weight:500;letter-spacing:-0.01em}
+.ex-row-s{font-size:11.5px;color:var(--mute);margin-top:2px}
+
+/* ── SCROLLBAR ────────────────────────── */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--line-2)}
+
+/* ── ANIMATIONS ───────────────────────── */
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.screen.on .pad{animation:fadeUp .3s ease}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(200,151,72,.4)}50%{box-shadow:0 0 0 8px rgba(200,151,72,0)}}
+
+/* TWEAKS PANEL */
+.tweaks{position:fixed;bottom:20px;right:20px;background:var(--ink);color:var(--paper);border-radius:14px;padding:16px 18px;width:240px;display:none;z-index:100;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.tweaks.open{display:block}
+.tw-h{font-family:var(--serif);font-size:15px;font-weight:500;margin-bottom:12px}
+.tw-row{margin-bottom:12px}
+.tw-k{font-size:10px;letter-spacing:0.15em;text-transform:uppercase;color:var(--mute-2);margin-bottom:6px;font-weight:600}
+.tw-opts{display:flex;gap:4px;flex-wrap:wrap}
+.tw-opt{padding:5px 10px;border-radius:6px;font-size:11px;background:rgba(255,255,255,.08);color:var(--paper);cursor:pointer;font-weight:500}
+.tw-opt.on{background:var(--forest-3)}
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <!-- SIDEBAR -->
+  <aside class="sb">
+    <div class="sb-head">
+      <div class="sb-logo">Career<i>Forge</i></div>
+      <div class="sb-tag">Become. Don't just learn.</div>
+    </div>
+    <nav class="sb-nav">
+      <div class="sb-group">Daily</div>
+      <div class="sb-i on" data-s="today">Today<span class="dot"></span></div>
+      <div class="sb-i" data-s="dashboard">Career map</div>
+      <div class="sb-i" data-s="mypath">My path</div>
+
+      <div class="sb-group">Practice</div>
+      <div class="sb-i" data-s="studio">Studio</div>
+      <div class="sb-i" data-s="exercises">Exercises</div>
+
+      <div class="sb-group">Advance</div>
+      <div class="sb-i" data-s="interview">Promotion</div>
+      <div class="sb-i" data-s="progress">Timeline</div>
+
+      <div class="sb-group">Career</div>
+      <div class="sb-i" data-s="career">Job readiness</div>
+      <div class="sb-i" data-s="notebook">Notebook</div>
+    </nav>
+    <div class="sb-foot">
+      <div class="sb-role">
+        <div class="sb-role-k">You are</div>
+        <div class="sb-role-n">Python Developer</div>
+        <div class="sb-role-next">→ Data Analyst · 58d</div>
+      </div>
+      <div class="sb-user">
+        <div class="sb-av">RR</div>
+        <div>
+          <div class="sb-user-n">Raja Raje</div>
+          <div class="sb-user-r">Level 1 · 33% to promo</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <section class="main">
+
+    <!-- ═══ TODAY ═══ -->
+    <div class="screen on" id="s-today" data-screen-label="01 Today">
+      <div class="topbar">
+        <div class="tb-l">
+          <div class="eyebrow">Thursday · April 23</div>
+          <h1>Good evening, Raja. Three lessons stand between you and <i>Data Analyst</i>.</h1>
+        </div>
+        <div class="tb-r">
+          <span class="chip chip-forest">Day 3 of streak</span>
+          <span class="chip chip-gold">7 reviews due</span>
+        </div>
+      </div>
+      <div class="pad">
+        <div class="today-grid">
+          <div>
+            <!-- HERO QUEST -->
+            <div class="hero-quest">
+              <div class="hq-eye">Today's focus · Lesson 3 of 6</div>
+              <div class="hq-title">APIs &amp; <i>async</i> programming.</div>
+              <div class="hq-sub">This is the lesson that unlocks your capstone. You'll send your first real API call and make it non-blocking. 42 learners are on this lesson right now.</div>
+              <div class="hq-meta">
+                <div class="hq-m"><div class="hq-m-k">Time</div><div class="hq-m-v">45 min</div></div>
+                <div class="hq-m"><div class="hq-m-k">Skill gained</div><div class="hq-m-v">async / await</div></div>
+                <div class="hq-m"><div class="hq-m-k">Progress</div><div class="hq-m-v">33% → 50%</div></div>
+                <div class="hq-m"><div class="hq-m-k">Capstone fit</div><div class="hq-m-v">Core</div></div>
+              </div>
+              <div class="hq-cta">
+                <button class="btn btn-forest" onclick="nav('studio')">Begin lesson →</button>
+                <button class="btn btn-ghost-d">View plan</button>
+              </div>
+            </div>
+
+            <!-- REVIEW -->
+            <div class="section-h">Spaced review <span class="count">7 cards due</span></div>
+            <div class="ritual-card">
+              <div class="ritual-top">
+                <div>
+                  <div class="ritual-k">Carry-over from yesterday</div>
+                  <div class="ritual-q">When does HNSW's O(log n) query complexity disappear, making brute-force search preferable?</div>
+                  <div class="ritual-a">When vector dimension is very low — say, 2D points on a map. HNSW's graph overhead then costs more than linear scan saves.</div>
+                </div>
+              </div>
+              <div class="review-btns">
+                <button class="rbtn rbtn-f">Forgot</button>
+                <button class="rbtn rbtn-h">Hard</button>
+                <button class="rbtn rbtn-e">Easy</button>
+              </div>
+            </div>
+
+            <!-- REFLECT -->
+            <div class="section-h" style="margin-top:28px">A moment of reflection</div>
+            <div class="ritual-card">
+              <div class="ritual-k" style="color:var(--ink)">One question — that's the ritual</div>
+              <div class="ritual-q" style="margin-top:4px">What got harder today?</div>
+              <div class="mood-row">
+                <button class="mood">Blocked</button>
+                <button class="mood">Foggy</button>
+                <button class="mood on">Steady</button>
+                <button class="mood">Flowing</button>
+                <button class="mood">Energized</button>
+              </div>
+              <textarea class="rf-ta" placeholder="A sentence is enough. This becomes a note in your Notebook."></textarea>
+              <div style="display:flex;justify-content:flex-end;margin-top:10px">
+                <button class="btn btn-ink" style="padding:8px 14px;font-size:12px">Log reflection</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- RAIL -->
+          <aside class="rail">
+            <div class="rail-card">
+              <div class="rail-k">Promotion goal</div>
+              <div class="goal-ring">
+                <div class="ring">
+                  <svg width="76" height="76" viewBox="0 0 76 76">
+                    <circle cx="38" cy="38" r="32" fill="none" stroke="var(--paper-2)" stroke-width="6"/>
+                    <circle cx="38" cy="38" r="32" fill="none" stroke="var(--forest-3)" stroke-width="6" stroke-linecap="round" stroke-dasharray="201" stroke-dashoffset="134"/>
+                  </svg>
+                  <div class="ring-n">33%</div>
+                </div>
+                <div class="goal-info">
+                  <div class="goal-r">Data Analyst</div>
+                  <div class="goal-d">by June 20 · 58 days</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="rail-card">
+              <div class="rail-k">Streak garden</div>
+              <div class="garden">
+                <div class="stalk off" style="height:15%"></div>
+                <div class="stalk" style="height:45%"></div>
+                <div class="stalk" style="height:65%"></div>
+                <div class="stalk today" style="height:85%"></div>
+                <div class="stalk off" style="height:8%"></div>
+                <div class="stalk off" style="height:8%"></div>
+                <div class="stalk off" style="height:8%"></div>
+              </div>
+              <div class="stalk-lbl">
+                <span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span>
+              </div>
+              <div class="streak-meta">"Three days in a row — your longest stretch yet."</div>
+            </div>
+
+            <div class="rail-card">
+              <div class="rail-k">You're not alone</div>
+              <div class="peers">
+                <div class="peer-av a">AL</div>
+                <div class="peer-av b">SK</div>
+                <div class="peer-av c">JP</div>
+                <div class="peer-av d">MT</div>
+                <div class="peer-av">+38</div>
+              </div>
+              <div class="peer-t"><b>42 learners</b> are on this lesson this week.</div>
+              <div class="peer-stuck">Most common stuck point: understanding when to await vs gather.</div>
+            </div>
+
+            <div class="rail-card">
+              <div class="rail-k">Industry pulse</div>
+              <div style="font-family:var(--serif);font-size:14px;line-height:1.45;margin-bottom:8px">Long-context windows don't replace RAG.</div>
+              <div style="font-size:11px;color:var(--mute);line-height:1.5">Teams measuring 4× cost for naive context stuffing. Worth a scan before your capstone.</div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ CAREER MAP ═══ -->
+    <div class="screen" id="s-dashboard" data-screen-label="02 Career map">
+      <div class="topbar">
+        <div class="tb-l">
+          <div class="eyebrow">Career constellation</div>
+          <h1>Six roles. Six months. <i>One you</i>, six versions forward.</h1>
+        </div>
+        <div class="tb-r">
+          <span class="chip chip-forest">Level 1 of 6</span>
+        </div>
+      </div>
+      <div class="pad">
+        <div class="ladder-wrap">
+          <div class="lw-eye">Your constellation</div>
+          <div class="lw-h">Each star is a role you'll earn — <i>not a badge</i> you collect.</div>
+          <div class="lw-sub">Every level requires a capstone and a promotion interview. No shortcuts. That's why it matters.</div>
+          <div class="constellation">
+            <div class="c-line"></div>
+            <div class="c-line-fill" style="width:8%"></div>
+            <div class="c-stars">
+              <div class="cstar">
+                <div class="cnode now">1</div>
+                <div class="cstar-l">Python<br>Developer</div>
+                <div class="cstar-sub">You are here</div>
+              </div>
+              <div class="cstar">
+                <div class="cnode next">2</div>
+                <div class="cstar-l">Data<br>Analyst</div>
+                <div class="cstar-sub">Next peak</div>
+              </div>
+              <div class="cstar">
+                <div class="cnode locked">3</div>
+                <div class="cstar-l muted">Data<br>Scientist</div>
+              </div>
+              <div class="cstar">
+                <div class="cnode locked">4</div>
+                <div class="cstar-l muted">ML<br>Engineer</div>
+              </div>
+              <div class="cstar">
+                <div class="cnode locked">5</div>
+                <div class="cstar-l muted">GenAI<br>Engineer</div>
+              </div>
+              <div class="cstar">
+                <div class="cnode goal">★</div>
+                <div class="cstar-l gold">Senior<br>GenAI Eng.</div>
+                <div class="cstar-sub" style="color:var(--gold-2)">Destination</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- STATS -->
+        <div class="stat-strip">
+          <div class="stat-cell">
+            <div class="stat-k">Skills earned</div>
+            <div class="stat-v">14</div>
+            <div class="stat-t">+3 this week</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-k">Lessons shipped</div>
+            <div class="stat-v">12</div>
+            <div class="stat-t">2 at this level</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-k">Reviews kept</div>
+            <div class="stat-v">96%</div>
+            <div class="stat-t">retention rate</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-k">Days to goal</div>
+            <div class="stat-v">118</div>
+            <div class="stat-t">on pace</div>
+          </div>
+        </div>
+
+        <!-- SKILL TREE + MENTORS -->
+        <div class="d-row">
+          <div class="d-card">
+            <div class="d-card-h">Skills earned on platform</div>
+            <div class="d-card-s">Lit when a lesson cements the concept. Dim when you've only brushed it.</div>
+            <div class="skill-grid">
+              <div class="skill-tile lit"><div class="skill-n">Python basics</div><div class="skill-meta">4 lessons</div><div class="skill-lit-dot"></div></div>
+              <div class="skill-tile lit"><div class="skill-n">Functions</div><div class="skill-meta">3 lessons</div><div class="skill-lit-dot"></div></div>
+              <div class="skill-tile lit"><div class="skill-n">OOP</div><div class="skill-meta">2 lessons</div><div class="skill-lit-dot"></div></div>
+              <div class="skill-tile lit"><div class="skill-n">Type hints</div><div class="skill-meta">1 lesson</div><div class="skill-lit-dot"></div></div>
+              <div class="skill-tile"><div class="skill-n">REST APIs</div><div class="skill-meta">In progress</div></div>
+              <div class="skill-tile"><div class="skill-n">async/await</div><div class="skill-meta">Today</div></div>
+              <div class="skill-tile dim"><div class="skill-n">Testing</div><div class="skill-meta">Upcoming</div></div>
+              <div class="skill-tile dim"><div class="skill-n">Git flow</div><div class="skill-meta">Upcoming</div></div>
+              <div class="skill-tile dim"><div class="skill-n">Docker</div><div class="skill-meta">Optional</div></div>
+            </div>
+          </div>
+
+          <div class="d-card">
+            <div class="d-card-h">Your mentors</div>
+            <div class="d-card-s">Summon when you need them.</div>
+            <div class="mentor-list">
+              <div class="mentor-r">
+                <div class="mentor-dot" style="font-family:var(--serif);font-weight:500">C</div>
+                <div style="flex:1">
+                  <div class="mentor-n">Career mentor</div>
+                  <div class="mentor-d">Strategy. Role readiness.</div>
+                </div>
+              </div>
+              <div class="mentor-r">
+                <div class="mentor-dot" style="font-family:var(--serif);font-weight:500">S</div>
+                <div style="flex:1">
+                  <div class="mentor-n">Senior reviewer</div>
+                  <div class="mentor-d">Production-grade feedback.</div>
+                </div>
+              </div>
+              <div class="mentor-r">
+                <div class="mentor-dot" style="font-family:var(--serif);font-weight:500">I</div>
+                <div style="flex:1">
+                  <div class="mentor-n">Mock interviewer</div>
+                  <div class="mentor-d">FAANG-style practice.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ MY PATH ═══ -->
+    <div class="screen" id="s-mypath" data-screen-label="03 My path">
+      <div class="topbar">
+        <div class="tb-l">
+          <div class="eyebrow">Your path</div>
+          <h1>From where you stand to where <i>you're going</i>.</h1>
+        </div>
+      </div>
+      <div class="pad">
+        <div class="path-wrap">
+          <!-- LEVEL 1 -->
+          <div class="level-block">
+            <div class="level-header">
+              <div class="level-chip now">1</div>
+              <div class="level-meta">
+                <div class="level-eye active">Current level</div>
+                <div class="level-t">Python Developer</div>
+                <div class="level-d">Build the muscle: clean functions, async I/O, error handling. These are the reflexes every data and AI role will lean on.</div>
+              </div>
+              <div>
+                <div class="level-pct">33%</div>
+                <div class="level-pct-sub">Complete</div>
+              </div>
+            </div>
+            <div class="level-body">
+              <div class="lesson"><div class="l-marker done">✓</div><div class="l-title done">Python fundamentals</div><span class="l-tag req">Required</span><div class="l-meta">45m</div></div>
+              <div class="lesson"><div class="l-marker done">✓</div><div class="l-title done">OOP & modules</div><span class="l-tag req">Required</span><div class="l-meta">50m</div></div>
+              <div class="lesson active-l"><div class="l-marker now">●</div><div class="l-title now">APIs & async programming</div><span class="l-tag req">Required</span><div class="l-meta">45m · today</div></div>
+              <div class="lesson"><div class="l-marker up">○</div><div class="l-title up">Testing & debugging</div><span class="l-tag req">Required</span><div class="l-meta">40m</div></div>
+              <div class="lesson"><div class="l-marker up">○</div><div class="l-title up">Git & collaboration</div><span class="l-tag req">Required</span><div class="l-meta">35m</div></div>
+              <div class="lesson"><div class="l-marker up">○</div><div class="l-title up">Docker & environments</div><span class="l-tag opt">Optional</span><div class="l-meta">60m</div></div>
+              <div class="capstone-band">
+                <div class="cb-star">★</div>
+                <div class="cb-info">
+                  <div class="cb-t">Capstone: build a CLI AI tool</div>
+                  <div class="cb-s">Unlocks after lesson 5 · feeds your promotion interview</div>
+                </div>
+                <button class="cb-btn">View brief</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- LEVEL 2 - BLURRED PREVIEW -->
+          <div class="level-block">
+            <div class="level-header">
+              <div class="level-chip locked">2</div>
+              <div class="level-meta">
+                <div class="level-eye">Next</div>
+                <div class="level-t muted">Data Analyst</div>
+                <div class="level-d">SQL joins that feel natural. Pandas that doesn't fight you. A dashboard a stakeholder actually reads.</div>
+              </div>
+            </div>
+            <div class="future-preview">
+              <div class="fp-peek">"Week 1 — you'll write SQL that joins three tables and explains itself. Week 2 — pandas that handles a million rows without blinking. By week 4, you'll ship a dashboard a stakeholder reads without asking questions. The capstone: turn a messy CSV into a decision..."</div>
+              <div class="fp-cta">Pass Python Developer promotion to unlock →</div>
+            </div>
+          </div>
+
+          <!-- LEVELS 3–5 collapsed -->
+          <div class="level-block">
+            <div class="level-header">
+              <div class="level-chip locked">3</div>
+              <div class="level-meta">
+                <div class="level-t muted">Data Scientist</div>
+                <div class="level-d">Statistics, ML modeling, A/B testing. Earns itself.</div>
+              </div>
+            </div>
+          </div>
+          <div class="level-block">
+            <div class="level-header">
+              <div class="level-chip locked">4</div>
+              <div class="level-meta">
+                <div class="level-t muted">ML Engineer</div>
+                <div class="level-d">Pipelines, model serving, MLflow, CI/CD for ML.</div>
+              </div>
+            </div>
+          </div>
+          <div class="level-block">
+            <div class="level-header">
+              <div class="level-chip locked">5</div>
+              <div class="level-meta">
+                <div class="level-t muted">GenAI Engineer</div>
+                <div class="level-d">LLMs, RAG, prompt engineering, evals, LangGraph.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- LEVEL 6 - GOAL -->
+          <div class="level-block">
+            <div class="level-header">
+              <div class="level-chip goal">★</div>
+              <div class="level-meta">
+                <div class="level-eye gold">Your destination</div>
+                <div class="level-t gold">Senior GenAI Engineer</div>
+                <div class="level-d">Agentic systems. Production RAG. LLMOps. The role that didn't exist 18 months ago — and is in demand everywhere now.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ EXERCISES ═══ -->
+    <div class="screen" id="s-exercises" data-screen-label="04 Exercises">
+      <div class="topbar">
+        <div class="tb-l">
+          <div class="eyebrow">Forge</div>
+          <h1>Exercises you'll <i>actually</i> remember.</h1>
+        </div>
+        <div class="tb-r"><span class="chip chip-forest">1 of 4 done</span></div>
+      </div>
+      <div class="pad">
+        <div class="ex-hero">
+          <div class="ex-eye">Capstone · required for promotion</div>
+          <div class="ex-t">Build a CLI AI tool with retry + env auth</div>
+          <div class="ex-s">200 pts. Senior review on submission. This is the work your promotion interview will be built on.</div>
+          <button class="btn btn-forest" onclick="nav('studio')">Open in Studio →</button>
+        </div>
+
+        <div class="section-h" style="margin-top:28px">Practice exercises</div>
+        <div class="ex-row">
+          <div style="flex:1">
+            <div class="ex-row-t">Write a prompt classifier</div>
+            <div class="ex-row-s">Beginner · 100 pts · Classification patterns</div>
+          </div>
+          <span class="chip chip-forest">Done</span>
+        </div>
+        <div class="ex-row">
+          <div style="flex:1">
+            <div class="ex-row-t">Async API client with retry logic</div>
+            <div class="ex-row-s">Intermediate · 150 pts · Error handling</div>
+          </div>
+          <button class="btn btn-ghost">Start</button>
+        </div>
+        <div class="ex-row">
+          <div style="flex:1">
+            <div class="ex-row-t">Build a streaming response handler</div>
+            <div class="ex-row-s">Intermediate · 150 pts · Streaming APIs</div>
+          </div>
+          <button class="btn btn-ghost">Start</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ STUDIO ═══ -->
+    <div class="screen" id="s-studio" data-screen-label="05 Studio">
+      <div class="topbar">
+        <div class="tb-l">
+          <div class="eyebrow">Studio · Capstone draft</div>
+          <h1>cli_ai_tool <i>— main.py</i></h1>
+        </div>
+        <div class="tb-r">
+          <span class="chip chip-ink">Auto-saved · 2m ago</span>
+        </div>
+      </div>
+      <div class="studio-grid">
+        <div class="editor">
+          <div class="ed-bar">
+            <div class="ed-tabs">
+              <div class="ed-tab on">Code</div>
+              <div class="ed-tab">Trace</div>
+              <div class="ed-tab">Tests</div>
+            </div>
+            <div class="ed-actions">
+              <div class="edb edb-rev">Request review</div>
+              <div class="edb edb-run">▶ Run</div>
+            </div>
+          </div>
+          <div class="ed-files">
+            <div class="ed-file on"><div class="mod"></div>main.py</div>
+            <div class="ed-file">utils.py</div>
+            <div class="ed-file" style="color:#3a3a32">+ file</div>
+          </div>
+          <div class="code">
+            <div class="cl"><span class="cn">1</span><span class="cx cm"># Capstone · Python Developer · CLI AI Tool</span></div>
+            <div class="cl"><span class="cn">2</span><span class="cx"><span class="k">import</span> <span class="vr">os</span></span></div>
+            <div class="cl"><span class="cn">3</span><span class="cx"><span class="k">import</span> <span class="vr">asyncio</span></span></div>
+            <div class="cl"><span class="cn">4</span><span class="cx"><span class="k">from</span> <span class="vr">anthropic</span> <span class="k">import</span> <span class="vr">Anthropic</span></span></div>
+            <div class="cl"><span class="cn">5</span><span class="cx"></span></div>
+            <div class="cl"><span class="cn">6</span><span class="cx"><span class="vr">client</span> = <span class="fn">Anthropic</span>()</span></div>
+            <div class="cl"><span class="cn">7</span><span class="cx"></span></div>
+            <div class="cl"><span class="cn">8</span><span class="cx"><span class="k">async def</span> <span class="fn">ask_claude</span>(<span class="vr">prompt</span>: <span class="vr">str</span>) -> <span class="vr">str</span>:</span></div>
+            <div class="cl"><span class="cn">9</span><span class="cx">    <span class="vr">response</span> = <span class="k">await</span> <span class="vr">client</span>.<span class="vr">messages</span>.<span class="fn">create</span>(</span></div>
+            <div class="cl"><span class="cn">10</span><span class="cx">        <span class="vr">model</span>=<span class="s">"claude-sonnet-4-5"</span>,</span></div>
+            <div class="cl"><span class="cn">11</span><span class="cx">        <span class="vr">max_tokens</span>=<span class="nm">1024</span>,</span></div>
+            <div class="cl"><span class="cn">12</span><span class="cx">        <span class="vr">messages</span>=[{<span class="s">"role"</span>: <span class="s">"user"</span>, <span class="s">"content"</span>: <span class="vr">prompt</span>}]</span></div>
+            <div class="cl"><span class="cn">13</span><span class="cx">    )</span></div>
+            <div class="cl"><span class="cn">14</span><span class="cx">    <span class="k">return</span> <span class="vr">response</span>.<span class="vr">content</span>[<span class="nm">0</span>].<span class="vr">text</span></span></div>
+            <div class="cl"><span class="cn">15</span><span class="cx"></span></div>
+            <div class="cl"><span class="cn">16</span><span class="cx"><span class="k">async def</span> <span class="fn">main</span>():</span></div>
+            <div class="cl"><span class="cn">17</span><span class="cx">    <span class="fn">print</span>(<span class="s">"CLI AI Tool · Capstone"</span>)</span></div>
+            <div class="cl"><span class="cn">18</span><span class="cx">    <span class="k">while</span> <span class="nm">True</span>:</span></div>
+            <div class="cl"><span class="cn">19</span><span class="cx">        <span class="vr">prompt</span> = <span class="fn">input</span>(<span class="s">"\nYou: "</span>)</span></div>
+            <div class="cl"><span class="cn">20</span><span class="cx">        <span class="k">if</span> <span class="vr">prompt</span> == <span class="s">"quit"</span>: <span class="k">break</span></span></div>
+            <div class="cl"><span class="cn">21</span><span class="cx">        <span class="vr">reply</span> = <span class="k">await</span> <span class="fn">ask_claude</span>(<span class="vr">prompt</span>)</span></div>
+            <div class="cl"><span class="cn">22</span><span class="cx">        <span class="fn">print</span>(<span class="s">f"Claude: {reply}"</span>)</span></div>
+            <div class="cl"><span class="cn">23</span><span class="cx"></span></div>
+            <div class="cl"><span class="cn">24</span><span class="cx"><span class="vr">asyncio</span>.<span class="fn">run</span>(<span class="fn">main</span>())</span></div>
+          </div>
+          <div class="ed-foot">
+            <div class="ed-foot-tabs">
+              <div class="eft on">Output</div>
+              <div class="eft">Code quality</div>
+              <div class="eft">Skills lit</div>
+            </div>
+            <div class="ed-out">
+              CLI AI Tool · Capstone<br>
+              You: explain async<br>
+              Claude: Async lets Python run tasks concurrently without blocking...
+            </div>
+          </div>
+        </div>
+
+        <!-- TUTOR -->
+        <div class="tutor">
+          <div class="tt-head">
+            <div class="tt-title">Studio assistant</div>
+            <div class="tt-sub">Senior review mode · on your draft</div>
+            <div class="tt-mode-sel">
+              <div class="tt-mode">Tutor</div>
+              <div class="tt-mode on">Review</div>
+              <div class="tt-mode">Quiz</div>
+            </div>
+          </div>
+          <div class="tt-body">
+            <div class="score-card">
+              <div class="sc-n">84</div>
+              <div class="sc-r">
+                <div class="sc-k">Production ready</div>
+                <div class="sc-d">Solid draft. Two gaps to close before senior submit.</div>
+              </div>
+            </div>
+
+            <div class="rev-sec">
+              <div class="rev-k good">What's working</div>
+              <div class="rev-item"><code>ask_claude</code> is properly awaited — async flow is clean.</div>
+              <div class="rev-item">API call isolated in its own function. Easy to test.</div>
+              <div class="rev-item">Readable variable names, consistent style.</div>
+            </div>
+
+            <div class="rev-sec">
+              <div class="rev-k warn">Close these gaps</div>
+              <div class="rev-item">No error handling on the API call. What happens on a 429?</div>
+              <div class="rev-item">API key not loaded from env — missing <code>os.getenv</code>.</div>
+            </div>
+
+            <div class="rev-sec">
+              <div class="rev-k todo">Before submission</div>
+              <div class="rev-item">Add <code>try/except anthropic.APIError</code> with retry.</div>
+              <div class="rev-item">Load key via <code>os.getenv("ANTHROPIC_API_KEY")</code>.</div>
+              <div class="rev-item">Add a <code>--verbose</code> flag for debug output.</div>
+            </div>
+          </div>
+          <div class="tt-input">
+            <textarea class="tt-ta" placeholder="Ask about the review..."></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ PROMOTION INTERVIEW ═══ -->
+    <div class="screen" id="s-interview" data-screen-label="06 Promotion">
+      <div class="topbar">
+        <div class="tb-l">
+          <div class="eyebrow">Promotion interview</div>
+          <h1>One session. One <i>title</i>. No second chances this week.</h1>
+        </div>
+      </div>
+      <div class="pad">
+        <div id="promo-view">
+          <div class="itabs">
+            <div class="itab" onclick="showPractice()">Practice</div>
+            <div class="itab on" onclick="showPromo()">Promotion interview</div>
+          </div>
+
+          <!-- BOSS CARD -->
+          <div class="boss-card">
+            <div class="boss-eye">Level 1 → Level 2 · Promotion gate</div>
+            <div class="boss-t">Python Developer <i>→</i> Data Analyst.</div>
+            <div class="boss-s">45 minutes. FAANG-format. No coaching. When you pass, your title changes across the app, your resume updates, and you download a certificate signed by the platform.</div>
+
+            <div class="checklist">
+              <div class="cl-k">Pre-flight checklist</div>
+              <div class="cl-row">
+                <div class="cl-check on">✓</div>
+                <div>
+                  <div class="cl-label">Lessons 1 & 2 complete</div>
+                  <div class="cl-sub">Python fundamentals, OOP</div>
+                </div>
+              </div>
+              <div class="cl-row">
+                <div class="cl-check off">3</div>
+                <div>
+                  <div class="cl-label off">3 remaining lessons</div>
+                  <div class="cl-sub">APIs, testing, Git</div>
+                </div>
+              </div>
+              <div class="cl-row">
+                <div class="cl-check off">C</div>
+                <div>
+                  <div class="cl-label off">Capstone submitted</div>
+                  <div class="cl-sub">CLI AI tool with review</div>
+                </div>
+              </div>
+              <div class="cl-row">
+                <div class="cl-check off">P</div>
+                <div>
+                  <div class="cl-label off">2 practice interviews</div>
+                  <div class="cl-sub">Recommended — warms you up</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="boss-cta">
+              <button class="btn-gold disabled">Locked · 3 lessons to unlock</button>
+              <button class="btn btn-ghost-d" onclick="showWin()">Preview win screen →</button>
+            </div>
+          </div>
+
+          <div class="section-h">Warm up — practice interviews</div>
+          <div class="practice-list">
+            <div class="practice-row">
+              <div style="flex:1">
+                <div class="pr-n">Python fundamentals deep-dive</div>
+                <div class="pr-s">OOP · async · testing · 30 min</div>
+              </div>
+              <button class="btn btn-ghost">Start →</button>
+            </div>
+            <div class="practice-row">
+              <div style="flex:1">
+                <div class="pr-n">Debug a broken async pipeline</div>
+                <div class="pr-s">Debugging scenario · 20 min</div>
+              </div>
+              <button class="btn btn-ghost">Start →</button>
+            </div>
+            <div class="practice-row">
+              <div style="flex:1">
+                <div class="pr-n">System design: small Python service</div>
+                <div class="pr-s">Design question · 30 min</div>
+              </div>
+              <button class="btn btn-ghost">Start →</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- WIN SCREEN -->
+        <div id="win-view" style="display:none">
+          <div class="win-wrap">
+            <div class="win-top">
+              <div class="win-seal">
+                <svg width="42" height="42" viewBox="0 0 42 42" fill="none" stroke="var(--ink)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="10,22 18,30 32,14"/>
+                </svg>
+              </div>
+              <div class="win-eye">Promotion confirmed · April 23, 2026</div>
+              <div class="win-h">You are, officially, <i>a Data Analyst</i>.</div>
+              <div class="win-d">You shipped the capstone. You passed senior review. You held your ground in the interview. This is how real careers are built — one role, earned, at a time.</div>
+            </div>
+            <div class="win-body">
+              <div class="win-stats">
+                <div><div class="ws-v">6</div><div class="ws-k">Lessons</div></div>
+                <div><div class="ws-v">1</div><div class="ws-k">Capstone</div></div>
+                <div><div class="ws-v">Level 2</div><div class="ws-k">Unlocked</div></div>
+              </div>
+              <div class="win-actions">
+                <button class="btn btn-ink" style="flex:1" onclick="nav('mypath')">Begin Data Analyst →</button>
+                <button class="btn btn-ghost">Download certificate</button>
+                <button class="btn btn-ghost">Share</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ TIMELINE ═══ -->
+    <div class="screen" id="s-progress" data-screen-label="07 Timeline">
+      <div class="topbar">
+        <div class="tb-l">
+          <div class="eyebrow">Timeline</div>
+          <h1>Your career, <i>in order</i>.</h1>
+        </div>
+      </div>
+      <div class="pad">
+        <div class="tl-wrap">
+          <div class="tl-stem"><div class="tl-stem-fill"></div></div>
+          <div class="tl-row">
+            <div class="tl-mark"><div class="tl-dot now">1</div></div>
+            <div class="tl-body">
+              <div class="tl-role">Python Developer</div>
+              <div class="tl-st now">In progress · 33% complete · 3 lessons remaining</div>
+              <div class="tl-skills">
+                <span class="tl-sk e">Python</span>
+                <span class="tl-sk e">OOP</span>
+                <span class="tl-sk e">Functions</span>
+                <span class="tl-sk f">Async (today)</span>
+                <span class="tl-sk f">Testing</span>
+                <span class="tl-sk f">Git</span>
+              </div>
+            </div>
+          </div>
+          <div class="tl-row">
+            <div class="tl-mark"><div class="tl-dot future">2</div></div>
+            <div class="tl-body">
+              <div class="tl-role muted">Data Analyst</div>
+              <div class="tl-st future">Locked — pass Python Developer promotion</div>
+              <div class="tl-skills">
+                <span class="tl-sk f">SQL</span><span class="tl-sk f">pandas</span><span class="tl-sk f">EDA</span><span class="tl-sk f">Dashboards</span>
+              </div>
+            </div>
+          </div>
+          <div class="tl-row">
+            <div class="tl-mark"><div class="tl-dot future">3</div></div>
+            <div class="tl-body">
+              <div class="tl-role muted">Data Scientist</div>
+              <div class="tl-st future">Locked</div>
+              <div class="tl-skills">
+                <span class="tl-sk f">Statistics</span><span class="tl-sk f">ML modeling</span><span class="tl-sk f">A/B testing</span>
+              </div>
+            </div>
+          </div>
+          <div class="tl-row">
+            <div class="tl-mark"><div class="tl-dot future">4</div></div>
+            <div class="tl-body">
+              <div class="tl-role muted">ML Engineer</div>
+              <div class="tl-st future">Locked</div>
+              <div class="tl-skills">
+                <span class="tl-sk f">MLflow</span><span class="tl-sk f">Serving</span><span class="tl-sk f">CI/CD</span>
+              </div>
+            </div>
+          </div>
+          <div class="tl-row">
+            <div class="tl-mark"><div class="tl-dot future">5</div></div>
+            <div class="tl-body">
+              <div class="tl-role muted">GenAI Engineer</div>
+              <div class="tl-st future">Locked</div>
+              <div class="tl-skills">
+                <span class="tl-sk f">LLMs</span><span class="tl-sk f">RAG</span><span class="tl-sk f">Evals</span><span class="tl-sk f">LangGraph</span>
+              </div>
+            </div>
+          </div>
+          <div class="tl-row">
+            <div class="tl-mark"><div class="tl-dot goal">★</div></div>
+            <div class="tl-body">
+              <div class="tl-role gold">Senior GenAI Engineer</div>
+              <div class="tl-st" style="color:var(--gold)">Your destination · 6 months away</div>
+              <div class="tl-skills">
+                <span class="tl-sk f">AI Agents</span><span class="tl-sk f">LLMOps</span><span class="tl-sk f">Production RAG</span><span class="tl-sk f">Multi-agent</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ JOB READINESS ═══ -->
+    <div class="screen" id="s-career" data-screen-label="08 Job readiness">
+      <div class="topbar">
+        <div class="tb-l">
+          <div class="eyebrow">Job readiness</div>
+          <h1>You're a Python Developer. Here's how to <i>land the role</i>.</h1>
+        </div>
+      </div>
+      <div class="pad">
+        <div class="jr-hero">
+          <div class="jr-ring">
+            <svg width="130" height="130" viewBox="0 0 130 130">
+              <circle cx="65" cy="65" r="56" fill="none" stroke="var(--paper-2)" stroke-width="8"/>
+              <circle cx="65" cy="65" r="56" fill="none" stroke="var(--forest-3)" stroke-width="8" stroke-linecap="round" stroke-dasharray="352" stroke-dashoffset="134" transform="rotate(-90 65 65)"/>
+            </svg>
+            <div class="jr-ring-n">
+              <div class="jr-n">62%</div>
+              <div class="jr-pct">Job ready</div>
+            </div>
+          </div>
+          <div class="jr-info">
+            <div class="jr-h">Python Developer readiness</div>
+            <div class="jr-s">Based on lessons completed, capstone progress, and skills earned on platform. Updates live as you level up.</div>
+            <div class="jr-hint">→ Finish capstone + promotion interview to reach 90%+</div>
+          </div>
+        </div>
+
+        <div class="tools">
+          <div class="tool">
+            <div class="tool-ic">R</div>
+            <div class="tool-n">Resume builder</div>
+            <div class="tool-s">Auto-filled with your platform skills. Edit, export as PDF.</div>
+            <div class="tool-foot"><span class="tool-tag">Auto-populated</span><span class="tool-go">Open →</span></div>
+          </div>
+          <div class="tool">
+            <div class="tool-ic">JD</div>
+            <div class="tool-n">JD fit analysis</div>
+            <div class="tool-s">Paste any job description — get a fit score and gap plan.</div>
+            <div class="tool-foot"><span class="tool-tag">AI-powered</span><span class="tool-go">Analyze →</span></div>
+          </div>
+          <div class="tool">
+            <div class="tool-ic">Q</div>
+            <div class="tool-n">Interview prep bank</div>
+            <div class="tool-s">Role-specific Q&amp;A. Technical + behavioural. Filtered by your level.</div>
+            <div class="tool-foot"><span class="tool-tag">Level-filtered</span><span class="tool-go">Browse →</span></div>
+          </div>
+        </div>
+
+        <div class="jr-grid">
+          <div class="resume">
+            <div class="res-top">
+              <div>
+                <div class="res-n">Raja Raje</div>
+                <div class="res-r">Python Developer · CareerForge</div>
+              </div>
+              <span class="chip chip-forest">Auto</span>
+            </div>
+            <div class="res-sec">Skills earned</div>
+            <div class="chips">
+              <span class="sk earned">Python</span>
+              <span class="sk earned">Async</span>
+              <span class="sk earned">REST APIs</span>
+              <span class="sk earned">OOP</span>
+              <span class="sk man">Git</span>
+              <span class="sk man">Docker</span>
+            </div>
+            <div class="res-sec">Projects</div>
+            <div style="padding-left:12px;border-left:2px solid var(--line)">
+              <div style="font-family:var(--serif);font-size:14px;font-weight:500">CLI AI Tool · Capstone</div>
+              <div style="font-size:11px;color:var(--mute);margin:2px 0 4px">Python Developer · 2026</div>
+              <div style="font-size:12.5px;color:var(--ink-3);line-height:1.55">Async CLI integrating Claude API with retry logic and env-based auth.</div>
+            </div>
+          </div>
+
+          <div class="jd">
+            <div class="jd-h">
+              <div>
+                <div class="jd-t">JD fit analysis</div>
+                <div style="font-size:11px;color:var(--mute);margin-top:2px">Last run · Apr 20</div>
+              </div>
+              <span class="chip chip-ink">71% fit</span>
+            </div>
+            <div class="jd-score">
+              <div class="jd-n">71%</div>
+              <div>
+                <div class="jd-role">Junior Python Engineer</div>
+                <div class="jd-co">TechCorp · Hyderabad</div>
+              </div>
+            </div>
+            <div class="jd-bar"><div class="jd-fill" style="width:71%"></div></div>
+            <div class="jd-gaps">
+              <div class="jd-gk">Gaps to close</div>
+              <div class="jd-g"><div class="dot"></div>Error handling — covered in lesson 4.</div>
+              <div class="jd-g"><div class="dot"></div>PostgreSQL basics — add Data Analyst to your path.</div>
+              <div class="jd-g"><div class="dot" style="background:var(--rose)"></div>FastAPI — optional lesson in Python Dev.</div>
+            </div>
+            <div class="jd-input">
+              <textarea class="jd-ta" placeholder="Paste a job description..."></textarea>
+              <div style="margin-top:10px;display:flex;gap:8px">
+                <button class="btn btn-ink">Analyze fit →</button>
+                <button class="btn btn-ghost">Clear</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ NOTEBOOK ═══ -->
+    <div class="screen" id="s-notebook" data-screen-label="09 Notebook">
+      <div class="topbar">
+        <div class="tb-l">
+          <div class="eyebrow">Notebook</div>
+          <h1>Your insights — <i>annotated</i>, ready to review.</h1>
+        </div>
+        <div class="tb-r">
+          <span class="chip chip-ink">3 notes</span>
+          <span class="chip chip-gold">3 due</span>
+        </div>
+      </div>
+      <div class="pad">
+        <div class="nb-wrap">
+          <div class="nb-filter">
+            <button class="nb-f on">All</button>
+            <button class="nb-f">Due (3)</button>
+            <button class="nb-f">Reflections</button>
+            <button class="nb-f">Tutor</button>
+          </div>
+
+          <div class="note">
+            <div class="note-top">
+              <div class="note-src">Chat <span class="tag">code-practice</span></div>
+              <div class="note-date">Apr 21, 2026</div>
+            </div>
+            <div class="note-body">Async programming patterns — <code>asyncio.run(main())</code> is the entry point for running async code. The event loop handles concurrency without threads. Await only works inside async functions.</div>
+            <div class="take-k">My takeaway</div>
+            <input class="take-in" placeholder="Add your own takeaway...">
+          </div>
+
+          <div class="note">
+            <div class="note-top">
+              <div class="note-src">Tutor <span class="tag blue">RAG concepts</span></div>
+              <div class="note-date">Apr 20, 2026</div>
+            </div>
+            <div class="note-body">Vector databases store high-dimensional embeddings and use algorithms like HNSW (Hierarchical Navigable Small World) to find the K most similar vectors in O(log n) time — the engine of RAG, semantic search, and recommendation systems.</div>
+            <div class="take-k">My takeaway</div>
+            <input class="take-in" value="HNSW is a skip list for vector space — logarithmic search.">
+          </div>
+
+          <div class="note">
+            <div class="note-top">
+              <div class="note-src">Reflection</div>
+              <div class="note-date">Apr 20, 2026</div>
+            </div>
+            <div class="note-body">"Type hints make Python feel more like a contract with my future self — <code>def greet(name: str) → str</code> tells the caller exactly what to expect."</div>
+            <div class="take-k">My takeaway</div>
+            <input class="take-in" placeholder="Add your own takeaway...">
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </section>
+</div>
+
+<!-- TWEAKS PANEL -->
+<div class="tweaks" id="tweaks">
+  <div class="tw-h">Tweaks</div>
+  <div class="tw-row">
+    <div class="tw-k">Accent</div>
+    <div class="tw-opts">
+      <div class="tw-opt on" data-accent="forest">Forest</div>
+      <div class="tw-opt" data-accent="ink">Ink</div>
+      <div class="tw-opt" data-accent="gold">Gold</div>
+    </div>
+  </div>
+  <div class="tw-row">
+    <div class="tw-k">Density</div>
+    <div class="tw-opts">
+      <div class="tw-opt on" data-density="airy">Airy</div>
+      <div class="tw-opt" data-density="compact">Compact</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "accent": "gold",
+  "density": "airy"
+}/*EDITMODE-END*/;
+
+function nav(s){
+  document.querySelectorAll('.screen').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('.sb-i').forEach(x=>x.classList.remove('on'));
+  document.getElementById('s-'+s)?.classList.add('on');
+  document.querySelector('.sb-i[data-s="'+s+'"]')?.classList.add('on');
+  document.querySelector('.main').scrollTop=0;
+}
+document.querySelectorAll('.sb-i[data-s]').forEach(i=>i.addEventListener('click',()=>nav(i.dataset.s)));
+document.querySelectorAll('.mood').forEach(m=>m.addEventListener('click',function(){
+  this.parentElement.querySelectorAll('.mood').forEach(x=>x.classList.remove('on'));
+  this.classList.add('on');
+}));
+document.querySelectorAll('.ed-tab, .eft, .tt-mode, .nb-f').forEach(t=>t.addEventListener('click',function(){
+  this.parentElement.querySelectorAll(':scope > *').forEach(x=>x.classList.remove('on'));
+  this.classList.add('on');
+}));
+function showPromo(){document.getElementById('promo-view').style.display='block';document.getElementById('win-view').style.display='none';document.querySelectorAll('.itab').forEach((t,i)=>t.classList.toggle('on',i===1));document.querySelector('.main').scrollTop=0;}
+function showPractice(){document.querySelectorAll('.itab').forEach((t,i)=>t.classList.toggle('on',i===0));}
+function showWin(){document.getElementById('promo-view').style.display='none';document.getElementById('win-view').style.display='block';document.querySelector('.main').scrollTop=0;}
+
+// TWEAKS
+let state = {...TWEAK_DEFAULTS};
+window.addEventListener('message',e=>{
+  if(e.data?.type==='__activate_edit_mode'){document.getElementById('tweaks').classList.add('open');}
+  if(e.data?.type==='__deactivate_edit_mode'){document.getElementById('tweaks').classList.remove('open');}
+});
+window.parent.postMessage({type:'__edit_mode_available'},'*');
+document.querySelectorAll('.tw-opt').forEach(o=>o.addEventListener('click',function(){
+  this.parentElement.querySelectorAll('.tw-opt').forEach(x=>x.classList.remove('on'));
+  this.classList.add('on');
+  if(this.dataset.accent){
+    state.accent=this.dataset.accent;
+    const root=document.documentElement;
+    if(state.accent==='ink') root.style.setProperty('--forest-3','#2a2d28');
+    else if(state.accent==='gold') root.style.setProperty('--forest-3','#C89748');
+    else root.style.setProperty('--forest-3','#3D7A53');
+  }
+  if(this.dataset.density){
+    state.density=this.dataset.density;
+    document.documentElement.style.setProperty('--pad-y',state.density==='compact'?'18px':'28px');
+  }
+  window.parent.postMessage({type:'__edit_mode_set_keys',edits:state},'*');
+}));
+</script>
+</body>
+</html>

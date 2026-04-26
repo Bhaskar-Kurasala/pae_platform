@@ -1,0 +1,1270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CareerForge — Prototype</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --green-900: #052e1c;
+  --green-800: #085041;
+  --green-700: #0F6E56;
+  --green-600: #1D9E75;
+  --green-400: #5DCAA5;
+  --green-200: #9FE1CB;
+  --green-100: #d1f0e4;
+  --green-50:  #e8f7f2;
+  --amber-800: #633806;
+  --amber-600: #854F0B;
+  --amber-400: #BA7517;
+  --amber-100: #FAC775;
+  --amber-50:  #FDF3DC;
+  --blue-700:  #185FA5;
+  --blue-400:  #378ADD;
+  --blue-50:   #E6F1FB;
+  --red-600:   #A32D2D;
+  --red-50:    #FCEBEB;
+  --gray-900:  #0a0a0a;
+  --gray-800:  #111111;
+  --gray-700:  #1a1a1a;
+  --gray-600:  #2a2a2a;
+  --gray-400:  #555555;
+  --gray-300:  #888888;
+  --gray-200:  #bbbbbb;
+  --gray-150:  #dddddd;
+  --gray-100:  #eeeeee;
+  --gray-50:   #f6f6f4;
+  --white:     #ffffff;
+  --font: 'DM Sans', sans-serif;
+  --mono: 'DM Mono', monospace;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --sidebar-w: 210px;
+  --topbar-h: 58px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; background: #0a0a0a; font-family: var(--font); font-size: 13px; color: var(--gray-900); }
+
+/* ── LAYOUT ── */
+.app-shell { display: flex; height: 100vh; }
+.sidebar { width: var(--sidebar-w); background: var(--gray-900); border-right: 1px solid var(--gray-700); display: flex; flex-direction: column; flex-shrink: 0; }
+.page-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--gray-50); }
+
+/* ── SIDEBAR ── */
+.sb-logo { padding: 18px 16px 14px; border-bottom: 1px solid var(--gray-700); display: flex; align-items: center; gap: 9px; }
+.sb-logo-mark { width: 28px; height: 28px; background: var(--green-600); border-radius: 7px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.sb-logo-mark svg { width: 14px; height: 14px; }
+.sb-logo-text { font-size: 14px; font-weight: 700; color: var(--white); letter-spacing: -.3px; }
+.sb-logo-text span { color: var(--green-600); }
+.sb-nav { flex: 1; padding: 8px 0; overflow-y: auto; }
+.sb-section { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--gray-400); padding: 14px 16px 5px; }
+.sb-item { display: flex; align-items: center; gap: 9px; padding: 8px 16px; font-size: 12.5px; color: var(--gray-300); cursor: pointer; border-left: 2px solid transparent; transition: all .12s; white-space: nowrap; }
+.sb-item:hover { color: var(--gray-150); background: rgba(255,255,255,.04); }
+.sb-item.active { color: var(--white); background: rgba(255,255,255,.07); border-left-color: var(--green-600); font-weight: 500; }
+.sb-item svg { width: 13px; height: 13px; flex-shrink: 0; opacity: .65; }
+.sb-item.active svg { opacity: 1; }
+.sb-bottom { padding: 12px; border-top: 1px solid var(--gray-700); }
+.sb-role-card { background: #0d2418; border: 1px solid #1a3d28; border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: 10px; }
+.sb-role-label { font-size: 9.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--green-600); margin-bottom: 3px; }
+.sb-role-name { font-size: 13px; font-weight: 700; color: var(--white); margin-bottom: 2px; }
+.sb-role-next { font-size: 11px; color: var(--green-400); display: flex; align-items: center; gap: 4px; }
+.sb-user { display: flex; align-items: center; gap: 9px; }
+.sb-avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--green-800); border: 1.5px solid var(--green-600); display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: var(--white); flex-shrink: 0; }
+.sb-user-name { font-size: 12px; font-weight: 600; color: var(--gray-200); }
+.sb-user-role { font-size: 10px; color: var(--gray-400); }
+
+/* ── TOPBAR ── */
+.topbar { height: var(--topbar-h); background: var(--white); border-bottom: 1px solid var(--gray-100); padding: 0 24px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.topbar-left .page-title { font-size: 16px; font-weight: 700; color: var(--gray-900); letter-spacing: -.3px; }
+.topbar-left .page-sub { font-size: 11.5px; color: var(--gray-300); margin-top: 1px; }
+.topbar-right { display: flex; gap: 8px; align-items: center; }
+.chip { font-size: 11px; padding: 4px 10px; border-radius: 20px; font-weight: 600; cursor: default; }
+.chip-green { background: var(--green-50); color: var(--green-800); border: 1px solid var(--green-200); }
+.chip-amber { background: var(--amber-50); color: var(--amber-800); border: 1px solid var(--amber-100); }
+.chip-gray { background: var(--gray-50); color: var(--gray-400); border: 1px solid var(--gray-150); }
+
+/* ── CONTENT AREA ── */
+.content { flex: 1; overflow-y: auto; padding: 20px 24px; }
+.content.no-pad { padding: 0; }
+
+/* ── SCREENS ── */
+.screen { display: none; }
+.screen.active { display: flex; flex-direction: column; height: 100%; }
+
+/* ── COMMON COMPONENTS ── */
+.card { background: var(--white); border: 1px solid var(--gray-100); border-radius: var(--radius-lg); }
+.card.accent { border-color: var(--green-200); border-width: 1.5px; }
+.card.dashed { border-style: dashed; background: rgba(246,246,244,.5); }
+.card-pad { padding: 14px 16px; }
+.eyebrow { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 5px; }
+.eyebrow.green { color: var(--green-700); }
+.eyebrow.gray { color: var(--gray-300); }
+.eyebrow.amber { color: var(--amber-600); }
+.card-title { font-size: 14px; font-weight: 700; color: var(--gray-900); letter-spacing: -.1px; margin-bottom: 3px; }
+.card-sub { font-size: 12px; color: var(--gray-300); line-height: 1.45; }
+.progress-bar { height: 4px; background: var(--gray-100); border-radius: 2px; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--green-600); border-radius: 2px; transition: width .4s ease; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+.stat-card { background: var(--gray-50); border-radius: var(--radius-md); padding: 14px; }
+.stat-n { font-size: 24px; font-weight: 800; color: var(--gray-900); letter-spacing: -1px; }
+.stat-l { font-size: 11px; color: var(--gray-300); margin-top: 2px; line-height: 1.3; }
+.btn { padding: 7px 14px; border-radius: var(--radius-sm); font-size: 12px; font-weight: 700; cursor: pointer; border: none; font-family: var(--font); transition: all .1s; letter-spacing: .01em; }
+.btn:active { transform: scale(.98); }
+.btn-green { background: var(--green-800); color: var(--white); }
+.btn-green:hover { background: var(--green-700); }
+.btn-outline { background: var(--white); color: var(--gray-400); border: 1px solid var(--gray-150); }
+.btn-outline:hover { background: var(--gray-50); }
+.section-label { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--gray-300); margin-bottom: 10px; }
+.badge { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 700; }
+.badge-green { background: var(--green-50); color: var(--green-800); }
+.badge-gray { background: var(--gray-100); color: var(--gray-400); }
+.badge-amber { background: var(--amber-50); color: var(--amber-800); }
+.badge-blue { background: var(--blue-50); color: var(--blue-700); }
+
+/* ── CAREER LADDER ── */
+.career-ladder { background: var(--white); border: 1px solid var(--gray-100); border-radius: var(--radius-lg); padding: 16px 20px; margin-bottom: 14px; }
+.ladder-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.ladder-title { font-size: 12.5px; font-weight: 700; color: var(--gray-900); }
+.ladder-sub { font-size: 11px; color: var(--gray-300); margin-top: 1px; }
+.ladder-steps { display: flex; align-items: center; margin-bottom: 12px; }
+.step { display: flex; flex-direction: column; align-items: center; flex: 1; position: relative; z-index: 2; }
+.step-node { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; border: 2px solid transparent; position: relative; }
+.step-node.done { background: var(--green-600); color: var(--white); border-color: var(--green-600); }
+.step-node.current { background: var(--green-800); color: var(--white); border-color: var(--green-800); box-shadow: 0 0 0 4px var(--green-100); }
+.step-node.next { background: var(--white); color: var(--green-700); border-color: var(--green-200); }
+.step-node.locked { background: var(--gray-50); color: var(--gray-200); border-color: var(--gray-100); }
+.step-node.goal { background: var(--amber-50); color: var(--amber-600); border-color: var(--amber-100); }
+.step-label { font-size: 9.5px; margin-top: 6px; text-align: center; line-height: 1.3; max-width: 58px; }
+.step-label.done, .step-label.current { color: var(--green-800); font-weight: 700; }
+.step-label.next { color: var(--green-700); font-weight: 600; }
+.step-label.locked { color: var(--gray-200); }
+.step-label.goal { color: var(--amber-600); font-weight: 700; }
+.step-connector { flex: 1; height: 2px; margin-top: -18px; position: relative; z-index: 1; }
+.step-connector.done { background: var(--green-600); }
+.step-connector.pending { background: var(--gray-100); }
+.ladder-footer { display: flex; align-items: center; gap: 10px; padding-top: 12px; border-top: 1px solid var(--gray-50); }
+.ladder-progress { flex: 1; }
+.ladder-pct { font-size: 11px; font-weight: 700; color: var(--green-800); margin-bottom: 5px; }
+.ladder-cta { font-size: 11px; color: var(--gray-300); }
+
+/* ── PROMOTION BANNER ── */
+.promo-banner { background: var(--white); border: 1.5px solid var(--green-800); border-radius: var(--radius-lg); padding: 14px 16px; margin-bottom: 14px; }
+.pb-eyebrow { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--green-800); margin-bottom: 10px; }
+.pb-steps { display: flex; align-items: flex-start; margin-bottom: 10px; }
+.pbs { display: flex; flex-direction: column; align-items: center; flex: 1; }
+.pbs-dot { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; }
+.pbs-dot.done { background: var(--green-600); color: var(--white); }
+.pbs-dot.active { background: var(--green-800); color: var(--white); box-shadow: 0 0 0 3px var(--green-100); }
+.pbs-dot.pending { background: var(--gray-100); color: var(--gray-300); border: 1px solid var(--gray-150); }
+.pbs-label { font-size: 10px; margin-top: 5px; text-align: center; color: var(--gray-300); line-height: 1.3; }
+.pbs-label.done { color: var(--green-700); font-weight: 700; }
+.pbs-label.active { color: var(--green-800); font-weight: 700; }
+.pbs-line { flex: 1; height: 2px; margin-top: 13px; }
+.pbs-line.done { background: var(--green-600); }
+.pbs-line.pending { background: var(--gray-100); }
+.pb-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+.pb-pct { font-size: 11px; font-weight: 800; color: var(--green-800); }
+.pb-cta { font-size: 11px; color: var(--gray-400); }
+
+/* ── LESSON ROWS ── */
+.lesson-row { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-bottom: 1px solid #f8f8f6; }
+.lesson-row:last-of-type { border-bottom: none; }
+.lesson-row.active-lesson { background: #f0faf6; }
+.l-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.l-dot.done { background: var(--green-600); }
+.l-dot.active { background: var(--green-800); }
+.l-dot.up { background: var(--gray-150); }
+.l-name { flex: 1; font-size: 12.5px; }
+.l-name.done { color: var(--gray-200); text-decoration: line-through; }
+.l-name.active-text { color: var(--gray-900); font-weight: 700; }
+.l-name.up { color: var(--gray-300); }
+.l-tag { font-size: 10px; padding: 2px 7px; border-radius: 8px; font-weight: 700; flex-shrink: 0; }
+.l-req { background: var(--green-50); color: var(--green-800); }
+.l-opt { background: var(--gray-100); color: var(--gray-400); }
+.l-dur { font-size: 10px; color: var(--gray-200); flex-shrink: 0; }
+
+/* ── CAPSTONE / PROMO BANDS ── */
+.capstone-band { background: linear-gradient(90deg, #fffbf2, #fff8e6); border-top: 1px solid var(--amber-100); padding: 10px 14px; display: flex; align-items: center; gap: 10px; }
+.cap-icon { font-size: 15px; flex-shrink: 0; }
+.cap-info { flex: 1; }
+.cap-title { font-size: 12px; font-weight: 700; color: var(--amber-800); }
+.cap-sub { font-size: 11px; color: var(--amber-600); margin-top: 1px; }
+.cap-btn { font-size: 11px; background: var(--amber-100); color: var(--amber-800); border: none; border-radius: 5px; padding: 5px 10px; cursor: pointer; font-weight: 700; white-space: nowrap; font-family: var(--font); }
+.promo-band { background: #f0faf6; border-top: 1px solid var(--green-200); padding: 10px 14px; display: flex; align-items: center; gap: 10px; }
+.promo-band-text { flex: 1; font-size: 11px; color: var(--green-700); font-weight: 600; }
+.promo-band-btn { font-size: 11px; background: var(--green-800); color: var(--white); border: none; border-radius: 5px; padding: 5px 10px; cursor: pointer; font-weight: 700; white-space: nowrap; font-family: var(--font); }
+.locked-block { background: #fafaf8; border: 1px dashed var(--gray-150); border-radius: var(--radius-lg); padding: 12px 16px; margin-left: 44px; display: flex; align-items: center; gap: 12px; }
+.lock-emoji { font-size: 18px; opacity: .35; flex-shrink: 0; }
+.locked-title { font-size: 13px; font-weight: 700; color: var(--gray-300); margin-bottom: 2px; }
+.locked-desc { font-size: 11px; color: var(--gray-200); line-height: 1.4; }
+
+/* ── MENTOR ROWS ── */
+.mentor-row { display: flex; align-items: center; gap: 11px; padding: 10px 14px; border-bottom: 1px solid #f8f8f6; }
+.mentor-row:last-child { border-bottom: none; }
+.mentor-icon { width: 34px; height: 34px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.mi-green { background: var(--green-50); }
+.mi-amber { background: var(--amber-50); }
+.mi-blue { background: var(--blue-50); }
+.mentor-name { font-size: 12.5px; font-weight: 700; color: var(--gray-900); margin-bottom: 2px; }
+.mentor-desc { font-size: 11px; color: var(--gray-300); }
+.mentor-btn { font-size: 11px; padding: 5px 11px; background: var(--gray-50); border: 1px solid var(--gray-150); border-radius: 5px; cursor: pointer; color: var(--gray-400); font-weight: 600; white-space: nowrap; font-family: var(--font); }
+.mentor-btn:hover { background: var(--green-50); color: var(--green-800); border-color: var(--green-200); }
+
+/* ── STUDIO ── */
+.studio-layout { display: grid; grid-template-columns: 1fr 300px; flex: 1; overflow: hidden; }
+.editor-area { background: #12121e; display: flex; flex-direction: column; overflow: hidden; }
+.editor-topbar { background: #0d0d1a; border-bottom: 1px solid #1e1e30; padding: 9px 16px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.etabs { display: flex; gap: 2px; }
+.etab { padding: 5px 12px; border-radius: 5px; font-size: 11.5px; cursor: pointer; font-weight: 600; color: #666; font-family: var(--font); transition: all .1s; }
+.etab.active { background: #1e1e30; color: #c8c8e0; }
+.editor-actions { display: flex; gap: 8px; }
+.ea-btn { padding: 5px 12px; border-radius: 5px; font-size: 11px; cursor: pointer; font-weight: 700; border: none; font-family: var(--font); }
+.ea-review { background: #0d2418; color: var(--green-400); border: 1px solid #1a3d28; }
+.ea-run { background: var(--green-600); color: var(--white); }
+.file-tab-bar { background: #0d0d1a; border-bottom: 1px solid #1e1e30; padding: 5px 16px; display: flex; gap: 12px; flex-shrink: 0; }
+.ftab { font-size: 11px; color: #555; cursor: pointer; display: flex; align-items: center; gap: 5px; padding: 3px 0; }
+.ftab.active { color: #c8c8e0; }
+.fdot { width: 5px; height: 5px; border-radius: 50%; background: var(--amber-100); }
+.code-view { flex: 1; overflow-y: auto; padding: 14px 16px; font-family: var(--mono); font-size: 12px; line-height: 1.75; color: #c8c8e0; }
+.code-line { display: flex; gap: 16px; min-height: 21px; }
+.ln { color: #2a2a4a; min-width: 20px; text-align: right; user-select: none; flex-shrink: 0; font-size: 11px; }
+.lc { flex: 1; }
+.k { color: #bb80ff; }
+.s { color: #98ec98; }
+.fn { color: #80ccff; }
+.cm { color: #44445a; font-style: italic; }
+.num { color: #f9a875; }
+.var { color: #e8e8ff; }
+.editor-footer { background: #0d0d1a; border-top: 1px solid #1e1e30; flex-shrink: 0; }
+.footer-tabs { display: flex; gap: 0; border-bottom: 1px solid #1e1e30; padding: 0 16px; }
+.ft { font-size: 11px; color: #444; cursor: pointer; padding: 7px 12px 6px; border-bottom: 2px solid transparent; font-weight: 600; }
+.ft.active { color: var(--green-400); border-bottom-color: var(--green-400); }
+.output { padding: 10px 16px; font-family: var(--mono); font-size: 11.5px; color: var(--green-200); line-height: 1.6; min-height: 60px; }
+.tutor-panel { background: var(--white); display: flex; flex-direction: column; border-left: 1px solid var(--gray-100); overflow: hidden; }
+.tp-header { padding: 12px 14px; border-bottom: 1px solid var(--gray-100); background: #fafaf8; flex-shrink: 0; }
+.tp-title { font-size: 13px; font-weight: 700; color: var(--gray-900); margin-bottom: 2px; }
+.tp-subtitle { font-size: 11px; color: var(--gray-300); }
+.tp-tabs { display: flex; border-bottom: 1px solid var(--gray-100); flex-shrink: 0; }
+.tp-tab { flex: 1; padding: 9px 4px; font-size: 11px; font-weight: 700; text-align: center; cursor: pointer; color: var(--gray-300); border-bottom: 2px solid transparent; transition: all .1s; }
+.tp-tab.active { color: var(--green-800); border-bottom-color: var(--green-600); }
+.tp-body { flex: 1; overflow-y: auto; padding: 14px; }
+.sr-score-box { background: var(--green-50); border: 1px solid var(--green-200); border-radius: var(--radius-md); padding: 11px 13px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 13px; }
+.sr-score-n { font-size: 26px; font-weight: 800; color: var(--green-800); letter-spacing: -1px; }
+.sr-score-lbl { font-size: 11px; color: var(--green-700); margin-top: 1px; }
+.sr-score-badge { font-size: 11px; background: var(--green-600); color: var(--white); padding: 4px 10px; border-radius: 10px; font-weight: 700; }
+.sr-section { margin-bottom: 13px; }
+.sr-label { font-size: 10px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 7px; }
+.sr-label.green { color: var(--green-700); }
+.sr-label.amber { color: var(--amber-600); }
+.sr-label.blue { color: var(--blue-700); }
+.sr-item { display: flex; gap: 8px; margin-bottom: 6px; }
+.sr-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
+.sr-dot.g { background: var(--green-600); }
+.sr-dot.a { background: var(--amber-100); }
+.sr-dot.b { background: var(--blue-400); }
+.sr-text { font-size: 12px; color: #444; line-height: 1.45; }
+.tp-input-area { border-top: 1px solid var(--gray-100); padding: 10px 12px; flex-shrink: 0; }
+.tp-ta { width: 100%; border: 1px solid var(--gray-150); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 12px; color: #444; resize: none; height: 56px; font-family: var(--font); background: #fafaf8; }
+.tp-chips { padding: 7px 12px 10px; display: flex; gap: 5px; flex-wrap: wrap; flex-shrink: 0; }
+.tp-chip { font-size: 10.5px; padding: 4px 9px; border-radius: 12px; background: var(--gray-50); color: var(--gray-400); cursor: pointer; border: 1px solid var(--gray-100); font-weight: 600; font-family: var(--font); }
+.tp-chip.on { background: var(--green-50); color: var(--green-800); border-color: var(--green-200); }
+
+/* ── INTERVIEW ── */
+.interview-tabs { display: flex; gap: 8px; margin-bottom: 18px; }
+.i-tab { padding: 7px 16px; border-radius: var(--radius-sm); font-size: 12.5px; cursor: pointer; font-weight: 700; border: 1px solid var(--gray-150); background: var(--white); color: var(--gray-300); font-family: var(--font); transition: all .1s; }
+.i-tab.active { background: var(--green-800); color: var(--white); border-color: var(--green-800); }
+.promo-interview-card { border: 1.5px solid var(--green-800); border-radius: var(--radius-lg); overflow: hidden; margin-bottom: 16px; }
+.pic-top { background: var(--green-800); padding: 20px 22px; }
+.pic-badge { font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--green-400); margin-bottom: 7px; }
+.pic-title { font-size: 20px; font-weight: 800; color: var(--white); letter-spacing: -.4px; margin-bottom: 5px; }
+.pic-sub { font-size: 12px; color: var(--green-200); line-height: 1.55; }
+.pic-body { padding: 18px 22px; background: var(--white); }
+.stakes-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+.stake { background: var(--gray-50); border-radius: var(--radius-md); padding: 10px 12px; }
+.stake-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--gray-300); margin-bottom: 4px; }
+.stake-value { font-size: 12.5px; font-weight: 700; color: var(--gray-900); }
+.warn-box { background: var(--amber-50); border: 1px solid var(--amber-100); border-radius: var(--radius-md); padding: 10px 14px; font-size: 12px; color: var(--amber-800); margin-bottom: 14px; line-height: 1.5; }
+.practice-item { background: var(--white); border: 1px solid var(--gray-100); border-radius: var(--radius-md); padding: 10px 14px; margin-bottom: 7px; display: flex; align-items: center; gap: 10px; }
+.pi-title { font-size: 12.5px; font-weight: 700; color: var(--gray-900); margin-bottom: 2px; }
+.pi-sub { font-size: 11px; color: var(--gray-300); }
+.pi-btn { font-size: 11px; padding: 5px 11px; background: var(--green-50); color: var(--green-800); border: 1px solid var(--green-200); border-radius: 5px; cursor: pointer; font-weight: 700; white-space: nowrap; font-family: var(--font); }
+
+/* ── WIN SCREEN ── */
+.win-top { background: var(--green-800); padding: 40px 32px; text-align: center; }
+.win-check-circle { width: 64px; height: 64px; border-radius: 50%; background: var(--green-600); margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; }
+.win-badge { font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--green-400); margin-bottom: 8px; }
+.win-title { font-size: 30px; font-weight: 800; color: var(--white); letter-spacing: -.6px; margin-bottom: 10px; }
+.win-desc { font-size: 13px; color: var(--green-200); line-height: 1.65; max-width: 400px; margin: 0 auto; }
+.win-body { background: var(--white); padding: 26px 32px; }
+.win-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+.win-stat { background: var(--gray-50); border-radius: var(--radius-md); padding: 14px; text-align: center; }
+.win-stat-n { font-size: 24px; font-weight: 800; color: var(--gray-900); letter-spacing: -.5px; }
+.win-stat-l { font-size: 11px; color: var(--gray-300); margin-top: 3px; }
+.win-actions { display: flex; gap: 10px; }
+
+/* ── JOB READINESS ── */
+.readiness-header { background: var(--white); border: 1px solid var(--gray-100); border-radius: var(--radius-lg); padding: 16px 20px; margin-bottom: 16px; display: flex; align-items: center; gap: 20px; }
+.rh-score { text-align: center; flex-shrink: 0; padding-right: 20px; border-right: 1px solid var(--gray-100); }
+.rh-score-n { font-size: 36px; font-weight: 800; color: var(--green-800); letter-spacing: -2px; }
+.rh-score-l { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; color: var(--green-700); margin-top: 2px; }
+.rh-body { flex: 1; }
+.rh-title { font-size: 14px; font-weight: 700; color: var(--gray-900); margin-bottom: 4px; }
+.rh-sub { font-size: 12px; color: var(--gray-300); margin-bottom: 8px; }
+.rh-hint { font-size: 11px; font-weight: 600; color: var(--green-700); margin-top: 5px; }
+.tool-card { background: var(--white); border: 1px solid var(--gray-100); border-radius: var(--radius-lg); overflow: hidden; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.tool-card:hover { border-color: var(--green-200); box-shadow: 0 2px 12px rgba(29,158,117,.08); }
+.tc-top { padding: 14px 14px 10px; }
+.tc-icon { width: 38px; height: 38px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; margin-bottom: 10px; }
+.tci-g { background: var(--green-50); }
+.tci-b { background: var(--blue-50); }
+.tci-a { background: var(--amber-50); }
+.tc-title { font-size: 13px; font-weight: 700; color: var(--gray-900); margin-bottom: 3px; }
+.tc-sub { font-size: 11.5px; color: var(--gray-300); line-height: 1.4; }
+.tc-foot { padding: 9px 14px; border-top: 1px solid #f8f8f6; display: flex; justify-content: space-between; align-items: center; }
+.tc-btn { font-size: 11px; padding: 4px 10px; border-radius: 5px; background: var(--gray-50); color: var(--gray-400); border: 1px solid var(--gray-100); cursor: pointer; font-weight: 700; font-family: var(--font); }
+.resume-preview { background: var(--white); border: 1px solid var(--gray-100); border-radius: var(--radius-lg); overflow: hidden; }
+.rp-header { padding: 12px 16px; border-bottom: 1px solid #f8f8f6; display: flex; align-items: center; justify-content: space-between; }
+.rp-title { font-size: 13px; font-weight: 700; color: var(--gray-900); }
+.rp-body { padding: 16px; }
+.rp-name { font-size: 16px; font-weight: 800; color: var(--gray-900); margin-bottom: 2px; letter-spacing: -.3px; }
+.rp-role { font-size: 12.5px; color: var(--green-800); font-weight: 700; margin-bottom: 12px; }
+.rp-sec-title { font-size: 9.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--gray-300); margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid var(--gray-100); }
+.skill-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
+.skill { font-size: 11px; padding: 3px 9px; border-radius: 12px; font-weight: 600; }
+.skill-earned { background: var(--green-50); color: var(--green-800); border: 1px solid var(--green-200); }
+.skill-manual { background: var(--gray-100); color: var(--gray-400); border: 1px solid var(--gray-100); }
+.jd-panel { background: var(--white); border: 1px solid var(--gray-100); border-radius: var(--radius-lg); overflow: hidden; }
+.jd-header { padding: 12px 16px; border-bottom: 1px solid #f8f8f6; display: flex; align-items: center; justify-content: space-between; }
+.jd-score-row { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; padding: 14px 16px; }
+.jd-score-n { font-size: 32px; font-weight: 800; color: var(--green-800); letter-spacing: -1.5px; }
+.jd-score-info { flex: 1; }
+.jd-role { font-size: 14px; font-weight: 700; color: var(--gray-900); margin-bottom: 2px; }
+.jd-comp { font-size: 11px; color: var(--gray-300); }
+.jd-bar { height: 5px; background: var(--gray-100); border-radius: 3px; overflow: hidden; margin: 0 16px 14px; }
+.jd-fill { height: 100%; border-radius: 3px; }
+.jd-gaps { padding: 0 16px 14px; }
+.jd-gap-title { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; color: var(--gray-300); margin-bottom: 8px; }
+.jd-gap-item { display: flex; gap: 8px; margin-bottom: 6px; align-items: flex-start; }
+.jd-gap-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+.jd-gap-text { font-size: 12px; color: #444; line-height: 1.35; }
+.jd-input { padding: 0 16px 16px; }
+.jd-ta { width: 100%; border: 1px solid var(--gray-150); border-radius: var(--radius-sm); padding: 9px 11px; font-size: 12px; color: #444; resize: none; height: 80px; font-family: var(--font); background: #fafaf8; }
+
+/* ── RIGHT PANEL (Today) ── */
+.right-panel { width: 220px; border-left: 1px solid var(--gray-100); background: var(--white); overflow-y: auto; padding: 16px; flex-shrink: 0; }
+.rp-section { margin-bottom: 18px; padding-bottom: 18px; border-bottom: 1px solid #f5f5f3; }
+.rp-section:last-child { border-bottom: none; }
+.rs-label { font-size: 10px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; color: var(--gray-300); margin-bottom: 9px; }
+.streak-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-bottom: 4px; }
+.sd { height: 20px; border-radius: 3px; background: var(--gray-100); }
+.sd.on { background: var(--green-600); }
+.sd.today { background: var(--green-800); }
+.streak-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.sday { font-size: 9px; color: var(--gray-200); text-align: center; }
+.promo-earned { background: var(--green-50); border: 1px solid var(--green-200); border-radius: var(--radius-md); padding: 10px 12px; }
+.pe-empty { font-size: 12px; color: var(--gray-300); text-align: center; padding: 4px 0; }
+.pe-hint { font-size: 10.5px; color: var(--gray-200); text-align: center; margin-top: 4px; line-height: 1.4; }
+.news-item { display: flex; gap: 9px; padding: 8px 0; border-bottom: 1px solid #f5f5f3; }
+.news-item:last-child { border-bottom: none; }
+.news-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--green-600); flex-shrink: 0; margin-top: 5px; }
+.news-title { font-size: 12px; font-weight: 700; color: var(--gray-900); margin-bottom: 2px; line-height: 1.3; }
+.news-sub { font-size: 11px; color: var(--gray-300); line-height: 1.3; }
+
+/* ── REVIEW CARD ── */
+.review-card { background: var(--white); border: 1px solid var(--gray-100); border-radius: var(--radius-lg); margin-bottom: 10px; overflow: hidden; }
+.rc-top { padding: 12px 14px; border-bottom: 1px solid #f8f8f6; }
+.rc-badges { display: flex; gap: 6px; margin-bottom: 8px; }
+.rc-q { font-size: 13px; font-weight: 600; color: var(--gray-900); line-height: 1.4; }
+.rc-ans { font-size: 11px; color: var(--gray-300); margin-top: 4px; line-height: 1.4; }
+.rc-btns { display: flex; gap: 8px; padding: 10px 14px; }
+.rb { flex: 1; padding: 8px; border-radius: var(--radius-sm); border: 1px solid; font-size: 11px; font-weight: 700; cursor: pointer; text-align: center; font-family: var(--font); }
+.rb-f { background: #fff2f0; border-color: #f5c0b8; color: #c0392b; }
+.rb-h { background: var(--amber-50); border-color: var(--amber-100); color: var(--amber-800); }
+.rb-e { background: var(--green-50); border-color: var(--green-200); color: var(--green-800); }
+
+/* ── REFLECT ── */
+.reflect-card { background: var(--white); border: 1px solid var(--gray-100); border-radius: var(--radius-lg); overflow: hidden; margin-bottom: 10px; }
+.rf-top { padding: 12px 14px; border-bottom: 1px solid #f8f8f6; }
+.rf-title { font-size: 13px; font-weight: 700; color: var(--gray-900); margin-bottom: 8px; }
+.mood-row { display: flex; gap: 6px; }
+.mood { font-size: 11.5px; padding: 5px 11px; border-radius: 20px; border: 1px solid var(--gray-150); background: var(--gray-50); cursor: pointer; color: var(--gray-400); font-weight: 600; font-family: var(--font); transition: all .1s; }
+.mood.active { background: var(--green-50); border-color: var(--green-200); color: var(--green-800); }
+.rf-input { padding: 10px 14px; }
+.rf-ta { width: 100%; border: 1px solid var(--gray-150); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 12px; color: #444; resize: none; height: 52px; background: #fafaf8; font-family: var(--font); }
+
+/* ── PROGRESS PAGE ── */
+.timeline-row { display: flex; gap: 14px; align-items: stretch; margin-bottom: 12px; }
+.tl-num { width: 36px; display: flex; flex-direction: column; align-items: center; flex-shrink: 0; }
+.tl-dot { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; flex-shrink: 0; }
+.tl-dot.earned { background: var(--green-600); color: var(--white); }
+.tl-dot.active { background: var(--green-800); color: var(--white); box-shadow: 0 0 0 4px var(--green-100); }
+.tl-dot.future { background: var(--gray-100); color: var(--gray-200); }
+.tl-line { flex: 1; width: 2px; background: var(--gray-100); margin: 4px auto 0; }
+.tl-line.earned { background: var(--green-600); }
+.tl-card { flex: 1; background: var(--white); border: 1px solid var(--gray-100); border-radius: var(--radius-lg); padding: 12px 16px; margin-bottom: 0; }
+.tl-card.earned-card { border-color: var(--green-200); }
+.tl-card.active-card { border-color: var(--green-800); border-width: 1.5px; }
+.tl-role { font-size: 14px; font-weight: 800; color: var(--gray-900); margin-bottom: 3px; }
+.tl-role.future-role { color: var(--gray-200); }
+.tl-status { font-size: 11px; font-weight: 700; margin-bottom: 6px; }
+.tl-status.done-st { color: var(--green-700); }
+.tl-status.active-st { color: var(--green-800); }
+.tl-status.future-st { color: var(--gray-200); }
+.tl-skills { display: flex; flex-wrap: wrap; gap: 4px; }
+.tl-skill { font-size: 10px; padding: 2px 7px; border-radius: 8px; font-weight: 600; }
+.tl-skill.earned-skill { background: var(--green-50); color: var(--green-800); }
+.tl-skill.future-skill { background: var(--gray-100); color: var(--gray-200); }
+
+/* ── NOTEBOOK ── */
+.note-card { background: var(--white); border: 1px solid var(--gray-100); border-radius: var(--radius-lg); padding: 14px 16px; margin-bottom: 10px; }
+.note-source { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--blue-700); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+.note-date { font-weight: 400; color: var(--gray-300); }
+.note-content { font-size: 12.5px; color: var(--gray-900); line-height: 1.55; margin-bottom: 10px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.note-takeaway-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--gray-300); margin-bottom: 4px; }
+.note-takeaway-input { width: 100%; border: 1px dashed var(--gray-150); border-radius: 5px; padding: 6px 9px; font-size: 12px; color: #666; font-family: var(--font); background: #fafaf8; }
+
+/* ── SCROLLBARS ── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--gray-150); border-radius: 4px; }
+
+/* ── LEVEL BLOCKS ── */
+.level-block { margin-bottom: 12px; }
+.level-hdr { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.level-num { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; flex-shrink: 0; border: 2px solid; }
+.ln-active { background: var(--green-800); color: var(--white); border-color: var(--green-800); box-shadow: 0 0 0 4px var(--green-100); }
+.ln-locked { background: var(--gray-50); color: var(--gray-200); border-color: var(--gray-100); }
+.ln-goal { background: var(--amber-50); color: var(--amber-600); border-color: var(--amber-100); }
+.level-info { flex: 1; }
+.level-title-text { font-size: 14px; font-weight: 800; color: var(--gray-900); letter-spacing: -.1px; }
+.level-title-text.locked-title { color: var(--gray-200); }
+.level-title-text.goal-title { color: var(--amber-600); }
+.level-tag { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 700; margin-top: 2px; }
+.lt-active { background: var(--green-50); color: var(--green-800); }
+.lt-locked { background: var(--gray-100); color: var(--gray-300); }
+.lt-goal { background: var(--amber-50); color: var(--amber-800); }
+.level-body { margin-left: 46px; background: var(--white); border: 1px solid var(--gray-100); border-radius: var(--radius-lg); overflow: hidden; }
+
+/* ── ANIMATIONS ── */
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.screen.active .content { animation: fadeIn .2s ease; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sb-logo">
+      <div class="sb-logo-mark">
+        <svg viewBox="0 0 14 14" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="1,10 4.5,5.5 7.5,8 11,3.5"/>
+        </svg>
+      </div>
+      <div class="sb-logo-text"><span>Career</span>Forge</div>
+    </div>
+    <div class="sb-nav">
+      <div class="sb-section">Learn</div>
+      <div class="sb-item active" data-screen="today">
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="5.5"/><polyline points="7,4 7,7 9.5,8.5"/></svg>
+        Today
+      </div>
+      <div class="sb-item" data-screen="dashboard">
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="12" height="12" rx="2"/><path d="M4 7h6M4 4.5h6M4 9.5h3.5"/></svg>
+        Dashboard
+      </div>
+      <div class="sb-item" data-screen="mypath">
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3.5h10M2 7h7M2 10.5h8.5"/></svg>
+        My path
+      </div>
+      <div class="sb-item" data-screen="exercises">
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="2,11 4.5,5 7.5,8 10,5 12.5,8"/></svg>
+        Exercises
+      </div>
+      <div class="sb-item" data-screen="studio">
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="3,10 5.5,4 8,7 10,4.5"/><path d="M2 12h10"/></svg>
+        Studio
+      </div>
+      <div class="sb-section">Advance</div>
+      <div class="sb-item" data-screen="interview">
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="5.5" r="3"/><path d="M1.5 13s1.5-3 5.5-3 5.5 3 5.5 3"/></svg>
+        Promotion interview
+      </div>
+      <div class="sb-item" data-screen="progress">
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="1,11 4,7 7,9 10,5 13,7"/></svg>
+        Level progress
+      </div>
+      <div class="sb-section">Career</div>
+      <div class="sb-item" data-screen="career">
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="10" height="11" rx="1.5"/><path d="M5 5h4M5 7.5h4M5 10h2.5"/></svg>
+        Job readiness
+      </div>
+      <div class="sb-item" data-screen="notebook">
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 1h8a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V2a1 1 0 011-1z"/><path d="M5 4h4M5 7h4M5 10h2"/></svg>
+        Notebook
+      </div>
+    </div>
+    <div class="sb-bottom">
+      <div class="sb-role-card">
+        <div class="sb-role-label">Current role</div>
+        <div class="sb-role-name">Python Developer</div>
+        <div class="sb-role-next">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 5h6M5.5 2l3 3-3 3"/></svg>
+          Next: Data Analyst
+        </div>
+      </div>
+      <div class="sb-user">
+        <div class="sb-avatar">RR</div>
+        <div>
+          <div class="sb-user-name">Raja Raje</div>
+          <div class="sb-user-role">Python Developer</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PAGE AREA -->
+  <div class="page-area">
+
+    <!-- ═══════════════════════════════════════
+         SCREEN: TODAY
+    ═══════════════════════════════════════ -->
+    <div class="screen active" id="screen-today" data-screen-label="Today">
+      <div class="topbar">
+        <div class="topbar-left">
+          <div class="page-title">Good evening, Raja — you're a Python Developer.</div>
+          <div class="page-sub">Wednesday, April 22 · 3 lessons to your Promotion Interview</div>
+        </div>
+        <div class="topbar-right">
+          <span class="chip chip-green">3 lessons left</span>
+          <span class="chip chip-amber">7 reviews due</span>
+        </div>
+      </div>
+      <div style="display:flex;flex:1;overflow:hidden">
+        <div class="content" style="flex:1">
+          <!-- Promo Banner -->
+          <div class="promo-banner">
+            <div class="pb-eyebrow">Python Developer → Data Analyst · Promotion path</div>
+            <div class="pb-steps">
+              <div class="pbs"><div class="pbs-dot done">✓</div><div class="pbs-label done">Lessons 1–2</div></div>
+              <div class="pbs-line done"></div>
+              <div class="pbs"><div class="pbs-dot active">3</div><div class="pbs-label active">3 lessons left</div></div>
+              <div class="pbs-line pending"></div>
+              <div class="pbs"><div class="pbs-dot pending">C</div><div class="pbs-label">Capstone</div></div>
+              <div class="pbs-line pending"></div>
+              <div class="pbs"><div class="pbs-dot pending">R</div><div class="pbs-label">Senior review</div></div>
+              <div class="pbs-line pending"></div>
+              <div class="pbs"><div class="pbs-dot pending">I</div><div class="pbs-label">Promo interview</div></div>
+            </div>
+            <div class="progress-bar" style="margin-bottom:6px"><div class="progress-fill" style="width:33%"></div></div>
+            <div class="pb-footer">
+              <span class="pb-pct">33% complete</span>
+              <span class="pb-cta">Up next: APIs &amp; async programming →</span>
+            </div>
+          </div>
+          <!-- Up Next -->
+          <div class="card accent" style="margin-bottom:10px">
+            <div class="card-pad">
+              <div class="eyebrow green">Up next · lesson 3 of 6</div>
+              <div class="card-title">APIs &amp; async programming</div>
+              <div class="card-sub" style="margin-bottom:10px">Python Developer level · ~45 min · builds toward your capstone</div>
+              <div style="display:flex;gap:7px">
+                <button class="btn btn-green" onclick="nav('studio')">Continue lesson →</button>
+                <button class="btn btn-outline">View plan</button>
+              </div>
+            </div>
+          </div>
+          <!-- Review -->
+          <div class="review-card">
+            <div class="rc-top">
+              <div class="rc-badges"><span class="badge badge-green">Spaced review</span><span class="badge badge-amber">7 due today</span></div>
+              <div class="rc-q">Under which condition would HNSW's O(log n) query complexity disappear, making brute-force search preferable?</div>
+              <div class="rc-ans">Correct: When vector dimension is very low (e.g. 2D), HNSW overhead outweighs its benefit.</div>
+            </div>
+            <div class="rc-btns">
+              <div class="rb rb-f">Forgot</div>
+              <div class="rb rb-h">Hard</div>
+              <div class="rb rb-e">Easy</div>
+            </div>
+          </div>
+          <!-- Reflect -->
+          <div class="reflect-card">
+            <div class="rf-top">
+              <div class="rf-title">Daily reflection — how does learning feel right now?</div>
+              <div class="mood-row">
+                <div class="mood">Blocked</div>
+                <div class="mood">Meh</div>
+                <div class="mood active">Steady</div>
+                <div class="mood">Flowing</div>
+              </div>
+            </div>
+            <div class="rf-input"><textarea class="rf-ta" placeholder="One line about what's working or what's not..."></textarea></div>
+            <div style="padding:0 14px 12px;display:flex;justify-content:flex-end"><button class="btn btn-green">Log reflection</button></div>
+          </div>
+        </div>
+        <!-- Right Panel -->
+        <div class="right-panel">
+          <div class="rp-section">
+            <div class="rs-label">Promotion goal</div>
+            <div style="font-size:14px;font-weight:800;color:var(--gray-900);margin-bottom:2px">Data Analyst</div>
+            <div style="font-size:11px;color:var(--gray-300);margin-bottom:7px">by Jun 22 · 60 days left</div>
+            <div class="progress-bar" style="margin-bottom:4px"><div class="progress-fill" style="width:2%"></div></div>
+            <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--gray-300)"><span>2%</span><span>60d left</span></div>
+          </div>
+          <div class="rp-section">
+            <div class="rs-label">Weekly streak</div>
+            <div class="streak-grid">
+              <div class="sd"></div><div class="sd"></div><div class="sd on"></div><div class="sd today"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div>
+            </div>
+            <div class="streak-days">
+              <div class="sday">M</div><div class="sday">T</div><div class="sday">W</div><div class="sday">T</div><div class="sday">F</div><div class="sday">S</div><div class="sday">S</div>
+            </div>
+            <div style="font-size:10px;color:var(--gray-300);margin-top:5px">2 of 7 days active</div>
+          </div>
+          <div class="rp-section">
+            <div class="rs-label">Promotions earned</div>
+            <div class="promo-earned">
+              <div class="pe-empty">No promotions yet</div>
+              <div class="pe-hint">Finish capstone to unlock your Promotion Interview</div>
+            </div>
+          </div>
+          <div class="rp-section">
+            <div class="rs-label">Industry pulse</div>
+            <div class="news-item">
+              <div class="news-dot"></div>
+              <div><div class="news-title">Long-context windows don't replace RAG</div><div class="news-sub">Teams measuring 4× cost for naive context stuffing</div></div>
+            </div>
+            <div class="news-item">
+              <div class="news-dot"></div>
+              <div><div class="news-title">Claude 4 Opus released</div><div class="news-sub">New benchmark leader for agentic tasks</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════
+         SCREEN: DASHBOARD
+    ═══════════════════════════════════════ -->
+    <div class="screen" id="screen-dashboard" data-screen-label="Dashboard">
+      <div class="topbar">
+        <div class="topbar-left">
+          <div class="page-title">Good evening, Raja — you're a Python Developer.</div>
+          <div class="page-sub">Wednesday, April 22 · 3 lessons to your Promotion Interview</div>
+        </div>
+        <div class="topbar-right">
+          <span class="chip chip-green">Level 1 of 6</span>
+        </div>
+      </div>
+      <div class="content">
+        <!-- Career Ladder -->
+        <div class="career-ladder">
+          <div class="ladder-header">
+            <div>
+              <div class="ladder-title">Your career ladder — 6 months to Senior GenAI Engineer</div>
+              <div class="ladder-sub">Each level = a real industry role · Pass capstone + promotion interview to advance</div>
+            </div>
+          </div>
+          <div class="ladder-steps">
+            <div class="step"><div class="step-node current">1</div><div class="step-label current">Python<br>Dev</div></div>
+            <div class="step-connector pending"></div>
+            <div class="step"><div class="step-node next">2</div><div class="step-label next">Data<br>Analyst</div></div>
+            <div class="step-connector pending"></div>
+            <div class="step"><div class="step-node locked">3</div><div class="step-label locked">Data<br>Scientist</div></div>
+            <div class="step-connector pending"></div>
+            <div class="step"><div class="step-node locked">4</div><div class="step-label locked">ML<br>Engineer</div></div>
+            <div class="step-connector pending"></div>
+            <div class="step"><div class="step-node locked">5</div><div class="step-label locked">GenAI<br>Engineer</div></div>
+            <div class="step-connector pending"></div>
+            <div class="step"><div class="step-node goal">6</div><div class="step-label goal">Sr. GenAI<br>Eng.</div></div>
+          </div>
+          <div class="ladder-footer">
+            <div class="ladder-progress">
+              <div class="ladder-pct">33% — Level 1 in progress</div>
+              <div class="progress-bar" style="margin-top:5px"><div class="progress-fill" style="width:33%"></div></div>
+            </div>
+            <div class="ladder-cta">3 lessons + capstone → Promotion Interview → Data Analyst</div>
+          </div>
+        </div>
+        <!-- Current + Next Level -->
+        <div class="grid-2">
+          <div class="card accent">
+            <div class="card-pad">
+              <div class="eyebrow green">Current level · Python Developer</div>
+              <div class="card-title">Intro to AI Engineering</div>
+              <div class="card-sub">Lesson 3 of 6 · ~45 min · APIs &amp; async</div>
+              <div class="progress-bar" style="margin:10px 0 8px"><div class="progress-fill" style="width:33%"></div></div>
+              <div class="capstone-band" style="margin:10px -14px -14px;border-radius:0 0 10px 10px">
+                <span class="cap-icon">★</span>
+                <div class="cap-info"><div class="cap-title">Capstone: Build a CLI AI tool</div><div class="cap-sub">Unlocks after lesson 5</div></div>
+                <button class="cap-btn">View brief</button>
+              </div>
+            </div>
+            <div style="padding:10px 14px 12px;display:flex;gap:7px">
+              <button class="btn btn-green" onclick="nav('studio')">Continue →</button>
+              <button class="btn btn-outline" onclick="nav('mypath')">View path</button>
+            </div>
+          </div>
+          <div class="card dashed">
+            <div class="card-pad">
+              <div class="eyebrow gray">Next level · locked</div>
+              <div class="card-title" style="color:var(--gray-300)">Data Analyst track</div>
+              <div class="card-sub">SQL · pandas · EDA · dashboarding · stakeholder reporting</div>
+              <div style="margin-top:12px;padding:10px;background:var(--gray-100);border-radius:var(--radius-sm);font-size:11px;color:var(--gray-300);text-align:center">Pass Python Developer promotion interview to unlock</div>
+            </div>
+          </div>
+        </div>
+        <!-- Stats -->
+        <div class="grid-3">
+          <div class="stat-card"><div class="stat-n">2</div><div class="stat-l">Lessons done this level</div></div>
+          <div class="stat-card"><div class="stat-n">0</div><div class="stat-l">Promotion interviews passed</div></div>
+          <div class="stat-card"><div class="stat-n">120d</div><div class="stat-l">Days to Senior GenAI goal</div></div>
+        </div>
+        <!-- Mentors -->
+        <div class="section-label">Your AI mentor team</div>
+        <div class="card">
+          <div class="mentor-row">
+            <div class="mentor-icon mi-green"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#085041" stroke-width="1.5"><circle cx="8" cy="6" r="3.5"/><path d="M1.5 15s1.5-3.5 6.5-3.5 6.5 3.5 6.5 3.5"/></svg></div>
+            <div style="flex:1"><div class="mentor-name">Career mentor</div><div class="mentor-desc">Guides your path · tracks role readiness · answers strategy questions</div></div>
+            <button class="mentor-btn">Ask ↗</button>
+          </div>
+          <div class="mentor-row">
+            <div class="mentor-icon mi-amber"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#854F0B" stroke-width="1.5"><polyline points="1,13 5,6 8.5,10 11.5,5 15,8"/></svg></div>
+            <div style="flex:1"><div class="mentor-name">Tech lead (code review)</div><div class="mentor-desc">Production-grade feedback · Senior engineer persona · Capstone prep</div></div>
+            <button class="mentor-btn" onclick="nav('studio')">Review →</button>
+          </div>
+          <div class="mentor-row">
+            <div class="mentor-icon mi-blue"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#185FA5" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 5.5v3l2 1.5"/></svg></div>
+            <div style="flex:1"><div class="mentor-name">Mock interviewer</div><div class="mentor-desc">FAANG-style practice · Warm up before promotion interview</div></div>
+            <button class="mentor-btn" onclick="nav('interview')">Practice →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════
+         SCREEN: MY PATH
+    ═══════════════════════════════════════ -->
+    <div class="screen" id="screen-mypath" data-screen-label="My path">
+      <div class="topbar">
+        <div class="topbar-left">
+          <div class="page-title">Your path to Senior GenAI Engineer</div>
+          <div class="page-sub">Pass capstone + promotion interview at each level to advance to the next role</div>
+        </div>
+      </div>
+      <div class="content">
+        <!-- Level 1 -->
+        <div class="level-block">
+          <div class="level-hdr">
+            <div class="level-num ln-active">1</div>
+            <div class="level-info">
+              <div class="level-title-text">Python Developer</div>
+              <span class="level-tag lt-active">Current level · 33% complete</span>
+            </div>
+          </div>
+          <div class="level-body">
+            <div class="lesson-row"><div class="l-dot done"></div><div class="l-name done">Python fundamentals</div><span class="l-tag l-req">required</span><div class="l-dur">45m</div></div>
+            <div class="lesson-row"><div class="l-dot done"></div><div class="l-name done">OOP &amp; modules</div><span class="l-tag l-req">required</span><div class="l-dur">50m</div></div>
+            <div class="lesson-row active-lesson"><div class="l-dot active"></div><div class="l-name active-text">APIs &amp; async programming</div><span class="l-tag l-req">required</span><div class="l-dur">45m</div></div>
+            <div class="lesson-row"><div class="l-dot up"></div><div class="l-name up">Testing &amp; debugging</div><span class="l-tag l-req">required</span><div class="l-dur">40m</div></div>
+            <div class="lesson-row"><div class="l-dot up"></div><div class="l-name up">Git &amp; collaboration</div><span class="l-tag l-req">required</span><div class="l-dur">35m</div></div>
+            <div class="lesson-row"><div class="l-dot up"></div><div class="l-name up">Docker &amp; environments</div><span class="l-tag l-opt">optional for your goal</span><div class="l-dur">60m</div></div>
+            <div class="capstone-band">
+              <span class="cap-icon">★</span>
+              <div class="cap-info"><div class="cap-title">Capstone: Build a CLI AI tool</div><div class="cap-sub">Submit → Senior review → Promotion interview · Unlocks after lesson 5</div></div>
+              <button class="cap-btn">View brief</button>
+            </div>
+            <div class="promo-band">
+              <div class="promo-band-text">Pass Promotion Interview → become Data Analyst + earn certificate</div>
+              <button class="promo-band-btn" onclick="nav('interview')">Locked — finish lessons</button>
+            </div>
+          </div>
+        </div>
+        <!-- Levels 2–6 -->
+        <div class="level-block">
+          <div class="level-hdr"><div class="level-num ln-locked">2</div><div class="level-info"><div class="level-title-text locked-title">Data Analyst</div><span class="level-tag lt-locked">Locked · pass Python Developer interview</span></div></div>
+          <div class="locked-block"><div class="lock-emoji">🔒</div><div><div class="locked-title">Pass Python Developer promotion interview</div><div class="locked-desc">SQL · pandas · EDA · Tableau · stakeholder reporting</div></div></div>
+        </div>
+        <div class="level-block">
+          <div class="level-hdr"><div class="level-num ln-locked">3</div><div class="level-info"><div class="level-title-text locked-title">Data Scientist</div><span class="level-tag lt-locked">Locked</span></div></div>
+          <div class="locked-block"><div class="lock-emoji">🔒</div><div><div class="locked-title">Pass Data Analyst promotion interview</div><div class="locked-desc">Statistics · ML modeling · feature engineering · A/B testing</div></div></div>
+        </div>
+        <div class="level-block">
+          <div class="level-hdr"><div class="level-num ln-locked">4</div><div class="level-info"><div class="level-title-text locked-title">ML Engineer</div><span class="level-tag lt-locked">Locked</span></div></div>
+          <div class="locked-block"><div class="lock-emoji">🔒</div><div><div class="locked-title">Pass Data Scientist promotion interview</div><div class="locked-desc">ML pipelines · model serving · MLflow · CI/CD for ML</div></div></div>
+        </div>
+        <div class="level-block">
+          <div class="level-hdr"><div class="level-num ln-locked">5</div><div class="level-info"><div class="level-title-text locked-title">GenAI Engineer</div><span class="level-tag lt-locked">Locked</span></div></div>
+          <div class="locked-block"><div class="lock-emoji">🔒</div><div><div class="locked-title">Pass ML Engineer promotion interview</div><div class="locked-desc">LLMs · RAG · prompt engineering · evals · LangChain</div></div></div>
+        </div>
+        <div class="level-block">
+          <div class="level-hdr"><div class="level-num ln-goal">6</div><div class="level-info"><div class="level-title-text goal-title">Senior GenAI Engineer</div><span class="level-tag lt-goal">🏆 Your destination</span></div></div>
+          <div class="locked-block" style="background:var(--amber-50);border-color:var(--amber-100)"><div style="font-size:18px">🏆</div><div><div class="locked-title" style="color:var(--amber-800)">The finish line — 6 months from now</div><div class="locked-desc" style="color:var(--amber-600)">AI Agents · Agentic Systems · LLMOps · Production RAG · Multi-agent · Scale</div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════
+         SCREEN: EXERCISES
+    ═══════════════════════════════════════ -->
+    <div class="screen" id="screen-exercises" data-screen-label="Exercises">
+      <div class="topbar">
+        <div class="topbar-left">
+          <div class="page-title">Exercises</div>
+          <div class="page-sub">Hands-on challenges with AI-powered code review · Python Developer level</div>
+        </div>
+        <div class="topbar-right"><span class="chip chip-green">1 of 4 done</span></div>
+      </div>
+      <div class="content">
+        <div class="section-label" style="margin-bottom:12px">Capstone exercises — required for promotion</div>
+        <div class="card" style="margin-bottom:10px;border-color:var(--amber-100);border-width:1.5px">
+          <div class="card-pad">
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="flex:1">
+                <div class="eyebrow amber">Capstone exercise</div>
+                <div class="card-title">Build a CLI AI tool with error handling</div>
+                <div class="card-sub">Python Developer capstone · 200 pts · Required for promotion interview</div>
+              </div>
+              <span class="badge badge-amber">Capstone</span>
+            </div>
+            <div style="margin-top:10px;display:flex;gap:7px"><button class="btn btn-green" onclick="nav('studio')">Start in Studio →</button></div>
+          </div>
+        </div>
+        <div class="section-label" style="margin-bottom:12px;margin-top:16px">Practice exercises</div>
+        <div class="card" style="margin-bottom:8px">
+          <div class="card-pad" style="display:flex;align-items:center;gap:10px">
+            <div style="flex:1"><div class="card-title">Write a prompt classifier</div><div class="card-sub">Beginner · 100 pts · Classification patterns</div></div>
+            <span class="badge badge-green">Done</span>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:8px">
+          <div class="card-pad" style="display:flex;align-items:center;gap:10px">
+            <div style="flex:1"><div class="card-title">Async API client with retry logic</div><div class="card-sub">Intermediate · 150 pts · Error handling</div></div>
+            <span class="badge badge-gray">Open</span>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:8px">
+          <div class="card-pad" style="display:flex;align-items:center;gap:10px">
+            <div style="flex:1"><div class="card-title">Build a streaming response handler</div><div class="card-sub">Intermediate · 150 pts · Streaming APIs</div></div>
+            <span class="badge badge-gray">Open</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════
+         SCREEN: STUDIO
+    ═══════════════════════════════════════ -->
+    <div class="screen" id="screen-studio" data-screen-label="Studio">
+      <div class="studio-layout" style="flex:1;overflow:hidden">
+        <div class="editor-area">
+          <div class="editor-topbar">
+            <div class="etabs">
+              <div class="etab active">Code</div>
+              <div class="etab">Trace</div>
+              <div class="etab">Challenges</div>
+            </div>
+            <div class="editor-actions">
+              <div class="ea-btn ea-review">Request senior review</div>
+              <div class="ea-btn ea-run">▶ Run</div>
+            </div>
+          </div>
+          <div class="file-tab-bar">
+            <div class="ftab active"><div class="fdot"></div> main.py</div>
+            <div class="ftab">utils.py</div>
+            <div class="ftab">+ New file</div>
+          </div>
+          <div class="code-view">
+            <div class="code-line"><span class="ln">1</span><span class="lc cm"># Capstone · Python Developer · CLI AI Tool</span></div>
+            <div class="code-line"><span class="ln">2</span><span class="lc"><span class="k">import</span> <span class="var">os</span></span></div>
+            <div class="code-line"><span class="ln">3</span><span class="lc"><span class="k">import</span> <span class="var">asyncio</span></span></div>
+            <div class="code-line"><span class="ln">4</span><span class="lc"><span class="k">from</span> <span class="var">anthropic</span> <span class="k">import</span> <span class="var">Anthropic</span></span></div>
+            <div class="code-line"><span class="ln">5</span><span class="lc"></span></div>
+            <div class="code-line"><span class="ln">6</span><span class="lc"><span class="var">client</span> = <span class="fn">Anthropic</span>()</span></div>
+            <div class="code-line"><span class="ln">7</span><span class="lc"></span></div>
+            <div class="code-line"><span class="ln">8</span><span class="lc"><span class="k">async def</span> <span class="fn">ask_claude</span>(<span class="var">prompt</span>: <span class="var">str</span>) -> <span class="var">str</span>:</span></div>
+            <div class="code-line"><span class="ln">9</span><span class="lc">    <span class="var">response</span> = <span class="k">await</span> <span class="var">client</span>.<span class="var">messages</span>.<span class="fn">create</span>(</span></div>
+            <div class="code-line"><span class="ln">10</span><span class="lc">        <span class="var">model</span>=<span class="s">"claude-sonnet-4-5"</span>,</span></div>
+            <div class="code-line"><span class="ln">11</span><span class="lc">        <span class="var">max_tokens</span>=<span class="num">1024</span>,</span></div>
+            <div class="code-line"><span class="ln">12</span><span class="lc">        <span class="var">messages</span>=[{<span class="s">"role"</span>: <span class="s">"user"</span>, <span class="s">"content"</span>: <span class="var">prompt</span>}]</span></div>
+            <div class="code-line"><span class="ln">13</span><span class="lc">    )</span></div>
+            <div class="code-line"><span class="ln">14</span><span class="lc">    <span class="k">return</span> <span class="var">response</span>.<span class="var">content</span>[<span class="num">0</span>].<span class="var">text</span></span></div>
+            <div class="code-line"><span class="ln">15</span><span class="lc"></span></div>
+            <div class="code-line"><span class="ln">16</span><span class="lc"><span class="k">async def</span> <span class="fn">main</span>():</span></div>
+            <div class="code-line"><span class="ln">17</span><span class="lc">    <span class="fn">print</span>(<span class="s">"CLI AI Tool · Python Developer Capstone"</span>)</span></div>
+            <div class="code-line"><span class="ln">18</span><span class="lc">    <span class="k">while</span> <span class="num">True</span>:</span></div>
+            <div class="code-line"><span class="ln">19</span><span class="lc">        <span class="var">prompt</span> = <span class="fn">input</span>(<span class="s">"\nYou: "</span>)</span></div>
+            <div class="code-line"><span class="ln">20</span><span class="lc">        <span class="k">if</span> <span class="var">prompt</span> == <span class="s">"quit"</span>: <span class="k">break</span></span></div>
+            <div class="code-line"><span class="ln">21</span><span class="lc">        <span class="var">reply</span> = <span class="k">await</span> <span class="fn">ask_claude</span>(<span class="var">prompt</span>)</span></div>
+            <div class="code-line"><span class="ln">22</span><span class="lc">        <span class="fn">print</span>(<span class="s">f"Claude: {reply}"</span>)</span></div>
+            <div class="code-line"><span class="ln">23</span><span class="lc"></span></div>
+            <div class="code-line"><span class="ln">24</span><span class="lc"><span class="var">asyncio</span>.<span class="fn">run</span>(<span class="fn">main</span>())</span></div>
+          </div>
+          <div class="editor-footer">
+            <div class="footer-tabs">
+              <div class="ft active">Output</div>
+              <div class="ft">Code quality</div>
+              <div class="ft">Mental model</div>
+              <div class="ft">Skills</div>
+            </div>
+            <div class="output">
+              CLI AI Tool · Python Developer Capstone<br>
+              You: explain async<br>
+              Claude: Async lets Python run tasks concurrently without blocking...
+            </div>
+          </div>
+        </div>
+        <div class="tutor-panel">
+          <div class="tp-header">
+            <div class="tp-title">Studio assistant</div>
+            <div class="tp-subtitle">Tutor · Senior review · Quiz me</div>
+          </div>
+          <div class="tp-tabs">
+            <div class="tp-tab">Tutor</div>
+            <div class="tp-tab active">Senior review</div>
+            <div class="tp-tab">Quiz</div>
+          </div>
+          <div class="tp-body">
+            <div class="sr-score-box">
+              <div><div class="sr-score-n">84</div><div class="sr-score-lbl">Production readiness</div></div>
+              <div class="sr-score-badge">Good shape</div>
+            </div>
+            <div class="sr-section">
+              <div class="sr-label green">What's working</div>
+              <div class="sr-item"><div class="sr-dot g"></div><div class="sr-text">Async/await used correctly — <code style="font-size:11px;background:#f0f0f0;padding:1px 4px;border-radius:3px">ask_claude</code> is properly awaited</div></div>
+              <div class="sr-item"><div class="sr-dot g"></div><div class="sr-text">Clean separation — API call isolated in its own function</div></div>
+              <div class="sr-item"><div class="sr-dot g"></div><div class="sr-text">Readable variable names, consistent style</div></div>
+            </div>
+            <div class="sr-section">
+              <div class="sr-label amber">Needs attention</div>
+              <div class="sr-item"><div class="sr-dot a"></div><div class="sr-text">No error handling on the API call — what happens on a 429?</div></div>
+              <div class="sr-item"><div class="sr-dot a"></div><div class="sr-text">API key not loaded from env — missing <code style="font-size:11px;background:#f0f0f0;padding:1px 4px;border-radius:3px">os.getenv</code></div></div>
+            </div>
+            <div class="sr-section">
+              <div class="sr-label blue">Before capstone submission</div>
+              <div class="sr-item"><div class="sr-dot b"></div><div class="sr-text">Add <code style="font-size:11px;background:#f0f0f0;padding:1px 4px;border-radius:3px">try/except anthropic.APIError</code> with retry</div></div>
+              <div class="sr-item"><div class="sr-dot b"></div><div class="sr-text">Load key via <code style="font-size:11px;background:#f0f0f0;padding:1px 4px;border-radius:3px">os.getenv("ANTHROPIC_API_KEY")</code></div></div>
+              <div class="sr-item"><div class="sr-dot b"></div><div class="sr-text">Add a <code style="font-size:11px;background:#f0f0f0;padding:1px 4px;border-radius:3px">--verbose</code> flag for debug output</div></div>
+            </div>
+          </div>
+          <div class="tp-input-area">
+            <textarea class="tp-ta" placeholder="Ask about your code..."></textarea>
+          </div>
+          <div class="tp-chips">
+            <div class="tp-chip on">Senior review</div>
+            <div class="tp-chip">Tutor</div>
+            <div class="tp-chip">Quiz me</div>
+            <div class="tp-chip">Career</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════
+         SCREEN: INTERVIEW
+    ═══════════════════════════════════════ -->
+    <div class="screen" id="screen-interview" data-screen-label="Promotion interview">
+      <div class="topbar">
+        <div class="topbar-left">
+          <div class="page-title">Promotion Interview</div>
+          <div class="page-sub">Practice anytime · Promotion interview unlocks after capstone submission</div>
+        </div>
+      </div>
+      <div class="content" id="interview-main">
+        <div class="interview-tabs">
+          <div class="i-tab" onclick="showPractice()">Practice interviews</div>
+          <div class="i-tab active" onclick="showPromo()">Promotion interview</div>
+        </div>
+        <div id="promo-view">
+          <div class="promo-interview-card">
+            <div class="pic-top">
+              <div class="pic-badge">Promotion Interview · Level 1</div>
+              <div class="pic-title">Python Developer → Data Analyst</div>
+              <div class="pic-sub">Your moment. One session to earn your Data Analyst title and certificate. No hand-holding — structured debrief at the end.</div>
+            </div>
+            <div class="pic-body">
+              <div class="stakes-grid">
+                <div class="stake"><div class="stake-label">What you earn</div><div class="stake-value">Data Analyst title + certificate</div></div>
+                <div class="stake"><div class="stake-label">Format</div><div class="stake-value">45 min · FAANG-style</div></div>
+                <div class="stake"><div class="stake-label">Covers</div><div class="stake-value">Python · APIs · capstone</div></div>
+              </div>
+              <div class="warn-box">Your capstone must be submitted and reviewed before this unlocks. This ensures you walk in ready — not cold.</div>
+              <button class="btn btn-green" style="width:100%;padding:11px;font-size:13px" onclick="showWin()">Start Promotion Interview →</button>
+            </div>
+          </div>
+          <div class="section-label">Warm up first — practice interviews</div>
+          <div class="practice-item">
+            <div style="flex:1"><div class="pi-title">Python fundamentals deep-dive</div><div class="pi-sub">OOP · async · testing · 30 min</div></div>
+            <span class="badge badge-gray">Practice</span>
+            <button class="pi-btn">Start →</button>
+          </div>
+          <div class="practice-item">
+            <div style="flex:1"><div class="pi-title">Debug a broken async pipeline</div><div class="pi-sub">Debugging scenario · 20 min</div></div>
+            <span class="badge badge-gray">Practice</span>
+            <button class="pi-btn">Start →</button>
+          </div>
+          <div class="practice-item">
+            <div style="flex:1"><div class="pi-title">System design: small Python service</div><div class="pi-sub">Design question · 30 min</div></div>
+            <span class="badge badge-gray">Practice</span>
+            <button class="pi-btn">Start →</button>
+          </div>
+        </div>
+        <!-- WIN SCREEN -->
+        <div id="win-view" style="display:none">
+          <div style="background:var(--white);border:1px solid var(--gray-100);border-radius:var(--radius-xl);overflow:hidden">
+            <div class="win-top">
+              <div class="win-check-circle">
+                <svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,14 11,20 23,8"/></svg>
+              </div>
+              <div class="win-badge">Promotion confirmed</div>
+              <div class="win-title">You are now a Data Analyst.</div>
+              <div class="win-desc">You've completed the Python Developer level, passed senior code review, and cracked the promotion interview. This is exactly how real engineers grow — one role at a time.</div>
+            </div>
+            <div class="win-body">
+              <div class="win-stats">
+                <div class="win-stat"><div class="win-stat-n">6</div><div class="win-stat-l">Lessons completed</div></div>
+                <div class="win-stat"><div class="win-stat-n">1</div><div class="win-stat-l">Capstone shipped</div></div>
+                <div class="win-stat"><div class="win-stat-n">Level 2</div><div class="win-stat-l">Now unlocked</div></div>
+              </div>
+              <div class="win-actions">
+                <button class="btn btn-green" style="flex:1;padding:11px;font-size:13px" onclick="nav('mypath')">Start Data Analyst level →</button>
+                <button class="btn btn-outline" style="padding:11px 16px">Download certificate</button>
+                <button class="btn btn-outline" style="padding:11px 16px">Share on LinkedIn</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════
+         SCREEN: PROGRESS
+    ═══════════════════════════════════════ -->
+    <div class="screen" id="screen-progress" data-screen-label="Level progress">
+      <div class="topbar">
+        <div class="topbar-left">
+          <div class="page-title">Level progress</div>
+          <div class="page-sub">Your career timeline · earn each role through capstone + promotion interview</div>
+        </div>
+      </div>
+      <div class="content">
+        <div class="grid-3" style="margin-bottom:20px">
+          <div class="stat-card"><div class="stat-n">2</div><div class="stat-l">Lessons completed</div></div>
+          <div class="stat-card"><div class="stat-n">0</div><div class="stat-l">Promotions earned</div></div>
+          <div class="stat-card"><div class="stat-n">33%</div><div class="stat-l">Level 1 progress</div></div>
+        </div>
+        <!-- Timeline -->
+        <div class="timeline-row">
+          <div class="tl-num"><div class="tl-dot active">1</div><div class="tl-line" style="background:var(--gray-100)"></div></div>
+          <div class="tl-card active-card">
+            <div class="tl-role">Python Developer</div>
+            <div class="tl-status active-st">In progress · 33% complete · 3 lessons remaining</div>
+            <div class="tl-skills">
+              <span class="tl-skill earned-skill">Python</span>
+              <span class="tl-skill earned-skill">Async</span>
+              <span class="tl-skill earned-skill">REST APIs</span>
+              <span class="tl-skill future-skill">Testing</span>
+              <span class="tl-skill future-skill">Git</span>
+            </div>
+          </div>
+        </div>
+        <div class="timeline-row">
+          <div class="tl-num"><div class="tl-dot future">2</div><div class="tl-line"></div></div>
+          <div class="tl-card"><div class="tl-role future-role">Data Analyst</div><div class="tl-status future-st">Locked · pass Python Developer interview to unlock</div><div class="tl-skills"><span class="tl-skill future-skill">SQL</span><span class="tl-skill future-skill">pandas</span><span class="tl-skill future-skill">EDA</span><span class="tl-skill future-skill">Tableau</span></div></div>
+        </div>
+        <div class="timeline-row">
+          <div class="tl-num"><div class="tl-dot future">3</div><div class="tl-line"></div></div>
+          <div class="tl-card"><div class="tl-role future-role">Data Scientist</div><div class="tl-status future-st">Locked</div><div class="tl-skills"><span class="tl-skill future-skill">Statistics</span><span class="tl-skill future-skill">ML modeling</span><span class="tl-skill future-skill">Experimentation</span></div></div>
+        </div>
+        <div class="timeline-row">
+          <div class="tl-num"><div class="tl-dot future">4</div><div class="tl-line"></div></div>
+          <div class="tl-card"><div class="tl-role future-role">ML Engineer</div><div class="tl-status future-st">Locked</div><div class="tl-skills"><span class="tl-skill future-skill">MLflow</span><span class="tl-skill future-skill">Model serving</span><span class="tl-skill future-skill">CI/CD</span></div></div>
+        </div>
+        <div class="timeline-row">
+          <div class="tl-num"><div class="tl-dot future">5</div><div class="tl-line" style="background:var(--amber-100)"></div></div>
+          <div class="tl-card"><div class="tl-role future-role">GenAI Engineer</div><div class="tl-status future-st">Locked</div><div class="tl-skills"><span class="tl-skill future-skill">LLMs</span><span class="tl-skill future-skill">RAG</span><span class="tl-skill future-skill">Evals</span><span class="tl-skill future-skill">LangGraph</span></div></div>
+        </div>
+        <div class="timeline-row">
+          <div class="tl-num"><div class="tl-dot future" style="background:var(--amber-50);color:var(--amber-600);border:2px solid var(--amber-100)">6</div></div>
+          <div class="tl-card" style="border-color:var(--amber-100)"><div class="tl-role" style="color:var(--amber-600)">Senior GenAI Engineer 🏆</div><div class="tl-status" style="color:var(--amber-600)">Your destination · 6 months away</div><div class="tl-skills"><span class="tl-skill future-skill">AI Agents</span><span class="tl-skill future-skill">LLMOps</span><span class="tl-skill future-skill">Prod. RAG</span><span class="tl-skill future-skill">Multi-agent</span></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════
+         SCREEN: JOB READINESS
+    ═══════════════════════════════════════ -->
+    <div class="screen" id="screen-career" data-screen-label="Job readiness">
+      <div class="topbar">
+        <div class="topbar-left">
+          <div class="page-title">You're a Python Developer. Here's how to land the role.</div>
+          <div class="page-sub">Skills auto-populate from platform · JD fit updates as you level up</div>
+        </div>
+      </div>
+      <div class="content">
+        <div class="readiness-header">
+          <div class="rh-score"><div class="rh-score-n">62%</div><div class="rh-score-l">Job ready</div></div>
+          <div class="rh-body">
+            <div class="rh-title">Python Developer job readiness</div>
+            <div class="rh-sub">Based on completed lessons, capstone progress, and skills earned on platform</div>
+            <div class="progress-bar"><div class="progress-fill" style="width:62%"></div></div>
+            <div class="rh-hint">Complete capstone + pass promotion interview → reach 90%+ readiness for Data Analyst roles</div>
+          </div>
+        </div>
+        <div class="grid-3">
+          <div class="tool-card">
+            <div class="tc-top">
+              <div class="tc-icon tci-g"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#085041" stroke-width="1.5"><rect x="2" y="2" width="14" height="15" rx="2"/><path d="M5 6h8M5 9h8M5 12h5"/></svg></div>
+              <div class="tc-title">Resume builder</div>
+              <div class="tc-sub">Auto-filled with your platform skills. Edit and export as PDF.</div>
+            </div>
+            <div class="tc-foot"><span class="badge badge-green">Auto-populated</span><button class="tc-btn">Open →</button></div>
+          </div>
+          <div class="tool-card">
+            <div class="tc-top">
+              <div class="tc-icon tci-b"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#185FA5" stroke-width="1.5"><rect x="2" y="3" width="14" height="13" rx="2"/><path d="M2 7h14M6 3v4M12 3v4"/></svg></div>
+              <div class="tc-title">JD fit analysis</div>
+              <div class="tc-sub">Paste any job description — get a fit score and gap plan instantly.</div>
+            </div>
+            <div class="tc-foot"><span class="badge badge-blue">AI-powered</span><button class="tc-btn">Analyze →</button></div>
+          </div>
+          <div class="tool-card">
+            <div class="tc-top">
+              <div class="tc-icon tci-a"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#854F0B" stroke-width="1.5"><circle cx="9" cy="7" r="4"/><path d="M2 17s1.5-4 7-4 7 4 7 4"/></svg></div>
+              <div class="tc-title">Interview prep bank</div>
+              <div class="tc-sub">Role-specific Q&amp;A. Technical + behavioural. Filtered by your level.</div>
+            </div>
+            <div class="tc-foot"><span class="badge badge-amber">Level-filtered</span><button class="tc-btn">Browse →</button></div>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="resume-preview">
+            <div class="rp-header">
+              <div class="rp-title">Resume preview</div>
+              <span class="badge badge-green">Auto-generated</span>
+            </div>
+            <div class="rp-body">
+              <div class="rp-name">Raja Raje</div>
+              <div class="rp-role">Python Developer · CareerForge certified</div>
+              <div class="rp-sec-title">Skills earned on platform</div>
+              <div class="skill-chips">
+                <span class="skill skill-earned">Python</span>
+                <span class="skill skill-earned">Async programming</span>
+                <span class="skill skill-earned">REST APIs</span>
+                <span class="skill skill-earned">OOP</span>
+                <span class="skill skill-manual">Git</span>
+                <span class="skill skill-manual">Docker</span>
+              </div>
+              <div class="rp-sec-title">Projects</div>
+              <div style="margin-bottom:4px"><div style="font-size:12.5px;font-weight:700;color:var(--gray-900)">CLI AI Tool · Capstone</div><div style="font-size:11px;color:var(--gray-300);margin-bottom:3px">Python Developer · CareerForge · 2026</div><div style="font-size:11.5px;color:#444;line-height:1.5;padding-left:10px;border-left:2px solid var(--gray-100)">Built async CLI tool integrating Claude API with retry logic and env-based auth</div></div>
+            </div>
+          </div>
+          <div class="jd-panel">
+            <div class="jd-header">
+              <div style="font-size:13px;font-weight:700;color:var(--gray-900)">JD fit analysis</div>
+              <span class="badge badge-blue">Last run · Apr 20</span>
+            </div>
+            <div class="jd-score-row">
+              <div class="jd-score-n">71%</div>
+              <div class="jd-score-info"><div class="jd-role">Junior Python Engineer</div><div class="jd-comp">TechCorp · Hyderabad</div></div>
+            </div>
+            <div class="jd-bar"><div class="jd-fill" style="width:71%;background:var(--green-600)"></div></div>
+            <div class="jd-gaps">
+              <div class="jd-gap-title">Gaps to close</div>
+              <div class="jd-gap-item"><div class="jd-gap-dot" style="background:var(--amber-100)"></div><div class="jd-gap-text">Error handling — covered in lesson 4 (Testing &amp; debugging)</div></div>
+              <div class="jd-gap-item"><div class="jd-gap-dot" style="background:var(--amber-100)"></div><div class="jd-gap-text">PostgreSQL basics — add Data Analyst level to your path</div></div>
+              <div class="jd-gap-item"><div class="jd-gap-dot" style="background:#f09595"></div><div class="jd-gap-text">FastAPI — optional lesson in Python Dev level</div></div>
+            </div>
+            <div class="jd-input">
+              <textarea class="jd-ta" placeholder="Paste a job description to get fit score + gap plan..."></textarea>
+              <div style="margin-top:8px;display:flex;gap:7px"><button class="btn btn-green">Analyze fit →</button><button class="btn btn-outline">Clear</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════
+         SCREEN: NOTEBOOK
+    ═══════════════════════════════════════ -->
+    <div class="screen" id="screen-notebook" data-screen-label="Notebook">
+      <div class="topbar">
+        <div class="topbar-left">
+          <div class="page-title">Notebook</div>
+          <div class="page-sub">Your saved insights — annotated and ready to review</div>
+        </div>
+        <div class="topbar-right">
+          <span class="chip chip-gray">3 notes</span>
+          <span class="chip chip-amber">3 due for review</span>
+        </div>
+      </div>
+      <div class="content">
+        <div style="display:flex;gap:8px;margin-bottom:16px">
+          <button class="btn btn-green" style="font-size:11px">All Notes</button>
+          <button class="btn btn-outline" style="font-size:11px">Review (3)</button>
+        </div>
+        <div class="note-card">
+          <div class="note-source">Chat · <span style="background:var(--green-50);color:var(--green-800);padding:1px 6px;border-radius:6px;font-weight:700">code-practice</span> <span class="note-date">Apr 21, 2026</span></div>
+          <div class="note-content">Studio: async programming patterns — <code style="font-size:11px;background:#f0f0f0;padding:1px 4px;border-radius:3px">asyncio.run(main())</code> is the entry point for running async code. The event loop handles concurrency without threads. Key: await only works inside async functions. Error handling with try/except wraps the await call.</div>
+          <div class="note-takeaway-label">My takeaway</div>
+          <input class="note-takeaway-input" placeholder="Add your own takeaway...">
+        </div>
+        <div class="note-card">
+          <div class="note-source">Tutor · <span style="background:var(--blue-50);color:var(--blue-700);padding:1px 6px;border-radius:6px;font-weight:700">RAG concepts</span> <span class="note-date">Apr 20, 2026</span></div>
+          <div class="note-content">How Vector Databases Work — Vector databases are purpose-built systems for storing and searching high-dimensional vector embeddings. They're the engine powering RAG, semantic search, recommendation systems. Core problem: given a query vector, find the K most similar vectors efficiently using algorithms like HNSW (Hierarchical Navigable Small World).</div>
+          <div class="note-takeaway-label">My takeaway</div>
+          <input class="note-takeaway-input" value="HNSW is like a skip list for vector space — logarithmic search time">
+        </div>
+        <div class="note-card">
+          <div class="note-source">Chat · <span style="background:var(--green-50);color:var(--green-800);padding:1px 6px;border-radius:6px;font-weight:700">code-practice</span> <span class="note-date">Apr 20, 2026</span></div>
+          <div class="note-content">Studio: def greet(name: str) → str — Type hints make Python code self-documenting. Return type annotation after → tells callers what to expect. f-strings with curly braces for interpolation. Output: Hello, PAE!</div>
+          <div class="note-takeaway-label">My takeaway</div>
+          <input class="note-takeaway-input" placeholder="Add your own takeaway...">
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /page-area -->
+</div><!-- /app-shell -->
+
+<script>
+function nav(screen) {
+  document.querySelectorAll('.sb-item').forEach(i => i.classList.remove('active'));
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const target = document.getElementById('screen-' + screen);
+  if (target) target.classList.add('active');
+  const navItem = document.querySelector('.sb-item[data-screen="' + screen + '"]');
+  if (navItem) navItem.classList.add('active');
+}
+
+document.querySelectorAll('.sb-item[data-screen]').forEach(item => {
+  item.addEventListener('click', () => nav(item.dataset.screen));
+});
+
+document.querySelectorAll('.mood').forEach(m => {
+  m.addEventListener('click', function() {
+    this.closest('.mood-row').querySelectorAll('.mood').forEach(x => x.classList.remove('active'));
+    this.classList.add('active');
+  });
+});
+
+function showPromo() {
+  document.getElementById('promo-view').style.display = 'block';
+  document.getElementById('win-view').style.display = 'none';
+  document.querySelectorAll('.i-tab').forEach((t,i) => t.classList.toggle('active', i===1));
+}
+function showPractice() {
+  document.querySelectorAll('.i-tab').forEach((t,i) => t.classList.toggle('active', i===0));
+}
+function showWin() {
+  document.getElementById('promo-view').style.display = 'none';
+  document.getElementById('win-view').style.display = 'block';
+}
+</script>
+</body>
+</html>
