@@ -1149,6 +1149,38 @@ NEXT_PUBLIC_RAZORPAY_KEY_ID=rzp_test_xxx
 - Admin-side refund UI (route exists; no frontend page yet).
 - "Students promoted" hero stat — needs a real count endpoint.
 
+### Phase D — Playwright E2E walk (2026-04-26)
+
+Walked the live `/catalog` route in Chromium as `demo@pae.dev`. **0 console errors across the entire flow.**
+
+Setup gotcha caught (logged to lessons.md territory):
+- **First Playwright pass rendered only 6 of the 13 cards** — Docker `compose build frontend` apparently kept a stale layer cache despite source-file changes. Fix: `docker compose build --no-cache frontend` + `docker compose up -d --force-recreate frontend`. The `frontend/CLAUDE.md` already calls out the rebuild requirement; what wasn't documented is that an incremental `compose build` can occasionally serve stale bundles. **Always `--no-cache` for catalog-style screen rewrites that change the data shape.**
+
+Verified end-to-end via Playwright DOM inspection:
+
+| Step | Result |
+|---|---|
+| Catalog renders 13 cards (11 courses + 2 bundles) | ✅ |
+| Hero stats derived from real data: "11 career tracks · 172 lessons + labs" | ✅ |
+| Free courses + previously-entitled paid courses show "✓ Enrolled" (disabled CTA) | ✅ |
+| Locked paid courses show "Unlock track" gold CTA | ✅ |
+| "Most popular" gold ribbon on Data Analyst (from `metadata.ribbon_text`) | ✅ |
+| "Save 30%" ribbon on Data Career Arc bundle | ✅ |
+| **Click "Unlock track" on Production RAG Systems (₹49)** → mock checkout fires → `useConfirmOrder` lands → CTA flips to "✓ Enrolled" within ~2 seconds | ✅ |
+| API confirms `is_unlocked=true` for that course (entitlement persisted) | ✅ |
+| **Click "Unlock bundle" on AI Engineer Arc (₹169)** wrapping `[python-developer, genai-engineer]` → 2 entitlements granted, 1 was idempotent (python-developer already entitled), GenAI Engineer flips instantly | ✅ |
+| Order history persisted: 6 orders with deterministic receipt numbers `CF-20260426-XXXXXX`, mix of `fulfilled` + `created` (orders that never reached confirm) | ✅ |
+| Bundle order has `target_type=bundle`, `amount_cents=16900`, `status=fulfilled` | ✅ |
+
+Screenshots captured (in repo root):
+- `catalog-real-data.png` — fresh state with 11 tracks + 2 bundles, demo's existing entitlements showing as "✓ Enrolled".
+- `catalog-after-unlock.png` — after Production RAG single-course purchase.
+- `catalog-after-bundle-purchase.png` — after AI Engineer Arc bundle purchase.
+
+The instant-unlock seam works exactly as designed: `useConfirmOrder.onSuccess` patches the `["catalog"]` query cache via `setQueryData`, flipping `is_unlocked: true` on every course id in `entitlements_granted`. No refetch round-trip; the UI flips before the optimistic update would even hit a re-render.
+
+UX observation worth flagging (not a bug): the Bundle CTA itself doesn't track its OWN purchased state — it stays "Unlock bundle" even after every component course is unlocked. A future polish pass could surface "✓ All courses unlocked" once every `course_ids` entry has an active entitlement. Logged as a follow-up.
+
 
 
 
