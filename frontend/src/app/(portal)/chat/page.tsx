@@ -3911,6 +3911,14 @@ function ChatPageInner() {
   const [startNewOpen, setStartNewOpen] = useState<boolean>(false);
   const prefillLoadedFor = useRef<string | null>(null);
   const initialConvApplied = useRef(false);
+  // P-Tutor3 (2026-04-26) — clicking "+ New" on `/chat?c=ABC` races: state
+  // updates clear `activeConvId` synchronously, but `router.replace("/chat")`
+  // updates `searchParams` asynchronously. The URL-sync effect would then
+  // see `urlConvId="ABC"` + `activeConvId=null` and re-open the conversation
+  // we just left. This ref tells the URL-sync effect to ignore one stale
+  // urlConvId tick after a manual clear. We unset it once urlConvId actually
+  // transitions to null.
+  const manualClearPending = useRef(false);
   // Same-tick cache for the first-message preview/agent so we can synthesize
   // a sidebar entry when the server id arrives in the first SSE event.
   const pendingFirstMessageRef = useRef<{ preview: string; agent: string | undefined } | null>(null);
@@ -4027,6 +4035,8 @@ function ChatPageInner() {
   useEffect(() => {
     if (!initialConvApplied.current) return;
     if (!urlConvId) {
+      // The URL has caught up to a manual clear — drop the guard.
+      manualClearPending.current = false;
       if (activeConvId !== null) {
         setActiveConvId(null);
         setHydratedMessages(undefined);
@@ -4034,6 +4044,9 @@ function ChatPageInner() {
       }
       return;
     }
+    // P-Tutor3 — ignore a stale `?c=` tick that lingers after `handleNew`
+    // until Next.js commits the `router.replace("/chat")` navigation.
+    if (manualClearPending.current) return;
     if (urlConvId === activeConvId) return;
     void openConversation(urlConvId, { pushUrl: false });
   }, [urlConvId, activeConvId, openConversation]);
@@ -4061,6 +4074,10 @@ function ChatPageInner() {
     setHydratedMessages(undefined);
     setComposerInput("");
     writeLastViewedId(null);
+    // P-Tutor3 — block the URL-sync effect from re-opening the old
+    // conversation while `searchParams` still holds the stale `?c=` value
+    // (Next.js commits the navigation on the next tick, not synchronously).
+    manualClearPending.current = true;
     router.replace("/chat");
     setChatKey((k) => k + 1);
   };
@@ -4107,6 +4124,8 @@ function ChatPageInner() {
     setHydratedMessages(undefined);
     setComposerInput("");
     writeLastViewedId(null);
+    // P-Tutor3 — see handleNew for why this guard is needed.
+    manualClearPending.current = true;
     router.replace("/chat");
     setChatKey((k) => k + 1);
   }, [router]);
@@ -4348,7 +4367,7 @@ function ChatPageInner() {
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNew}
         mode={activeMode}
-        onModeChange={handleModeChange}
+        onModeChange={handleModeChange as (next: string | null) => void}
         isEmpty={tutorIsEmpty}
         onOpenerPrompt={handleOpenerPrompt}
       >

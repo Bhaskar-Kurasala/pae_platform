@@ -1194,3 +1194,121 @@ UX observation worth flagging (not a bug): the Bundle CTA itself doesn't track i
 
 
 
+---
+
+## P-Tutor3 — Tutor screen bugfixes (2026-04-26)
+
+Two tactile bugs reported after the P-Tutor2 trim landed:
+
+1. **Conversation card was height-capped** at `min(72vh, 720px)`. The cap dated from when the screen had a mode-picker row above and a session-flow row below — both removed in P-Tutor2 — so the rationale for capping inside-the-viewport was gone. On a 1440×900 laptop the card stopped at 720px even though there were ~180px of empty space below it.
+2. **`+ New` did not start a fresh conversation** when clicked from the Recent rail while viewing an existing conversation. The visible chat still showed the previous transcript.
+
+### Bug 1 — fix
+
+`frontend/src/app/v8.css` — `.tutor-conv-card`:
+
+```css
+/* before */
+height: min(72vh, 720px);
+/* after */
+height: calc(100vh - 160px);
+```
+
+The 160px reservation accounts for `.topbar` (~70px sticky) + `.pad` top/bottom padding (28+54 = 82px) plus a few pixels of breathing room. `min-height: 520px` retained so short viewports don't collapse the chat into a sliver.
+
+### Bug 2 — root cause
+
+`handleNew` already cleared `activeConvId`, `hydratedMessages`, the input, and bumped `chatKey`, then called `router.replace("/chat")`. On paper the URL-sync effect at `chat/page.tsx:4027` would then see `urlConvId === null` and not re-open anything.
+
+The race: in Next.js App Router, `useSearchParams()` is **not updated synchronously** by `router.replace`. So in the same React render after `handleNew` runs, `urlConvId` still holds the stale `"ABC"` while `activeConvId` is already `null`. The URL-sync effect's branch `if (urlConvId === activeConvId) return;` doesn't catch this — it sees mismatch and calls `openConversation(urlConvId, …)`, which re-fetches and re-installs the very conversation we just left.
+
+### Bug 2 — fix
+
+Added a `manualClearPending` ref. `handleNew` and `handleConfirmStartNew` set it `true` before calling `router.replace("/chat")`. The URL-sync effect short-circuits while the ref is `true` AND `urlConvId` is non-null. Once `urlConvId` actually transitions to `null` (when Next.js finally commits the navigation), the effect clears the ref and proceeds normally.
+
+```ts
+useEffect(() => {
+  if (!initialConvApplied.current) return;
+  if (!urlConvId) {
+    manualClearPending.current = false;   // URL caught up — drop the guard
+    if (activeConvId !== null) { /* clear */ }
+    return;
+  }
+  if (manualClearPending.current) return;  // ignore stale ?c= tick
+  if (urlConvId === activeConvId) return;
+  void openConversation(urlConvId, { pushUrl: false });
+}, [urlConvId, activeConvId, openConversation]);
+```
+
+### Verification (Playwright, 1440×900)
+
+1. Sent a message → URL became `/chat?c=fd2…fb55`, marker text visible, eyebrow "Resumed conversation".
+2. Clicked `+ New` → URL became `/chat`, marker text gone, eyebrow "Fresh thread", welcome screen back.
+3. Clicked the rail item to resume → URL `?c=…` returned, marker visible.
+4. Clicked `+ New` again → cleared again. Race-fix holds across the round-trip.
+5. Card height at 1440×900: now 740px (was 720px). At 1080p laptops it grows to ~920px.
+
+### Net change in this phase
+
+- **Frontend:** 1 CSS edit (`v8.css`), 3 chat page edits (`chat/page.tsx`: ref declaration + handleNew + handleConfirmStartNew + URL-sync effect).
+- **Lint:** 0 new errors on changed files.
+
+---
+
+## P-Tutor4 — Wider chat + collapsible rail (2026-04-26)
+
+User feedback: "horizontally it feels slightly congested. Apps like ChatGPT have a toggle to close the conversation history so we have much wider area for chat."
+
+### Layout — old vs new
+
+The Tutor screen was sharing `today-grid` (`minmax(0, 1.55fr) 360px`), which meant the chat column was capped by the wider Today copy block. Tutor doesn't need a 360px rail — the rail only hosts Recent conversations.
+
+Introduced `tutor-grid` with its own proportions:
+
+```css
+.tutor-grid {
+  grid-template-columns: minmax(0, 1fr) 300px;
+  align-items: start;
+  gap: 20px;
+  transition: grid-template-columns 0.28s var(--ease);
+}
+.tutor-grid.rail-collapsed {
+  grid-template-columns: minmax(0, 1fr) 0;
+  gap: 0;
+}
+```
+
+At 1440px viewport: chat column 720px → 780px (+8%). Rail trimmed 360px → 300px.
+
+### Collapse toggle (the ChatGPT-style affordance)
+
+- Inline `›` button at the rail header (next to `+ New`) hides the rail.
+- Floating `‹ Recent` pill appears at the top-right of the chat card to bring it back. Anchored at `top: -34px` so it sits above the card eyebrow without overlapping "Fresh thread" / "Resumed conversation" copy.
+- Persisted via `localStorage` key `tutor-rail-collapsed-v1` so the user's choice survives reloads.
+- Mobile breakpoint (`max-width: 980px`) hides the affordance entirely — the rail already stacks under the chat there, so collapsing doesn't make sense.
+
+### Numbers (1440×900 laptop, measured in Playwright)
+
+| state | chat card width | gain vs old `today-grid` |
+| --- | --- | --- |
+| old (today-grid)     |   720 px |  baseline |
+| new, rail expanded   |   780 px |  +60 px (+8%) |
+| new, rail collapsed  | 1100 px | +380 px (+53%) |
+
+### Files
+
+- `frontend/src/app/v8.css` — added `.tutor-grid`, `.tutor-grid.rail-collapsed`, `.tutor-rail-reopen`, `.tutor-rail-collapse`, mobile breakpoint guard.
+- `frontend/src/components/v8/screens/tutor-screen.tsx` — added `RAIL_COLLAPSED_KEY`, `railCollapsed` state with lazy initial from localStorage, `toggleRail` callback, swapped `today-grid` → `tutor-grid` with conditional `rail-collapsed` class, added inline collapse button and floating reopen pill.
+
+### Verification (Playwright)
+
+1. Initial render: card 780px, rail visible, collapse button at rail header.
+2. Click collapse: card grows to 1100px, rail fades + slides out, reopen pill appears top-right above the card. localStorage flips to `"1"`.
+3. Reload: collapsed state persists. Card still 1100px, reopen pill still visible.
+4. Click reopen pill: rail comes back, card returns to 780px, reopen pill removed. localStorage flips to `"0"`.
+
+### Net change in this phase
+
+- **Frontend:** 1 CSS edit (`v8.css`, ~95 added lines), 1 component edit (`tutor-screen.tsx`, ~40 added lines).
+- **Lint:** 0 new errors on changed files.
+

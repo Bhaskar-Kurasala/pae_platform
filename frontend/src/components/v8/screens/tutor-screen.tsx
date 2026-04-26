@@ -44,6 +44,9 @@ const MODE_OPTIONS: ReadonlyArray<ModeOption> = [
 /** localStorage key for the first-time help auto-open. */
 const HELP_SEEN_KEY = "tutor-help-seen-v1";
 
+/** localStorage key for the rail-collapsed preference (P-Tutor4). */
+const RAIL_COLLAPSED_KEY = "tutor-rail-collapsed-v1";
+
 function relativeTime(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
   const min = Math.round(ms / 60_000);
@@ -130,6 +133,28 @@ export function TutorScreen({
   }, []);
   const openHelp = useCallback(() => setHelpOpen(true), []);
 
+  // P-Tutor4 (2026-04-26) — collapsible rail. Persisted in localStorage so
+  // the user's choice survives reloads. Defaults to expanded.
+  const [railCollapsed, setRailCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem(RAIL_COLLAPSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleRail = useCallback(() => {
+    setRailCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(RAIL_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
   useSetV8Topbar({
     eyebrow: "AI Tutor",
     titleHtml: "Think out loud with a tutor that <i>remembers</i> what you nearly forgot.",
@@ -144,7 +169,26 @@ export function TutorScreen({
   return (
     <section className="screen active" id="screen-tutor">
       <div className="pad">
-        <div className="grid today-grid">
+        <div
+          className={cn("grid tutor-grid", railCollapsed && "rail-collapsed")}
+          style={{ position: "relative" }}
+        >
+          {/* P-Tutor4 — floating reopen pill, only when rail is collapsed.
+              Anchored to the top-right of the grid so it sits where the rail
+              header used to be. */}
+          {railCollapsed ? (
+            <button
+              type="button"
+              className="tutor-rail-reopen"
+              onClick={toggleRail}
+              aria-label="Show recent conversations"
+              title="Show recent conversations"
+            >
+              <span aria-hidden="true">‹</span>
+              <span>Recent</span>
+            </button>
+          ) : null}
+
           {/* ─── Left column: dark conversation card only ─── */}
           <div className="grid">
             <section className="tutor-conv-card reveal">
@@ -204,7 +248,10 @@ export function TutorScreen({
           {/* ─── Right rail: Recent conversations only ─── */}
           <aside className="rail">
             <section className="rail-card reveal">
-              <div className="section-title" style={{ marginBottom: 8 }}>
+              <div
+                className="section-title"
+                style={{ marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}
+              >
                 <div>
                   <h4 style={{ fontSize: 16 }}>Recent conversations</h4>
                 </div>
@@ -216,6 +263,16 @@ export function TutorScreen({
                   style={{ padding: "4px 10px", fontSize: 11 }}
                 >
                   + New
+                </button>
+                {/* P-Tutor4 — collapse the rail to widen the chat surface. */}
+                <button
+                  type="button"
+                  className="tutor-rail-collapse"
+                  onClick={toggleRail}
+                  aria-label="Hide recent conversations"
+                  title="Hide recent conversations"
+                >
+                  <span aria-hidden="true">›</span>
                 </button>
               </div>
               {conversationsLoading ? (
