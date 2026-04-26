@@ -1,0 +1,22 @@
+{
+  "cookies": [],
+  "origins": [
+    {
+      "origin": "http://localhost:3002",
+      "localStorage": [
+        {
+          "name": "auth_token",
+          "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5ZGUwNDc0MC1iMzYxLTRlMmQtOGNhMC0xMjI5MjY0MzA1NjAiLCJyb2xlIjoic3R1ZGVudCIsImV4cCI6MTc3NjkyMzQzMX0.qRJ2We6lmyQodJeR52eKGkCi8PlPXGdvydqtWLjXgkg"
+        },
+        {
+          "name": "auth-storage",
+          "value": "{\"state\":{\"user\":{\"id\":\"9de04740-b361-4e2d-8ca0-122926430560\",\"email\":\"smoke@test.com\",\"full_name\":\"Smoke Test\",\"role\":\"student\",\"avatar_url\":null},\"token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5ZGUwNDc0MC1iMzYxLTRlMmQtOGNhMC0xMjI5MjY0MzA1NjAiLCJyb2xlIjoic3R1ZGVudCIsImV4cCI6MTc3NjkyMzQzMX0.qRJ2We6lmyQodJeR52eKGkCi8PlPXGdvydqtWLjXgkg\",\"refreshToken\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5ZGUwNDc0MC1iMzYxLTRlMmQtOGNhMC0xMjI5MjY0MzA1NjAiLCJleHAiOjE3Nzc0OTk0MzEsInR5cGUiOiJyZWZyZXNoIn0.enxffqeneYAWmI31nyuaUrazQ9aPVUp6rwjutZfzZiM\",\"isAuthenticated\":true},\"version\":0}"
+        },
+        {
+          "name": "access_token",
+          "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5ZGUwNDc0MC1iMzYxLTRlMmQtOGNhMC0xMjI5MjY0MzA1NjAiLCJyb2xlIjoic3R1ZGVudCIsImV4cCI6MTc3NjkyMzQzMX0.qRJ2We6lmyQodJeR52eKGkCi8PlPXGdvydqtWLjXgkg"
+        }
+      ]
+    }
+  ]
+}

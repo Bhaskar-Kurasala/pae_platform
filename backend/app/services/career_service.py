@@ -195,6 +195,33 @@ def derive_resume_verdict(skill_map: dict[str, float]) -> str:
     return "needs_work"
 
 
+def normalize_llm_content(content: Any) -> str:
+    """Coerce a LangChain ``response.content`` into a plain string.
+
+    MiniMax (Anthropic-compatible endpoint) returns ``content`` as a list of
+    dicts mixing ``thinking`` and ``text`` blocks; Anthropic Claude returns
+    plain ``str``. Concatenate every ``text`` block in order and skip any
+    block whose ``type`` is ``thinking``. Falls back to ``str(content)`` for
+    unknown shapes.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                btype = block.get("type")
+                if btype == "thinking":
+                    continue
+                text = block.get("text") or block.get("content")
+                if isinstance(text, str):
+                    parts.append(text)
+            elif isinstance(block, str):
+                parts.append(block)
+        return "\n".join(parts)
+    return str(content)
+
+
 def extract_json_object(text: str) -> dict[str, Any]:
     """Extract the first balanced {…} JSON object from *text*.
 

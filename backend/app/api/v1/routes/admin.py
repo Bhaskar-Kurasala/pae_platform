@@ -781,3 +781,288 @@ async def get_chat_feedback_rollup(
     since = datetime.now(UTC) - timedelta(days=since_days)
     service = ChatService(db)
     return await service.feedback_rollup(agent_name=agent_name, since=since)
+
+
+# ── Admin Console v1 (CareerForge_admin_v1.html) ─────────────────────────────
+
+
+class AdminConsoleStudent(PydanticModel):
+    id: str
+    name: str
+    track: str
+    stage: str
+    progress: int
+    streak: int
+    last_seen: int
+    risk: int
+    paid: bool
+    joined: str
+    city: str | None
+    email: str | None
+    sessions14: int
+    flashcards: int
+    agent_q: int
+    reviews: int
+    notes: int
+    labs: int
+    capstones: int
+    purchases: int
+    risk_reason: str | None = None
+
+
+class AdminConsolePulseCard(PydanticModel):
+    metric_key: str
+    label: str
+    value: str
+    unit: str
+    delta: int
+    delta_text: str
+    color: str
+    invert_delta: bool
+    spark: list[float]
+
+
+class AdminConsoleFunnelStage(PydanticModel):
+    name: str
+    count: int
+
+
+class AdminConsoleFeatureTile(PydanticModel):
+    feature_key: str
+    name: str
+    count: str
+    sub: str
+    cold: bool
+    bars: list[int]
+
+
+class AdminConsoleCallItem(PydanticModel):
+    student_id: str
+    time: str
+    reason: str
+
+
+class AdminConsoleEventItem(PydanticModel):
+    student_id: str | None
+    kind: str
+    text: str
+    time_label: str
+
+
+class AdminConsoleRevenue(PydanticModel):
+    month_total: str
+    new_purchases: str
+    renewals: str
+    refunds: str
+    spark: list[float]
+
+
+class AdminConsoleResponse(PydanticModel):
+    students: list[AdminConsoleStudent]
+    pulse: list[AdminConsolePulseCard]
+    funnel: list[AdminConsoleFunnelStage]
+    features: list[AdminConsoleFeatureTile]
+    calls: list[AdminConsoleCallItem]
+    events: list[AdminConsoleEventItem]
+    revenue: AdminConsoleRevenue
+    synced_at: datetime
+
+
+def _format_event_time(occurred_at: datetime) -> str:
+    delta = datetime.now(UTC) - occurred_at
+    minutes = int(delta.total_seconds() // 60)
+    if minutes <= 1:
+        return "now"
+    if minutes < 60:
+        return f"{minutes}m"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}h"
+    return f"{hours // 24}d"
+
+
+@router.get("/console/v1", response_model=AdminConsoleResponse)
+async def get_admin_console(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(_require_admin),
+) -> AdminConsoleResponse:
+    """All data the v1 Admin Console needs in one round-trip.
+
+    Pulls from the `admin_console_*` tables seeded by
+    `scripts.seed_admin_console`. One bulk endpoint keeps the page fast and
+    avoids 8 separate auth round-trips.
+    """
+    from app.models.admin_console import (
+        AdminConsoleCall,
+        AdminConsoleEngagement,
+        AdminConsoleEvent,
+        AdminConsoleFeatureUsage,
+        AdminConsoleFunnelSnapshot,
+        AdminConsoleProfile,
+        AdminConsolePulseMetric,
+        AdminConsoleRiskReason,
+    )
+
+    # Students — join profile + engagement + risk reason ────────────────
+    profile_rows = (
+        await db.execute(select(AdminConsoleProfile))
+    ).scalars().all()
+    engagement_rows = (
+        await db.execute(select(AdminConsoleEngagement))
+    ).scalars().all()
+    risk_rows = (
+        await db.execute(select(AdminConsoleRiskReason))
+    ).scalars().all()
+
+    eng_by_sid = {e.student_id: e for e in engagement_rows}
+    risk_by_sid = {r.student_id: r.reason for r in risk_rows}
+
+    student_ids = [p.student_id for p in profile_rows]
+    user_rows = (
+        await db.execute(select(User).where(User.id.in_(student_ids)))
+    ).scalars().all()
+    user_by_id = {u.id: u for u in user_rows}
+
+    students: list[AdminConsoleStudent] = []
+    for p in profile_rows:
+        u = user_by_id.get(p.student_id)
+        e = eng_by_sid.get(p.student_id)
+        students.append(
+            AdminConsoleStudent(
+                id=str(p.student_id),
+                name=u.full_name if u else "Unknown",
+                email=u.email if u else None,
+                track=p.track,
+                stage=p.stage,
+                progress=p.progress_pct,
+                streak=p.streak_days,
+                last_seen=p.last_seen_days,
+                risk=p.risk_score,
+                paid=p.paid,
+                joined=p.joined_label,
+                city=p.city,
+                sessions14=e.sessions_14d if e else 0,
+                flashcards=e.flashcards_14d if e else 0,
+                agent_q=e.agent_questions_14d if e else 0,
+                reviews=e.reviews_14d if e else 0,
+                notes=e.notes_14d if e else 0,
+                labs=e.labs_14d if e else 0,
+                capstones=e.capstones_14d if e else 0,
+                purchases=e.purchases_total if e else 0,
+                risk_reason=risk_by_sid.get(p.student_id),
+            )
+        )
+    students.sort(key=lambda s: s.risk, reverse=True)
+
+    # Pulse ─────────────────────────────────────────────────────────────
+    pulse_rows = (
+        await db.execute(
+            select(AdminConsolePulseMetric).order_by(AdminConsolePulseMetric.sort_order)
+        )
+    ).scalars().all()
+    pulse = [
+        AdminConsolePulseCard(
+            metric_key=p.metric_key,
+            label=p.label,
+            value=p.display_value,
+            unit=p.unit,
+            delta=p.delta_pct,
+            delta_text=p.delta_text,
+            color=p.color_hex,
+            invert_delta=p.invert_delta,
+            spark=[float(x) for x in (p.spark or [])],
+        )
+        for p in pulse_rows
+    ]
+
+    # Funnel — newest snapshot ──────────────────────────────────────────
+    funnel_row = (
+        await db.execute(
+            select(AdminConsoleFunnelSnapshot)
+            .order_by(AdminConsoleFunnelSnapshot.snapshot_date.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    funnel: list[AdminConsoleFunnelStage] = []
+    if funnel_row:
+        funnel = [
+            AdminConsoleFunnelStage(name="Signups", count=funnel_row.signups),
+            AdminConsoleFunnelStage(name="Onboarded", count=funnel_row.onboarded),
+            AdminConsoleFunnelStage(name="First lesson", count=funnel_row.first_lesson),
+            AdminConsoleFunnelStage(name="Paid", count=funnel_row.paid),
+            AdminConsoleFunnelStage(name="Capstone", count=funnel_row.capstone),
+            AdminConsoleFunnelStage(name="Promoted", count=funnel_row.promoted),
+            AdminConsoleFunnelStage(name="Hired", count=funnel_row.hired),
+        ]
+
+    # Features ──────────────────────────────────────────────────────────
+    feature_rows = (
+        await db.execute(
+            select(AdminConsoleFeatureUsage).order_by(AdminConsoleFeatureUsage.sort_order)
+        )
+    ).scalars().all()
+    features = [
+        AdminConsoleFeatureTile(
+            feature_key=f.feature_key,
+            name=f.name,
+            count=f.count_label,
+            sub=f.sub_label,
+            cold=f.is_cold,
+            bars=[int(x) for x in (f.bars or [])],
+        )
+        for f in feature_rows
+    ]
+
+    # Calls (today) ─────────────────────────────────────────────────────
+    call_rows = (
+        await db.execute(
+            select(AdminConsoleCall).order_by(AdminConsoleCall.scheduled_for)
+        )
+    ).scalars().all()
+    calls = [
+        AdminConsoleCallItem(
+            student_id=str(c.student_id),
+            time=c.display_time,
+            reason=c.reason,
+        )
+        for c in call_rows
+    ]
+
+    # Events ────────────────────────────────────────────────────────────
+    event_rows = (
+        await db.execute(
+            select(AdminConsoleEvent)
+            .order_by(AdminConsoleEvent.occurred_at.desc())
+            .limit(20)
+        )
+    ).scalars().all()
+    events = [
+        AdminConsoleEventItem(
+            student_id=str(e.student_id) if e.student_id else None,
+            kind=e.kind,
+            text=e.body_html,
+            time_label=_format_event_time(e.occurred_at),
+        )
+        for e in event_rows
+    ]
+
+    # Revenue (rolling 30-day) — derived from MRR pulse spark when present
+    mrr_pulse = next((p for p in pulse if p.metric_key == "mrr"), None)
+    revenue = AdminConsoleRevenue(
+        month_total="$12,340",
+        new_purchases="8 · $7,120",
+        renewals="14 · $5,220",
+        refunds="0",
+        spark=mrr_pulse.spark if mrr_pulse else [],
+    )
+
+    return AdminConsoleResponse(
+        students=students,
+        pulse=pulse,
+        funnel=funnel,
+        features=features,
+        calls=calls,
+        events=events,
+        revenue=revenue,
+        synced_at=datetime.now(UTC),
+    )

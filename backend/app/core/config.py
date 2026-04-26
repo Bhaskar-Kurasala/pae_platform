@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: list[str] = ["http://localhost:3000"]
 
+    # Feature flags
+    feature_tailored_resume_agent: bool = False
+    feature_readiness_diagnostic: bool = False
+    feature_jd_decoder: bool = False
+
     # Chat attachments (P1-6). Local dev stores attachment bytes on disk under
     # `attachments_dir`; created lazily on first upload. In production this
     # swaps to S3 by replacing the `AttachmentStorage` backend without any
@@ -98,6 +103,13 @@ class Settings(BaseSettings):
     attachments_dir: str = "var/attachments"
     attachments_max_bytes: int = 10 * 1024 * 1024  # 10 MB per file
     attachments_max_per_message: int = 4
+
+    # Course content — private GitHub repo holding notebooks/PDFs/slides.
+    # Backend acts as a proxy: students never get repo access; resolution
+    # to a Colab/raw URL happens at request time, gated by enrollment.
+    github_content_token: str = ""
+    github_content_repo: str = ""  # e.g. "your-username/pae-course-content"
+    github_content_branch: str = "main"
 
     # Celery — default to the same Redis as the app (host-aware) so docker
     # and local runs don't silently point the worker at localhost. Any env

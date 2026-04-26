@@ -1,0 +1,10 @@
+slug: python
+title: "Production Python for AI Engineers"
+description: >-
+  A from-zero-to-production Python course tuned for AI engineering work.
+  Mental models, generators, closures, and the patterns you'll actually
+  use when you ship LLM systems.
+difficulty: beginner
+estimated_hours: 24
+github_repo: pae-course-content
+github_path: python

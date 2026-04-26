@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ student.full_name }} — Cover Letter</title>
+<style>
+  @page { size: Letter; margin: 0.8in; }
+  html, body {
+    font-family: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 10.5pt; color: #111; line-height: 1.45;
+  }
+  .header { margin-bottom: 16pt; }
+  .name { font-weight: 600; }
+  .meta { color: #444; font-size: 9.5pt; }
+  p { margin: 0 0 10pt; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div class="name">{{ student.full_name }}</div>
+    <div class="meta">
+      {% if student.email %}{{ student.email }}{% endif %}
+      {% if student.location %} · {{ student.location }}{% endif %}
+    </div>
+  </div>
+
+  {% for paragraph in body.split("\n\n") %}
+    {% if paragraph.strip() %}
+    <p>{{ paragraph }}</p>
+    {% endif %}
+  {% endfor %}
+</body>
+</html>

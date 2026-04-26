@@ -1,4 +1,5 @@
 from app.models.agent_action import AgentAction
+from app.models.ai_review import AIReview  # noqa: F401
 from app.models.chat_attachment import ChatAttachment
 from app.models.chat_feedback import ChatMessageFeedback
 from app.models.chat_message import ChatMessage
@@ -18,6 +19,7 @@ from app.models.exercise_submission import ExerciseSubmission
 from app.models.goal_contract import GoalContract
 from app.models.growth_snapshot import GrowthSnapshot
 from app.models.lesson import Lesson
+from app.models.lesson_resource import LessonResource
 from app.models.mcq_bank import MCQBank
 from app.models.notification import Notification
 from app.models.payment import Payment
@@ -38,11 +40,40 @@ from app.models.user_skill_state import UserSkillState
 from app.models.notebook_entry import NotebookEntry
 from app.models.weekly_intention import WeeklyIntention
 from app.models.jd_library import JdLibrary  # noqa: F401
+from app.models.tailored_resume import TailoredResume  # noqa: F401
+from app.models.generation_log import GenerationLog  # noqa: F401
+from app.models.agent_invocation_log import AgentInvocationLog  # noqa: F401
+from app.models.migration_gate import MigrationGate  # noqa: F401
+from app.models.mock_interview import (  # noqa: F401
+    MockAnswer,
+    MockCostLog,
+    MockQuestion,
+    MockSessionReport,
+    MockWeaknessLedger,
+)
+from app.models.readiness import (  # noqa: F401
+    ReadinessDiagnosticSession,
+    ReadinessDiagnosticTurn,
+    ReadinessStudentSnapshot,
+    ReadinessVerdict,
+)
+from app.models.jd_decoder import JdAnalysis, JdMatchScore  # noqa: F401
+from app.models.admin_console import (  # noqa: F401
+    AdminConsoleCall,
+    AdminConsoleEngagement,
+    AdminConsoleEvent,
+    AdminConsoleFeatureUsage,
+    AdminConsoleFunnelSnapshot,
+    AdminConsoleProfile,
+    AdminConsolePulseMetric,
+    AdminConsoleRiskReason,
+)
 
 __all__ = [
     "User",
     "Course",
     "Lesson",
+    "LessonResource",
     "Exercise",
     "Enrollment",
     "StudentProgress",
@@ -81,4 +112,27 @@ __all__ = [
     "NotebookEntry",
     "WeeklyIntention",
     "JdLibrary",
+    "TailoredResume",
+    "GenerationLog",
+    "AgentInvocationLog",
+    "MigrationGate",
+    "MockQuestion",
+    "MockAnswer",
+    "MockSessionReport",
+    "MockWeaknessLedger",
+    "MockCostLog",
+    "ReadinessStudentSnapshot",
+    "ReadinessDiagnosticSession",
+    "ReadinessDiagnosticTurn",
+    "ReadinessVerdict",
+    "JdAnalysis",
+    "JdMatchScore",
+    "AdminConsoleCall",
+    "AdminConsoleEngagement",
+    "AdminConsoleEvent",
+    "AdminConsoleFeatureUsage",
+    "AdminConsoleFunnelSnapshot",
+    "AdminConsoleProfile",
+    "AdminConsolePulseMetric",
+    "AdminConsoleRiskReason",
 ]

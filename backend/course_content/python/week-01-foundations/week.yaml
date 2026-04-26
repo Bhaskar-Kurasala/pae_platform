@@ -1,0 +1,54 @@
+slug: week-01-foundations
+title: "Week 1 — Python Foundations"
+order: 1
+description: >-
+  How Python actually evaluates code, what generators really are, and
+  why closures matter. The week ends with a checkpoint notebook that
+  tests the mental model end-to-end.
+
+lessons:
+  - slug: python-mental-model
+    title: "Python's Mental Model"
+    order: 1
+    duration_min: 45
+    description: "Names, objects, references, and the evaluation model."
+    resources:
+      - kind: notebook
+        title: "Mental model — interactive notebook"
+        path: notebooks/01_01_01_python_mental_model.ipynb
+        is_required: true
+
+  - slug: generators
+    title: "Generators"
+    order: 2
+    duration_min: 40
+    description: "yield, lazy evaluation, and why you'll want this in data pipelines."
+    resources:
+      - kind: notebook
+        title: "Generators — interactive notebook"
+        path: notebooks/01_01_02_generators.ipynb
+        is_required: true
+
+  - slug: functions-closures
+    title: "Functions & Closures"
+    order: 3
+    duration_min: 40
+    description: "First-class functions, closures, and decorators."
+    resources:
+      - kind: notebook
+        title: "Functions and closures — interactive notebook"
+        path: notebooks/01_01_03_functions_closures.ipynb
+        is_required: true
+
+checkpoint:
+  slug: week-01-checkpoint
+  title: "Week 1 Checkpoint"
+  order: 99
+  description: "End-of-week practice that ties the three lessons together."
+  resources:
+    - kind: notebook
+      title: "Week 1 checkpoint notebook"
+      path: notebooks/01_01_CK_checkpoint.ipynb
+      is_required: true
+
+extra_resources: []

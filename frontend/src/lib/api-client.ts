@@ -331,6 +331,36 @@ export const coursesApi = {
 
 export const lessonsApi = {
   get: (id: string) => api.get<LessonResponse>(`/api/v1/lessons/${id}`),
+  resources: (id: string) =>
+    api.get<LessonResourceResponse[]>(`/api/v1/lessons/${id}/resources`),
+};
+
+export type ResourceKind = "notebook" | "repo" | "video" | "pdf" | "slides" | "link";
+
+export interface LessonResourceResponse {
+  id: string;
+  course_id: string;
+  lesson_id: string | null;
+  kind: ResourceKind;
+  title: string;
+  description: string | null;
+  order: number;
+  is_required: boolean;
+  metadata: Record<string, unknown> | null;
+  locked: boolean;
+}
+
+export interface ResourceOpenResponse {
+  kind: ResourceKind;
+  open_url: string;
+  expires_at: string | null;
+}
+
+export const resourcesApi = {
+  forCourse: (courseId: string) =>
+    api.get<LessonResourceResponse[]>(`/api/v1/courses/${courseId}/resources`),
+  open: (resourceId: string) =>
+    api.post<ResourceOpenResponse>(`/api/v1/resources/${resourceId}/open`, {}),
 };
 
 // DISC-21 — Stripe checkout for paid courses
@@ -828,6 +858,29 @@ export const seniorReviewApi = {
       code,
       problem_context: problemContext,
     }),
+};
+
+// ── Practice (unified /practice surface) ─────────────────────────
+export interface PracticeReviewRecord {
+  id: string;
+  problem_id: string | null;
+  review: SeniorReview;
+  created_at: string;
+}
+
+export const practiceApi = {
+  review: (payload: {
+    code: string;
+    problem_id?: string;
+    problem_context?: string;
+  }) => api.post<PracticeReviewRecord>("/api/v1/practice/review", payload),
+  listReviews: (problemId?: string, limit = 20) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (problemId) params.set("problem_id", problemId);
+    return api.get<PracticeReviewRecord[]>(
+      `/api/v1/practice/reviews?${params.toString()}`,
+    );
+  },
 };
 
 export type TutorMode = "standard" | "socratic_strict";

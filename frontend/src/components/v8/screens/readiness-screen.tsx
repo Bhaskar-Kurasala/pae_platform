@@ -13,8 +13,23 @@ import {
 
 import { useSetV8Topbar } from "@/components/v8/v8-topbar-context";
 import { v8Toast } from "@/components/v8/v8-toast";
+import {
+  IntakeModal,
+  TailoredResumeQuotaChip,
+} from "@/components/features/tailored-resume";
+import {
+  MockInterviewWorkspace,
+  isMockInterviewEnabled,
+} from "@/components/features/mock-interview";
+import {
+  DecoderCard as JdDecoderCard,
+  isJdDecoderEnabled,
+} from "@/components/features/jd-decoder";
+import {
+  DiagnosticAnchor,
+  isReadinessDiagnosticEnabled,
+} from "@/components/features/readiness-diagnostic";
 import { useMyResume, useFitScore } from "@/lib/hooks/use-career";
-import { useStartSession, useSubmitAnswer } from "@/lib/hooks/use-interview";
 import { useMyProgress } from "@/lib/hooks/use-progress";
 import { useAuthStore } from "@/stores/auth-store";
 
@@ -114,34 +129,6 @@ function computeFit(text: string): number {
     if (t.includes(k)) base += v;
   }
   return Math.max(20, Math.min(92, base));
-}
-
-function scoreInterviewAnswer(text: string): string[] {
-  const txt = text.trim();
-  const words = txt.split(/\s+/).filter(Boolean).length;
-  const mentionsProject = /(capstone|cli|async|api|python|project)/i.test(txt);
-  const mentionsOutcome = /(learned|shipped|proved|improved|reduced|faster|fixed)/i.test(
-    txt,
-  );
-  const out: string[] = [];
-  out.push(
-    words < 60
-      ? "Too short — aim for 80–140 words. Add context and one specific decision."
-      : words > 220
-        ? "A little long. Tighten to 140–180 words so it feels confident, not padded."
-        : "Length is in the interview sweet spot (80–180 words).",
-  );
-  out.push(
-    mentionsProject
-      ? "Good: you anchored the answer in real project vocabulary."
-      : "Missing specifics — name the project, tools, or one code decision.",
-  );
-  out.push(
-    mentionsOutcome
-      ? "Strong close: you mentioned a learning or outcome."
-      : "End with what this proved, fixed, or taught — the answer trails off otherwise.",
-  );
-  return out;
 }
 
 function useAnimatedBars(active: boolean): React.RefObject<HTMLDivElement | null> {
@@ -246,7 +233,32 @@ interface OverviewViewProps extends ViewProps {
   readinessPct: number;
 }
 
-function OverviewView({ open, active, readinessPct }: OverviewViewProps) {
+function OverviewView(props: OverviewViewProps) {
+  // Feature-flagged swap. Legacy demo overview (readiness ring + 3 hard-
+  // coded action rows + tool grid) is preserved below as
+  // OverviewViewLegacy so environments that haven't enabled the
+  // diagnostic don't go empty during rollout. The rules-of-hooks split
+  // pattern matches the JD decoder swap from commit 5.
+  if (isReadinessDiagnosticEnabled()) {
+    return <OverviewViewLive {...props} />;
+  }
+  return <OverviewViewLegacy {...props} />;
+}
+
+function OverviewViewLive({ active }: OverviewViewProps) {
+  // The conversational diagnostic IS the new anchor. No competing
+  // readiness ring above the fold; the verdict will surface its own
+  // headline when ready. Calm, generous, single emotional anchor.
+  return (
+    <div className={`view${active ? " active" : ""}`} id="rd-overview">
+      <section className="rd-hero reveal in" style={{ paddingTop: 8 }}>
+        <DiagnosticAnchor />
+      </section>
+    </div>
+  );
+}
+
+function OverviewViewLegacy({ open, active, readinessPct }: OverviewViewProps) {
   const ref = useAnimatedBars(active);
   return (
     <div className={`view${active ? " active" : ""}`} id="rd-overview" ref={ref}>
@@ -507,6 +519,7 @@ function ToolCard({ k, t, s, arrow, onClick }: ToolCardProps) {
 function ResumeView({ open, active }: ViewProps) {
   const user = useAuthStore((s) => s.user);
   const { data: resume } = useMyResume();
+  const [tailorOpen, setTailorOpen] = useState(false);
   const displayName = user?.full_name ?? "Your Name";
   const summary =
     resume?.summary ??
@@ -547,13 +560,7 @@ function ResumeView({ open, active }: ViewProps) {
               </button>
             </div>
           </div>
-          <div className="rd-mini">
-            <div className="k">Resume confidence</div>
-            <div className="v">71%</div>
-            <div className="s">
-              Strong proof base, needs tighter wording for job-market readability.
-            </div>
-          </div>
+          <TailoredResumeQuotaChip enabled={active} />
         </div>
 
         <div className="rd-dual">
@@ -629,11 +636,16 @@ function ResumeView({ open, active }: ViewProps) {
           >
             Use this against a real JD
           </button>
-          <button type="button" className="btn ghost">
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={() => setTailorOpen(true)}
+          >
             Generate tailored version
           </button>
         </div>
       </section>
+      <IntakeModal open={tailorOpen} onClose={() => setTailorOpen(false)} />
     </div>
   );
 }
@@ -657,7 +669,42 @@ function EvidenceRow({ title, copy, badge, tone }: EvidenceRowProps) {
   );
 }
 
-function JdMatchView({ open, active }: ViewProps) {
+function JdMatchView(props: ViewProps) {
+  // Feature-flagged swap. The legacy demo (computeFit + JD presets)
+  // stays compiled in JdMatchViewLegacy below so environments that
+  // haven't enabled the flag yet don't go empty during rollout.
+  // Hooks live in their respective components — the early-return
+  // pattern would violate React's rules-of-hooks since the legacy
+  // path uses useState / useFitScore.
+  if (isJdDecoderEnabled()) {
+    return <JdMatchViewLive {...props} />;
+  }
+  return <JdMatchViewLegacy {...props} />;
+}
+
+function JdMatchViewLive({ open, active }: ViewProps) {
+  return (
+    <div className={`view${active ? " active" : ""}`} id="rd-jd">
+      <section className="card pad reveal in">
+        <JdDecoderCard />
+        <div
+          className="rd-actions"
+          style={{ marginTop: 24, display: "flex", gap: 8 }}
+        >
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={() => open("overview")}
+          >
+            Back to overview
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function JdMatchViewLegacy({ open, active }: ViewProps) {
   const [jdText, setJdText] = useState<string>(DEFAULT_JD_TEXT);
   const [score, setScore] = useState<number>(68);
   const [recomputing, setRecomputing] = useState(false);
@@ -872,70 +919,8 @@ function TimelineStep({ num, title, copy }: TimelineStepProps) {
 }
 
 function InterviewCoachView({ active }: ViewProps) {
-  const [recording, setRecording] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
-  const [answer, setAnswer] = useState("");
-  const [scorerOut, setScorerOut] = useState<string[] | null>(null);
-  const startSession = useStartSession();
-  const submitAnswer = useSubmitAnswer();
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [currentQuestion, setCurrentQuestion] = useState<string>(
-    "Tell me about a project where you used Python to solve a real problem.",
-  );
-  const intervalRef = useRef<number | null>(null);
-  const startedAtRef = useRef<number>(0);
-
-  useEffect(() => {
-    return () => {
-      if (intervalRef.current !== null) {
-        window.clearInterval(intervalRef.current);
-      }
-    };
-  }, []);
-
-  const toggleRec = useCallback(() => {
-    if (recording) {
-      if (intervalRef.current !== null) {
-        window.clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-      setRecording(false);
-      v8Toast("Recording paused. Score when you are ready.");
-    } else {
-      startedAtRef.current = Date.now();
-      setRecording(true);
-      intervalRef.current = window.setInterval(() => {
-        setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000));
-      }, 250);
-      if (!sessionId) {
-        startSession.mutate(
-          { mode: "behavioral" },
-          {
-            onSuccess: (data) => {
-              setSessionId(data.id);
-              if (data.first_question) setCurrentQuestion(data.first_question);
-            },
-          },
-        );
-      }
-    }
-  }, [recording, sessionId, startSession]);
-
-  const score = useCallback(() => {
-    setScorerOut(scoreInterviewAnswer(answer));
-    if (sessionId && answer.trim().length > 0) {
-      submitAnswer.mutate(
-        { session_id: sessionId, question: currentQuestion, answer },
-        {
-          onSuccess: (data) => {
-            if (data.next_question) setCurrentQuestion(data.next_question);
-          },
-        },
-      );
-    }
-  }, [answer, currentQuestion, sessionId, submitAnswer]);
-
-  const timerDisplay = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
+  const enabled = isMockInterviewEnabled();
+  const defaultRole = "Junior Python Developer";
 
   return (
     <div className={`view${active ? " active" : ""}`} id="rd-interview">
@@ -946,102 +931,26 @@ function InterviewCoachView({ active }: ViewProps) {
         </div>
         <div className="rd-section-c">
           A plain interview bank is not enough for true job readiness. This
-          section helps you rehearse answers, use your own proof, receive
-          structure feedback, and build calm under pressure.
+          coach asks adaptive questions, scores honestly (with confidence —
+          not bluffing), and remembers what tripped you up last time so the
+          next session is sharper.
         </div>
 
-        <div className="rd-2col" style={{ marginTop: 18 }}>
-          <div className="match-card">
-            <div className="k">Live prompt</div>
-            <div className="big">“{currentQuestion}”</div>
-            <div className="body">
-              The coach pushes you toward a simple structure: context, what you
-              built, technical decisions, challenge handled, and result or
-              learning.
-            </div>
-            <div className="qa-set">
-              <div className="qa-item">
-                <div className="qa-q">Suggested answer structure</div>
-                <div className="qa-a">
-                  I built a CLI AI tool in Python as part of a capstone. The goal
-                  was to send prompts to an API and return useful responses through
-                  a simple terminal interface. I isolated the API logic in its own
-                  async function, then improved the design based on review feedback
-                  around retry logic and environment-based configuration. The main
-                  thing I learned was how to structure async work cleanly and think
-                  about production gaps, not just getting the first version
-                  running.
-                </div>
+        <div style={{ marginTop: 18 }}>
+          {enabled ? (
+            <MockInterviewWorkspace defaultTargetRole={defaultRole} />
+          ) : (
+            <div className="match-card" style={{ padding: 22 }}>
+              <div className="k">Temporarily off</div>
+              <div className="big">
+                The mock interview coach is disabled in this environment.
               </div>
-              <div className="qa-item">
-                <div className="qa-q">Coach feedback</div>
-                <div className="qa-a">
-                  Good technical signal. Stronger if you name the problem more
-                  concretely, explain one debugging moment, and finish with what
-                  this project proves about how you work.
-                </div>
+              <div className="body">
+                Re-enable it by removing
+                {" "}<code>NEXT_PUBLIC_MOCK_INTERVIEW_DISABLED</code>.
               </div>
             </div>
-          </div>
-          <div className="match-card">
-            <div className="k">Performance snapshot</div>
-            <div className="big">
-              <span className="count">57</span>% answer readiness
-            </div>
-            <div className="rd-list">
-              <EvidenceRow
-                title="Clarity"
-                copy="Your technical ideas are there, but the story arc still meanders."
-                badge="Improve"
-                tone="warn"
-              />
-              <EvidenceRow
-                title="Proof usage"
-                copy="You refer to real work, much better than generic theory answers."
-                badge="Strong"
-                tone="good"
-              />
-              <EvidenceRow
-                title="Outcome framing"
-                copy="Needs a sharper ending — what did the project prove, fix, or teach?"
-                badge="Improve"
-                tone="warn"
-              />
-            </div>
-            <div className="coach-rec">
-              <div className="rec-head">
-                <b>Rehearse your answer</b>
-                <span className="rec-timer">{timerDisplay}</span>
-              </div>
-              <textarea
-                className="coach-answer"
-                placeholder="Type or dictate your answer here. Aim for context → build → decision → challenge → result."
-                value={answer}
-                onChange={(e) => setAnswer(e.target.value)}
-              />
-              <div className={`rec-wave${recording ? " live" : ""}`}>
-                {Array.from({ length: 10 }).map((_, i) => (
-                  <div key={i} className="rec-bar" />
-                ))}
-              </div>
-              <div className="rd-footer" style={{ marginTop: 12 }}>
-                <button type="button" className="btn primary" onClick={toggleRec}>
-                  {recording ? "Stop recording" : "Start mock interview"}
-                </button>
-                <button type="button" className="btn ghost" onClick={score}>
-                  Score my answer
-                </button>
-              </div>
-              <div className={`scorer-out${scorerOut ? " show" : ""}`}>
-                <b>Coach feedback</b>
-                <ul>
-                  {(scorerOut ?? []).map((b, i) => (
-                    <li key={i}>{b}</li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </div>
+          )}
         </div>
       </section>
     </div>

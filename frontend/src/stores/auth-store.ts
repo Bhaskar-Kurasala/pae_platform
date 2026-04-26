@@ -37,6 +37,22 @@ function toUser(r: UserResponse): User {
   };
 }
 
+// Mirror the user's role into a cookie so Next.js edge middleware can gate
+// /admin/* without reading localStorage. Cookie is short-lived, non-HttpOnly,
+// SameSite=Lax — purely a presentation hint; the backend remains the
+// authoritative gate (returns 403 on token-role mismatch).
+const ROLE_COOKIE = "pae_role";
+function setRoleCookie(role: User["role"] | null): void {
+  if (typeof document === "undefined") return;
+  if (role) {
+    // 12h horizon — a bit longer than the access token, refreshed on every
+    // login. SameSite=Lax so it's sent on top-level admin navigations.
+    document.cookie = `${ROLE_COOKIE}=${role}; Path=/; Max-Age=43200; SameSite=Lax`;
+  } else {
+    document.cookie = `${ROLE_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
+  }
+}
+
 export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
@@ -46,11 +62,21 @@ export const useAuthStore = create<AuthState>()(
       isAuthenticated: false,
       _hasHydrated: false,
 
-      setHasHydrated: (v) => set({ _hasHydrated: v }),
-      setAuth: (user, token, refreshToken) =>
-        set({ user, token, refreshToken, isAuthenticated: true }),
-      clearAuth: () =>
-        set({ user: null, token: null, refreshToken: null, isAuthenticated: false }),
+      setHasHydrated: (v) => {
+        set({ _hasHydrated: v });
+        // After rehydrating from localStorage, replay the cookie so the
+        // middleware sees the right role on the next request.
+        const state = get();
+        setRoleCookie(state.isAuthenticated ? state.user?.role ?? null : null);
+      },
+      setAuth: (user, token, refreshToken) => {
+        set({ user, token, refreshToken, isAuthenticated: true });
+        setRoleCookie(user.role);
+      },
+      clearAuth: () => {
+        set({ user: null, token: null, refreshToken: null, isAuthenticated: false });
+        setRoleCookie(null);
+      },
 
       login: async (email, password) => {
         const tokens = await authApi.login({ email, password });
@@ -61,7 +87,9 @@ export const useAuthStore = create<AuthState>()(
         });
         try {
           const userResp = await authApi.me();
-          set({ user: toUser(userResp) });
+          const user = toUser(userResp);
+          set({ user });
+          setRoleCookie(user.role);
         } catch (err) {
           // If /me fails we have a zombie-auth state — roll back so guards
           // don't hang on an infinite spinner (DISC-52).
@@ -71,6 +99,7 @@ export const useAuthStore = create<AuthState>()(
             refreshToken: null,
             isAuthenticated: false,
           });
+          setRoleCookie(null);
           throw err;
         }
       },
@@ -85,7 +114,9 @@ export const useAuthStore = create<AuthState>()(
         });
         try {
           const userResp = await authApi.me();
-          set({ user: toUser(userResp) });
+          const user = toUser(userResp);
+          set({ user });
+          setRoleCookie(user.role);
         } catch (err) {
           set({
             user: null,
@@ -93,24 +124,29 @@ export const useAuthStore = create<AuthState>()(
             refreshToken: null,
             isAuthenticated: false,
           });
+          setRoleCookie(null);
           throw err;
         }
       },
 
-      logout: () =>
+      logout: () => {
         set({
           user: null,
           token: null,
           refreshToken: null,
           isAuthenticated: false,
-        }),
+        });
+        setRoleCookie(null);
+      },
 
       refreshMe: async () => {
         const token = get().token;
         if (!token) return false;
         try {
           const userResp = await authApi.me();
-          set({ user: toUser(userResp) });
+          const user = toUser(userResp);
+          set({ user });
+          setRoleCookie(user.role);
           return true;
         } catch {
           set({
@@ -119,6 +155,7 @@ export const useAuthStore = create<AuthState>()(
             refreshToken: null,
             isAuthenticated: false,
           });
+          setRoleCookie(null);
           return false;
         }
       },
@@ -156,6 +193,7 @@ if (typeof window !== "undefined") {
       const incomingAuthed = parsed.state?.isAuthenticated === true && !!parsed.state?.token;
       if (!incomingAuthed && store.isAuthenticated) {
         store.clearAuth();
+        setRoleCookie(null);
       }
     } catch {
       // ignore parse errors

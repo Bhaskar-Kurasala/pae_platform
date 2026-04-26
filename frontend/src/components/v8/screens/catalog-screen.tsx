@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSetV8Topbar } from "@/components/v8/v8-topbar-context";
@@ -27,20 +28,22 @@ interface SalaryTooltip {
 }
 
 interface PriceShape {
+  /** Free foundation course — render "Free" instead of a price. */
   free?: boolean;
-  cur?: string;
-  amt?: string;
+  /** Strikethrough comparison price (marketing). Live price comes from the courses API. */
   was?: string;
+  /** Bundle override: bundles have no DB row, so price is fixed in the UI. */
+  bundleAmt?: string;
 }
 
 interface CtaShape {
   label: string;
   variant?: "default" | "gold" | "enrolled";
-  /** When set, opens enroll overlay using these details. */
-  enroll?: { trackName: string; price: string; isBundle?: boolean };
-  /** When set, course is real backend-wired and CTA triggers checkout. */
+  /** When set, the CTA opens the enroll overlay for this track name. */
+  enroll?: { trackName: string; isBundle?: boolean };
+  /** When set, price + availability are looked up by this slug from the courses API. */
   courseSlug?: string;
-  /** Disabled CTA (no real backend course). */
+  /** Disabled CTA — bundle/coming-soon card with no live course row. */
   comingSoon?: boolean;
 }
 
@@ -146,11 +149,11 @@ const CARDS: ReadonlyArray<CardShape> = [
       { text: <><b>8</b> weeks</> },
       { text: <><b>76%</b> placed in 90 days</> },
     ],
-    price: { cur: "$", amt: "89", was: "$129" },
+    price: { was: "$129" },
     cta: {
       label: "Unlock track",
       variant: "gold",
-      enroll: { trackName: "Data Analyst", price: "$89" },
+      enroll: { trackName: "Data Analyst" },
       courseSlug: "data-analyst",
     },
     featured: true,
@@ -199,10 +202,10 @@ const CARDS: ReadonlyArray<CardShape> = [
       { text: <><b>12</b> weeks</> },
       { text: <><b>64%</b> interview-ready in 120 days</> },
     ],
-    price: { cur: "$", amt: "149" },
+    price: {},
     cta: {
       label: "Unlock track",
-      enroll: { trackName: "Data Scientist", price: "$149" },
+      enroll: { trackName: "Data Scientist" },
       courseSlug: "data-scientist",
     },
     locked: true,
@@ -250,10 +253,10 @@ const CARDS: ReadonlyArray<CardShape> = [
       { text: <><b>16</b> weeks</> },
       { text: <><b>$145k</b> median post-placement</> },
     ],
-    price: { cur: "$", amt: "199" },
+    price: {},
     cta: {
       label: "Unlock track",
-      enroll: { trackName: "ML Engineer", price: "$199" },
+      enroll: { trackName: "ML Engineer" },
       courseSlug: "ml-engineer",
     },
     locked: true,
@@ -301,10 +304,10 @@ const CARDS: ReadonlyArray<CardShape> = [
       { text: <><b>18</b> weeks</> },
       { text: <><b>$180k+</b> median post-placement</> },
     ],
-    price: { cur: "$", amt: "249" },
+    price: {},
     cta: {
       label: "Unlock track",
-      enroll: { trackName: "GenAI Engineer", price: "$249" },
+      enroll: { trackName: "GenAI Engineer" },
       courseSlug: "genai-engineer",
     },
     locked: true,
@@ -347,11 +350,11 @@ const CARDS: ReadonlyArray<CardShape> = [
       { text: <><b>18 months</b> est.</> },
       { text: <>Save <b>$178</b> vs. separate</> },
     ],
-    price: { cur: "$", amt: "508", was: "$686" },
+    price: { bundleAmt: "508", was: "$686" },
     cta: {
       label: "Unlock bundle",
       variant: "gold",
-      enroll: { trackName: "Full arc bundle", price: "$508", isBundle: true },
+      enroll: { trackName: "Full arc bundle", isBundle: true },
       comingSoon: true,
     },
   },
@@ -365,12 +368,18 @@ interface EnrollState {
   comingSoon: boolean;
 }
 
-function findCourseId(
+function findCourse(
   slug: string | undefined,
   courses: ReadonlyArray<CourseResponse> | undefined,
-): string | null {
+): CourseResponse | null {
   if (!slug || !courses) return null;
-  return courses.find((c) => c.slug === slug)?.id ?? null;
+  return courses.find((c) => c.slug === slug) ?? null;
+}
+
+function formatPrice(priceCents: number): string {
+  if (priceCents <= 0) return "Free";
+  const dollars = priceCents / 100;
+  return `$${Number.isInteger(dollars) ? dollars.toFixed(0) : dollars.toFixed(2)}`;
 }
 
 export function CatalogScreen() {
@@ -388,6 +397,11 @@ export function CatalogScreen() {
   const [filter, setFilter] = useState<FilterKey>("all");
   const [enroll, setEnroll] = useState<EnrollState | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const visibleCards = useMemo(
     () => CARDS.filter((c) => filter === "all" || c.cats.includes(filter)),
@@ -408,13 +422,17 @@ export function CatalogScreen() {
   const openEnroll = useCallback(
     (card: CardShape) => {
       if (!card.cta.enroll) return;
-      const courseId = findCourseId(card.cta.courseSlug, courses);
+      const isBundle = !!card.cta.enroll.isBundle;
+      const course = findCourse(card.cta.courseSlug, courses);
+      const courseAvailable = !!course && course.is_published;
+      const livePrice = course ? formatPrice(course.price_cents) : null;
+      const bundlePrice = card.price.bundleAmt ? `$${card.price.bundleAmt}` : null;
       setEnroll({
         trackName: card.cta.enroll.trackName,
-        price: card.cta.enroll.price,
-        isBundle: !!card.cta.enroll.isBundle,
-        courseId,
-        comingSoon: !!card.cta.comingSoon || !courseId,
+        price: livePrice ?? bundlePrice ?? "",
+        isBundle,
+        courseId: courseAvailable ? course.id : null,
+        comingSoon: !!card.cta.comingSoon || !courseAvailable,
       });
     },
     [courses],
@@ -510,6 +528,13 @@ export function CatalogScreen() {
                 : card.cta.enroll
                   ? () => openEnroll(card)
                   : undefined;
+            const liveCourse = findCourse(card.cta.courseSlug, courses);
+            const liveAvailable = !!liveCourse && liveCourse.is_published;
+            const displayAmt: string | null = card.price.free
+              ? null
+              : liveAvailable
+                ? String(Math.round(liveCourse.price_cents / 100))
+                : (card.price.bundleAmt ?? null);
             return (
               <article
                 key={card.key}
@@ -557,16 +582,18 @@ export function CatalogScreen() {
                 </div>
                 <div className="course-foot">
                   <div className="course-price">
-                    {card.price.free ? (
+                    {card.price.free || (liveAvailable && liveCourse.price_cents === 0) ? (
                       <span className="free">Free</span>
-                    ) : (
+                    ) : displayAmt ? (
                       <>
-                        <span className="cur">{card.price.cur}</span>
-                        <span className="amt">{card.price.amt}</span>
+                        <span className="cur">$</span>
+                        <span className="amt">{displayAmt}</span>
                         {card.price.was ? (
                           <span className="was">{card.price.was}</span>
                         ) : null}
                       </>
+                    ) : (
+                      <span className="free">Coming soon</span>
                     )}
                   </div>
                   <button
@@ -617,26 +644,65 @@ export function CatalogScreen() {
             <div className="bundle-price">
               <span className="amt">4 min</span>
             </div>
-            <Link href="/path" className="btn primary" style={{ padding: "12px 20px" }}>
+            <Link
+              href="/placement-quiz"
+              className="btn primary"
+              style={{ padding: "12px 20px" }}
+            >
               Start placement quiz
             </Link>
           </div>
         </div>
       </div>
 
-      <div
-        className={`enroll-overlay${enroll ? " on" : ""}`}
-        onClick={(e) => {
-          if (e.target === e.currentTarget) closeEnroll();
-        }}
-      >
-        <div className="enroll-card" onClick={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            className="enroll-close"
-            onClick={closeEnroll}
-            aria-label="Close"
-          >
+      {mounted
+        ? createPortal(
+            <EnrollOverlay
+              enroll={enroll}
+              checkoutLoading={checkoutLoading}
+              ctaWord={ctaWord}
+              titleSuffix={titleSuffix}
+              onClose={closeEnroll}
+              onConfirm={confirmEnroll}
+            />,
+            document.body,
+          )
+        : null}
+    </section>
+  );
+}
+
+interface EnrollOverlayProps {
+  enroll: EnrollState | null;
+  checkoutLoading: boolean;
+  ctaWord: string;
+  titleSuffix: string;
+  onClose: () => void;
+  onConfirm: () => void;
+}
+
+function EnrollOverlay({
+  enroll,
+  checkoutLoading,
+  ctaWord,
+  titleSuffix,
+  onClose,
+  onConfirm,
+}: EnrollOverlayProps) {
+  return (
+    <div
+      className={`enroll-overlay${enroll ? " on" : ""}`}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="enroll-card" onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          className="enroll-close"
+          onClick={onClose}
+          aria-label="Close"
+        >
             <svg
               width="14"
               height="14"
@@ -673,7 +739,7 @@ export function CatalogScreen() {
             <button
               type="button"
               className="btn primary enroll-cta"
-              onClick={confirmEnroll}
+              onClick={onConfirm}
               disabled={checkoutLoading}
             >
               <span className="enroll-cta-label">
@@ -698,10 +764,9 @@ export function CatalogScreen() {
             >
               <path d="M7 1l5 2v4c0 3.5-2.5 5.5-5 6-2.5-.5-5-2.5-5-6V3l5-2z" />
             </svg>
-            <span>30-day money-back guarantee · Secure checkout</span>
-          </div>
+          <span>30-day money-back guarantee · Secure checkout</span>
         </div>
       </div>
-    </section>
+    </div>
   );
 }

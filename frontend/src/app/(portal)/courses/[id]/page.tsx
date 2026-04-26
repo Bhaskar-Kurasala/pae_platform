@@ -7,9 +7,12 @@ import { ArrowLeft, ArrowRight, BookOpen, Clock, Loader2 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCourse, useCourseLessons } from "@/lib/hooks/use-courses";
 import { useMyProgress } from "@/lib/hooks/use-progress";
+import { useCourseResources } from "@/lib/hooks/use-resources";
 import { LessonItem } from "@/components/features/lesson-item";
 import { ProgressBar } from "@/components/features/progress-bar";
+import { ResourceList } from "@/components/features/resource-list";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ApiError,
   billingApi,
@@ -35,6 +38,7 @@ export default function CourseDetailPage({ params }: { params: Promise<{ id: str
   const queryClient = useQueryClient();
   const { data: course, isLoading: courseLoading } = useCourse(id);
   const { data: lessons = [], isLoading: lessonsLoading } = useCourseLessons(id);
+  const { data: resources = [] } = useCourseResources(id);
   const { data: progress } = useMyProgress();
   const { data: enrollment, refetch: refetchEnrollment } = useQuery<EnrollmentResponse | null>({
     queryKey: ["courses", id, "my-enrollment"],
@@ -250,36 +254,60 @@ export default function CourseDetailPage({ params }: { params: Promise<{ id: str
           </div>
         ) : null}
 
-        {/* Lesson list */}
-        <div className="rounded-xl ring-1 ring-foreground/10 bg-card overflow-hidden">
-          <div className="px-5 py-3 border-b bg-muted/40">
-            <h2 className="font-semibold text-sm">Course Content</h2>
-          </div>
-          {lessons.length === 0 ? (
-            <p className="px-5 py-8 text-center text-muted-foreground text-sm">
-              No lessons published yet.
-            </p>
-          ) : locked ? (
-            <p className="px-5 py-8 text-center text-sm text-muted-foreground">
-              Enroll above to unlock {lessons.length} lessons.
-            </p>
-          ) : (
-            <div className="divide-y">
-              {orderedLessons.map((lesson) => (
-                <LessonItem
-                  key={lesson.id}
-                  id={lesson.id}
-                  title={lesson.title}
-                  durationSeconds={lesson.duration_seconds}
-                  order={lesson.order}
-                  isCompleted={done.has(lesson.id)}
-                  isFreePreview={lesson.is_free_preview}
-                  isPortal
-                />
-              ))}
+        {/* Lessons + Resources tabs */}
+        <Tabs defaultValue="lessons" className="w-full">
+          <TabsList variant="line" className="border-b">
+            <TabsTrigger value="lessons">Lessons</TabsTrigger>
+            <TabsTrigger value="resources">
+              Resources{resources.length > 0 ? ` (${resources.length})` : ""}
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="lessons" className="mt-4">
+            <div className="rounded-xl ring-1 ring-foreground/10 bg-card overflow-hidden">
+              <div className="px-5 py-3 border-b bg-muted/40">
+                <h2 className="font-semibold text-sm">Course Content</h2>
+              </div>
+              {lessons.length === 0 ? (
+                <p className="px-5 py-8 text-center text-muted-foreground text-sm">
+                  No lessons published yet.
+                </p>
+              ) : locked ? (
+                <p className="px-5 py-8 text-center text-sm text-muted-foreground">
+                  Enroll above to unlock {lessons.length} lessons.
+                </p>
+              ) : (
+                <div className="divide-y">
+                  {orderedLessons.map((lesson) => (
+                    <LessonItem
+                      key={lesson.id}
+                      id={lesson.id}
+                      title={lesson.title}
+                      durationSeconds={lesson.duration_seconds}
+                      order={lesson.order}
+                      isCompleted={done.has(lesson.id)}
+                      isFreePreview={lesson.is_free_preview}
+                      isPortal
+                    />
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </TabsContent>
+
+          <TabsContent value="resources" className="mt-4">
+            <ResourceList
+              resources={resources}
+              lessons={orderedLessons.map((l) => ({
+                id: l.id,
+                title: l.title,
+                order: l.order,
+              }))}
+              enrolled={isEnrolled}
+              isPaid={isPaid}
+            />
+          </TabsContent>
+        </Tabs>
       </div>
     </PageShell>
   );

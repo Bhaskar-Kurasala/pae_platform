@@ -13,6 +13,25 @@ pnpm storybook    # Component browser
 pnpm generate:api # Regenerate API client from OpenAPI schema
 ```
 
+## Frontend container — prod build, NOT dev server
+
+`docker compose up` runs `node server.js` from a Next.js standalone build —
+**not** `pnpm dev`. HMR / file-touch tricks don't work against the container.
+After any frontend change you need to rebuild and restart the image before
+the new code is served:
+
+```
+docker compose build frontend && docker compose up -d frontend
+```
+
+This also matters for Playwright: `pnpm playwright test` hits
+`http://localhost:3002` (the container), so a green E2E run after a change
+without a rebuild is testing the **previous** bundle. Always rebuild before
+the test pass when frontend code changed.
+
+If you need true HMR, run `pnpm dev` locally on `:3000` and point Playwright
+at `:3000` instead — that's a separate workflow.
+
 ## File Structure
 ```
 src/

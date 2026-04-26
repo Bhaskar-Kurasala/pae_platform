@@ -36,6 +36,13 @@ const NAV_GROUPS: ReadonlyArray<{
     ],
   },
   {
+    label: "Practice",
+    items: [
+      { href: "/chat", label: "AI Tutor" },
+      { href: "/exercises", label: "Exercises" },
+    ],
+  },
+  {
     label: "Explore",
     variant: "secondary",
     items: [

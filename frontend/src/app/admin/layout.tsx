@@ -1,14 +1,20 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { AdminLayout } from "@/components/layouts/admin-layout";
 import { useAuthStore } from "@/stores/auth-store";
 
 export default function AdminRootLayout({ children }: { children: React.ReactNode }) {
   const { user, isAuthenticated, _hasHydrated, refreshMe } = useAuthStore();
   const router = useRouter();
+  const pathname = usePathname();
   const refreshAttempted = useRef(false);
+  // The admin console at /admin ships its own topbar + theming, so we render
+  // it bare. Legacy admin sub-routes (/admin/students, /admin/audit-log, …)
+  // still use the sidebar AdminLayout until each is migrated into the v1
+  // console proper.
+  const isConsoleRoot = pathname === "/admin";
 
   useEffect(() => {
     if (!_hasHydrated) return;
@@ -39,5 +45,8 @@ export default function AdminRootLayout({ children }: { children: React.ReactNod
     );
   }
 
+  if (isConsoleRoot) {
+    return <>{children}</>;
+  }
   return <AdminLayout>{children}</AdminLayout>;
 }

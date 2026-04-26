@@ -57,3 +57,5 @@ def _ensure_registered() -> None:
     import app.agents.socratic_tutor  # noqa: F401
     import app.agents.spaced_repetition  # noqa: F401
     import app.agents.student_buddy  # noqa: F401
+    import app.agents.tailored_resume  # noqa: F401
+    import app.agents.cover_letter  # noqa: F401

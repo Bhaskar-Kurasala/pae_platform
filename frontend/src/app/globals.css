@@ -349,3 +349,20 @@
   /* Weight 510 (Linear's signature semibold-ish) */
   .font-weight-510 { font-weight: 510; }
 }
+
+
+/* ----- Placement quiz screen-fade animations ----- */
+.quiz-fade {
+  animation: quizFadeUp 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes quizFadeUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .quiz-fade { animation: quizFadeIn 0.2s ease-out both; }
+  @keyframes quizFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+}

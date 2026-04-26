@@ -143,6 +143,12 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.today import router as today_router
     from app.api.v1.routes.webhooks import router as webhooks_router
     from app.api.v1.routes.feedback import router as feedback_router
+    from app.api.v1.routes.mock_interview import router as mock_interview_router
+    from app.api.v1.routes.tailored_resume import router as tailored_resume_router
+    from app.api.v1.routes.jd_decoder import router as jd_decoder_router
+    from app.api.v1.routes.readiness import router as readiness_router
+    from app.api.v1.routes.resources import router as resources_router
+    from app.api.v1.routes.practice import router as practice_router
 
     api_routers = [
         auth_router,
@@ -181,6 +187,12 @@ def create_app() -> FastAPI:
         chat_router,
         clarification_router,
         notebook_router,
+        tailored_resume_router,
+        mock_interview_router,
+        jd_decoder_router,
+        readiness_router,
+        resources_router,
+        practice_router,
     ]
     for r in api_routers:
         app.include_router(r, prefix="/api/v1")
