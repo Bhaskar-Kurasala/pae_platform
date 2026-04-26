@@ -328,15 +328,24 @@ export const chatApi = {
     api.post<NotebookEntryOut>(`/api/v1/chat/notebook/${entryId}/review`, {}),
   deleteNotebookEntry: (entryId: string) =>
     api.del(`/api/v1/chat/notebook/${entryId}`),
-  // P3-2 — send an assistant message to the spaced_repetition agent and
-  // get back a count of extracted Q/A flashcards.
-  addFlashcards: (
-    messageId: string,
-    content: string,
-  ): Promise<{ cards_added: number }> =>
-    api.post<{ cards_added: number }>("/api/v1/chat/flashcards", {
-      message_id: messageId,
-      content,
+  // P-Today3 (2026-04-26) — student writes the cards in MakeFlashcardsModal
+  // and we persist 1–10 of them in one call. The backend strips code fences
+  // from `back` and dedupes by (message_id, normalized front). The old
+  // single-arg `(messageId, content)` shape is gone — see
+  // `backend/app/schemas/chat.py` for why auto-extraction was removed.
+  addFlashcards: (params: {
+    messageId: string;
+    conversationId: string;
+    cards: Array<{ front: string; back: string }>;
+  }): Promise<{
+    cards_added: number;
+    cards: Array<{ question: string; answer: string }>;
+    cards_trimmed: number;
+  }> =>
+    api.post("/api/v1/chat/flashcards", {
+      message_id: params.messageId,
+      conversation_id: params.conversationId,
+      cards: params.cards,
     }),
   // P3-3 — generate 5 MCQ questions based on an assistant message's content.
   // The backend calls the mcq_factory agent scoped to the provided text and

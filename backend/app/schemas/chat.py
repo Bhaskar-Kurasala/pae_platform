@@ -154,29 +154,54 @@ class ConversationListItem(BaseModel):
     message_count: int = 0
 
 
-# P3-2 — flashcard extraction ---------------------------------------------------
+# P3-2 — flashcards (user-authored as of P-Today3, 2026-04-26) -----------------
+#
+# Original P3-2 design called the spaced_repetition agent to extract Q/A pairs
+# from the assistant message. In practice the LLM either failed to find a clean
+# Q/A shape (so the route fell back to crammed `content[:200]` + a junk answer)
+# or split formatted Markdown — including code fences — into one giant card
+# that rendered terribly on the warm-up screen. Worse, auto-extraction skips
+# the *generation effect* — writing the card in your own words is what makes
+# spaced repetition actually work.
+#
+# New model: the student writes 1–10 short cards in a modal before saving.
+# Length caps are tight on purpose — cards >25 words underperform on recall.
 
 
-class FlashcardExtractRequest(BaseModel):
-    """P3-2 — body for POST /chat/flashcards.
+class FlashcardCardInput(BaseModel):
+    """One student-authored card. Both fields are trimmed and length-capped."""
+
+    front: str = Field(min_length=1, max_length=140)
+    back: str = Field(min_length=1, max_length=280)
+
+
+class FlashcardCreateRequest(BaseModel):
+    """Body for POST /chat/flashcards.
 
     `message_id` is stored as a plain string (not UUID) because the UI may
     pass client-generated ids for messages that haven't been persisted yet.
-    `content` holds the assistant message text to extract cards from.
+    `conversation_id` is similarly opaque — kept so we can bucket "cards
+    authored from this chat" later without a separate join.
     """
 
     message_id: str = Field(min_length=1, max_length=255)
-    content: str = Field(min_length=1, max_length=50000)
+    conversation_id: str = Field(min_length=1, max_length=255)
+    cards: list[FlashcardCardInput] = Field(min_length=1, max_length=10)
 
 
 class FlashcardItem(BaseModel):
+    """Echoed back in the response so the client can confirm what landed."""
+
     question: str
     answer: str
 
 
-class FlashcardExtractResponse(BaseModel):
+class FlashcardCreateResponse(BaseModel):
     cards_added: int
     cards: list[FlashcardItem] = Field(default_factory=list)
+    # Server may strip code fences / collapse whitespace from `back`; we
+    # surface that so the UI can show a quiet "we trimmed N cards" hint.
+    cards_trimmed: int = 0
 
 
 # P3-3 — quiz generation -------------------------------------------------

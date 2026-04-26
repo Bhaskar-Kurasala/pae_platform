@@ -503,16 +503,43 @@ export function TodayScreen() {
                   id="cardShell"
                 >
                   <div className="card-face card-face-front">
-                    <h5>{activeCard.prompt}</h5>
+                    {/* P-Today3 — wrap long legacy prompts cleanly. New
+                        cards are <=140 chars so this is mostly defensive. */}
+                    <h5
+                      style={{
+                        wordBreak: "break-word",
+                        overflowWrap: "anywhere",
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {activeCard.prompt}
+                    </h5>
                     <p id="cardHintText">{activeCard.hint}</p>
                   </div>
                   <div className="card-face card-face-back">
                     <div className="card-back-recap">
                       <span className="recap-label">Question</span>
-                      <span className="recap-text">{activeCard.prompt}</span>
+                      <span
+                        className="recap-text"
+                        style={{
+                          wordBreak: "break-word",
+                          overflowWrap: "anywhere",
+                        }}
+                      >
+                        {activeCard.prompt}
+                      </span>
                     </div>
                     <div className="card-face-eyebrow">Answer</div>
-                    <p id="cardAnswerText">{activeCard.answer}</p>
+                    <p
+                      id="cardAnswerText"
+                      style={{
+                        wordBreak: "break-word",
+                        overflowWrap: "anywhere",
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {activeCard.answer}
+                    </p>
                   </div>
                 </div>
                 <div className="review-actions">

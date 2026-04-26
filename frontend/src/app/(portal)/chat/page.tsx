@@ -36,6 +36,7 @@ import { toast } from "@/lib/toast";
 import { ChatSkeleton } from "./chat-skeleton";
 import { FeedbackControls } from "./feedback-controls";
 import { SaveNoteModal } from "@/components/features/notebook/save-note-modal";
+import { MakeFlashcardsModal } from "@/components/features/flashcards/make-flashcards-modal";
 import {
   getAgentLabel,
   getAgentGroups,
@@ -1469,60 +1470,41 @@ function RoutingAffordance({
   );
 }
 
-// P3-2 — Flashcard extraction button. Calls the spaced_repetition agent and
-// shows a toast with the card count.
+// P-Today3 (2026-04-26) — pure trigger. The parent owns modal state +
+// the saved-set tracking, mirroring how the bookmark button feeds the
+// SaveNoteModal. Removed the inline immediate POST that used to call the
+// spaced_repetition extractor — see MakeFlashcardsModal docstring for why.
 function FlashcardButton({
-  messageId,
-  content,
+  onClick,
+  isSaved,
 }: {
-  messageId: string;
-  content: string;
+  onClick: () => void;
+  isSaved: boolean;
 }) {
-  const router = useRouter();
-  const qc = useQueryClient();
-  const [loading, setLoading] = useState(false);
-  const [saved, setSaved] = useState(false);
-
-  const handleClick = async () => {
-    setLoading(true);
-    try {
-      const result = await chatApi.addFlashcards(messageId, content);
-      setSaved(true);
-      void qc.invalidateQueries({ queryKey: ["srs", "due"] });
-      toast.success(
-        `${result.cards_added} card${result.cards_added !== 1 ? "s" : ""} saved to review queue`,
-        { action: { label: "Review now →", onClick: () => router.push("/today") } },
-      );
-    } catch {
-      toast.error("Could not add flashcards — try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <button
       type="button"
-      onClick={() => void handleClick()}
-      disabled={loading || saved}
-      aria-label="Add flashcards from this message"
+      onClick={onClick}
+      aria-label={
+        isSaved
+          ? "Flashcards already saved from this message"
+          : "Make flashcards from this message"
+      }
+      aria-pressed={isSaved}
       data-testid="flashcard-button"
       className={cn(
         "inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
-        saved
-          ? "text-green-600 cursor-default"
+        isSaved
+          ? "text-green-600"
           : "text-muted-foreground hover:bg-muted hover:text-foreground",
-        "disabled:opacity-50",
       )}
     >
-      {loading ? (
-        <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-      ) : saved ? (
+      {isSaved ? (
         <Check className="h-3.5 w-3.5" aria-hidden="true" />
       ) : (
         <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
       )}
-      {saved ? "Saved" : "Flashcards"}
+      {isSaved ? "Saved" : "Flashcards"}
     </button>
   );
 }
@@ -1549,6 +1531,8 @@ function AssistantBubble({
   onSaveToNotebook,
   isSaved = false,
   onQuizMe,
+  onMakeFlashcards,
+  flashcardsSaved = false,
   truncated = false,
   dbMessageId,
   onContinue,
@@ -1593,6 +1577,10 @@ function AssistantBubble({
   isSaved?: boolean;
   // P3-3 — quiz me button callback. Undefined for live-streaming bubbles.
   onQuizMe?: (messageId: string, content: string) => void;
+  // P-Today3 — open MakeFlashcardsModal. Omitted for live-streaming bubbles.
+  // `flashcardsSaved` mirrors `isSaved` semantics for the flashcards button.
+  onMakeFlashcards?: () => void;
+  flashcardsSaved?: boolean;
   // Long-answer continuation. Set when the backend hit its token budget.
   truncated?: boolean;
   // Server-assigned DB message id — needed to reference the row for continuation.
@@ -1683,7 +1671,12 @@ function AssistantBubble({
             aria-label="Message actions"
           >
             <CopyMessageButton content={content} />
-            <FlashcardButton messageId={messageId} content={content} />
+            {onMakeFlashcards && (
+              <FlashcardButton
+                onClick={onMakeFlashcards}
+                isSaved={flashcardsSaved}
+              />
+            )}
             {onQuizMe && (
               <button
                 type="button"
@@ -2959,6 +2952,30 @@ function ChatArea({
     [savePromptTarget],
   );
 
+  // P-Today3 — flashcards modal target + per-session saved set.
+  const [flashcardTarget, setFlashcardTarget] = useState<{
+    messageId: string;
+    content: string;
+  } | null>(null);
+  const [flashcardsSavedIds, setFlashcardsSavedIds] = useState<Set<string>>(
+    new Set(),
+  );
+
+  const handleMakeFlashcards = useCallback(
+    (messageId: string, msgContent: string): void => {
+      if (!conversationId) return;
+      setFlashcardTarget({ messageId, content: msgContent });
+    },
+    [conversationId],
+  );
+
+  const handleFlashcardsSaved = useCallback(() => {
+    const target = flashcardTarget;
+    if (target) {
+      setFlashcardsSavedIds((prev) => new Set([...prev, target.messageId]));
+    }
+  }, [flashcardTarget]);
+
   // P3-3 — quiz panel state. Non-null when the quiz panel is open.
   const [quizPanel, setQuizPanel] = useState<{
     messageId: string;
@@ -3281,6 +3298,13 @@ function ChatArea({
                         : undefined
                     }
                     isSaved={savedMessageIds.has(msg.id)}
+                    // P-Today3 — flashcards modal opener.
+                    onMakeFlashcards={
+                      isPersisted
+                        ? () => handleMakeFlashcards(msg.id, msg.content)
+                        : undefined
+                    }
+                    flashcardsSaved={flashcardsSavedIds.has(msg.id)}
                     // Long-answer continuation.
                     truncated={msg.truncated}
                     dbMessageId={msg.dbMessageId}
@@ -3382,6 +3406,19 @@ function ChatArea({
           content={savePromptTarget.content}
           userQuestion={savePromptTarget.userQuestion}
           onSaved={handleNoteSaved}
+        />
+      )}
+
+      {flashcardTarget && conversationId && (
+        <MakeFlashcardsModal
+          open={true}
+          onOpenChange={(next) => {
+            if (!next) setFlashcardTarget(null);
+          }}
+          messageId={flashcardTarget.messageId}
+          conversationId={conversationId}
+          content={flashcardTarget.content}
+          onSaved={handleFlashcardsSaved}
         />
       )}
 
