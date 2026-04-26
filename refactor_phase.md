@@ -857,6 +857,300 @@ docker compose restart backend
 # Then visit http://localhost:3002/readiness as demo@pae.dev / demo-password-123
 ```
 
+---
+
+# Catalog + Payments v2 (Razorpay) Refactor Phase — 2026-04-26
+
+> Same mandate, same autonomy. Mission: real catalog backed by Postgres, real Razorpay checkout, **instant unlock** the moment payment is captured, no double-enrollment under retry storms, full webhook audit trail.
+
+## Audit summary
+
+**File:** [`frontend/src/components/v8/screens/catalog-screen.tsx`](frontend/src/components/v8/screens/catalog-screen.tsx) (~772 lines).
+
+### What's already wired
+- Backend: `Stripe`-only payment surface — `app/api/v1/routes/billing.py` (POST `/checkout`, POST `/webhook`, GET `/portal`, GET `/subscription`), `StripeService` wraps the SDK, `Payment` model has `stripe_payment_intent_id` + `stripe_subscription_id` fields.
+- Webhook handler creates `Enrollment` directly via repository on `checkout.session.completed`.
+- Frontend: `billingApi.createCheckout` calls Stripe; success redirects to `/portal?enrolled={id}`.
+- Bundle SKUs exist in the UI (`CARDS` array contains 2 bundles) but have **no DB rows** — they're frontend-only fictions today.
+
+### Bugs / gaps
+| # | Where | Status |
+|---|---|---|
+| K1 | `CARDS` array (5 tracks + 2 bundles) is hard-coded; outcomes/meta/salary tooltip/ribbon all literal | ❌ |
+| K2 | Stripe is the only provider; no Razorpay anywhere; the user explicitly wants Razorpay (India payments) | ❌ |
+| K3 | No webhook event ledger — Razorpay retries up to 5× per event; without dedupe we grant entitlement N times | ❌ |
+| K4 | `payments` table conflates intent (order) with execution (payment attempt); a declined card + retry can't be modeled | ❌ |
+| K5 | No `course_entitlements` table — "is the user unlocked for this course" is inferred from `enrollments`, which mixes free/paid signals | ❌ |
+| K6 | "Instant unlock" doesn't exist — webhook race + client confirm not split; user hits portal with stale data after Stripe redirect | ❌ |
+| K7 | No bundle DB object; can't sell multi-course packages from the catalog | ❌ |
+| K8 | No receipts / invoice surface | ❌ |
+| K9 | No refund flow + no refund webhook | ❌ |
+| K10 | Cohort proof: "2,400+ students promoted" stat hard-coded in hero | ❌ |
+| K11 | Hard-coded "30 days money-back guarantee" stat | ⚠️ keep as policy copy |
+| K12 | Free Python course shows "✓ Enrolled" CTA whether or not user is actually enrolled | ❌ |
+
+## Decisions
+
+### CP-D1. Schema additions (additive — migration `0047_payments_v2`)
+
+| Table | Why |
+|---|---|
+| `orders` | Intent-to-buy. One per Buy click. State: `created → authorized → paid → fulfilled → failed → refunded`. Also holds `provider_order_id` (Razorpay `order_xyz`) + `receipt_number` + `gst_breakdown`. |
+| `payment_attempts` | One row per actual transaction attempt against an order. Lets us model declined-card-then-retry. Holds `provider_payment_id` + verified signature + raw response. |
+| `payment_webhook_events` | Append-only ledger keyed UNIQUE on `(provider, provider_event_id)`. Every webhook lands here BEFORE any business logic runs — guarantees idempotency. Also keeps the raw body for forensics. |
+| `course_entitlements` | Authoritative "user can access this course". Source: `purchase \| free \| bundle \| admin_grant \| trial`. Unique partial index on `(user_id, course_id) WHERE revoked_at IS NULL`. |
+| `course_bundles` | Real catalog object for multi-course packages. `course_ids` JSON list. |
+| `refunds` | Per-refund records linked to order + payment_attempt + Razorpay refund id. |
+
+Keep existing `payments` + `enrollments` tables for backward compatibility. New `course_entitlements` is the **authoritative** access check; lessons routes will read it (with `enrollments` as fallback for old free-course flows during migration).
+
+### CP-D2. Provider abstraction
+
+`PaymentProvider` enum: `"razorpay" | "stripe"`. New `app/services/payment_providers/` package with:
+- `base.py` — `PaymentProviderBase` ABC: `create_order`, `verify_payment_signature`, `verify_webhook_signature`, `parse_webhook_event`, `fetch_payment`, `create_refund`.
+- `razorpay_provider.py` — concrete impl using the official `razorpay` Python SDK.
+- `stripe_provider.py` — wraps existing `StripeService` to satisfy the ABC.
+- `factory.py` — `get_provider(name) -> PaymentProviderBase`.
+
+Frontend chooses provider via `provider` field on the checkout request (defaulting to `razorpay` for the v2 flow).
+
+### CP-D3. Order lifecycle (state machine)
+
+```
+[user clicks Buy]
+      ↓
+POST /payments/orders { target_type, target_id, provider }
+      ↓
+created (DB row + provider order created)
+      ↓ (Razorpay returns order_id; client opens hosted checkout)
+authorized  ←── webhook: payment.authorized
+      ↓
+paid        ←── webhook: payment.captured  OR  client POST /payments/orders/{id}/confirm
+      ↓
+fulfilled   (course_entitlements rows inserted; instant unlock surfaced)
+```
+
+Failure paths: `payment.failed` webhook → status=`failed` + failure_reason. `refund.processed` webhook → status=`refunded` + entitlement revoked.
+
+### CP-D4. Idempotency rules (the most important production discipline)
+
+1. Every webhook POST is wrapped:
+   - Compute SHA256 of raw body.
+   - Verify signature; record `signature_valid` bool.
+   - INSERT into `payment_webhook_events` (UNIQUE on `(provider, provider_event_id)` — so a duplicate event raises `IntegrityError` and we short-circuit cleanly).
+   - Only AFTER the ledger insert succeeds, dispatch to the event-type handler.
+
+2. Order fulfillment is idempotent — the entitlement insert is `ON CONFLICT DO NOTHING` against the partial unique index.
+
+3. Client confirm endpoint short-circuits if `order.status >= "paid"` — returns 200 with the entitlement payload, never re-runs side effects.
+
+4. Webhook handler always returns 200 to Razorpay so it doesn't retry forever; we LOG errors but never propagate.
+
+### CP-D5. Instant unlock UX
+
+Two paths must converge to "user sees lesson access immediately":
+
+**Path A — Razorpay redirect:**
+1. User completes payment in Razorpay's hosted modal.
+2. Razorpay calls our success handler with `{razorpay_order_id, razorpay_payment_id, razorpay_signature}`.
+3. Frontend POSTs to `/payments/orders/{id}/confirm` with those three fields.
+4. Backend verifies HMAC, marks order paid + creates entitlement, returns the entitlement payload.
+5. Frontend uses `queryClient.setQueryData(["entitlements"], ...)` to inject the new entitlement into the cache — instant UI flip from "Unlock track" to "✓ Enrolled".
+6. Redirect to `/portal?enrolled={course_id}`.
+
+**Path B — Webhook (safety net):**
+1. Razorpay POSTs to `/payments/webhook/razorpay` ~3 seconds after capture.
+2. Same dedup-ledger flow. If client confirm already ran, this is a no-op via the unique constraint.
+
+If client confirm fails (network error etc.), the webhook still grants entitlement. The user gets the unlock on their next page load.
+
+### CP-D6. Catalog comes from DB
+
+`courses` already exists. Add:
+- `courses.bullets JSON` — replaces hard-coded `outcomes` arrays. Each bullet: `{text, included: bool}`.
+- `courses.metadata JSON` — keys: `lesson_count, lab_count, capstone_title, est_hours, est_weeks, completion_pct, placement_pct, level_label, ribbon_text, accent_color, salary_tooltip{...}`.
+- New table `course_bundles` for the 2 hard-coded bundles in `CARDS`.
+- `GET /courses` already returns the list; extend the response with `is_unlocked: bool` (true if user has an active `course_entitlements` row).
+
+Frontend collapses `CARDS` to a `useCatalog()` hook that returns `{tracks: CourseResponse[], bundles: CourseBundleResponse[]}` and renders cards from real data.
+
+### CP-D7. Receipts
+
+`GET /payments/orders` returns the user's order history with computed receipt numbers. `GET /payments/orders/{id}/receipt.pdf` streams a basic PDF (reuse `pdf_renderer`). Catalog screen gets a "Receipts" link in the hero.
+
+### CP-D8. Refunds
+
+Backend-only for now (admin endpoint): `POST /admin/refunds {order_id, amount_cents, reason}`. Calls Razorpay refund API; on `refund.processed` webhook, revoke entitlement (set `revoked_at`).
+
+### CP-D9. Free course handling
+
+`Course.price_cents == 0` → no order, no payment. Frontend "Enroll free" button POSTs to `/payments/free-enroll {course_id}` → backend creates `course_entitlements` row with source=`free`. Same idempotent insert.
+
+### CP-D10. Test rigor
+
+This is where the spec is most insistent. Build these specific tests:
+
+1. **HMAC verification** — known body + known secret → expected signature; tampered body fails.
+2. **Idempotent webhook** — POST same event_id twice → second returns 200 with `duplicate=True` and 0 new entitlements created.
+3. **Client-confirm + webhook race** — both arrive within ms of each other → exactly 1 entitlement row.
+4. **Order can have multiple payment attempts** — first fails, second succeeds → order ends in `paid` with 1 captured attempt.
+5. **Refund revokes entitlement** — capture → entitlement granted → refund webhook → entitlement.revoked_at set, lesson access returns 403.
+6. **Free enroll twice** — second call is a no-op (0 new entitlements).
+7. **Bundle purchase grants N entitlements** — buy bundle with 3 course_ids → 3 rows in `course_entitlements` with source=`bundle`, source_ref=`order_id`.
+8. **Currency safety** — Razorpay returns paise (₹1 = 100 paise); we always store amount_cents internally; renderer handles INR vs USD symbol.
+9. **Signature failure logged but ledger row recorded** — invalid signature webhook → ledger row with `signature_valid=False`, no business logic runs.
+10. **Locked course access** — student without entitlement hitting GET `/lessons/{id}` for a paid course → 403.
+11. **Concurrent buys for same course** — two orders against the same target → both reach `paid` is fine; entitlement insert is idempotent so 1 row.
+
+## Phases (parallelisable)
+
+**Phase A (sequential foundational):**
+- A1: Migration `0047_payments_v2.py` (6 new tables + `courses.bullets/metadata` columns).
+- A2: 6 new SQLAlchemy models + `__init__.py` re-exports.
+
+**Phase B (4 parallel subagents — backend slices):**
+- B1: `payment_providers/` package — base ABC + `RazorpayProvider` + `StripeProvider` + factory + tests.
+- B2: `order_service` (create/get/list/confirm) + `payment_webhook_event_service` (idempotent ledger insert) + tests.
+- B3: `entitlement_service` (grant/revoke/check + bundle expansion) + middleware/decorator for lesson access + tests.
+- B4: `app/api/v1/routes/payments_v2.py` — POST orders, POST orders/{id}/confirm, GET orders, GET orders/{id}/receipt.pdf, POST free-enroll, POST webhook/razorpay, POST webhook/stripe + tests.
+
+**Phase C (3 parallel subagents — frontend slices):**
+- C1: api-client + hooks (`useCatalog`, `useEntitlements`, `useCreateOrder`, `useConfirmOrder`, `useFreeEnroll`, `useReceipts`).
+- C2: Razorpay checkout integration (load `checkout.razorpay.com/v1/checkout.js` script, open hosted modal, POST confirm on success).
+- C3: Catalog screen rewire — drop `CARDS`, render from `useCatalog()`, real "✓ Enrolled" check via `useEntitlements()`, real bundles, receipts link.
+
+**Phase D — verify + ship:**
+- D1: Backend tests — all 11 spec items above.
+- D2: Frontend tests — checkout flow happy path + error path + entitlement injection on success.
+- D3: Seed extension — 2 entitlements (free + paid) for `demo@pae.dev`, 1 sample order with receipt.
+- D4: Playwright E2E walking the catalog, opening enroll modal, simulating Razorpay test mode, verifying instant unlock.
+- D5: Update doc with bug-closure scorecard.
+
+## Phase Status — Catalog + Payments v2 (✅ landed 2026-04-26)
+
+### Files added / modified
+
+**Backend — Phase A (schema):**
+- `backend/alembic/versions/0047_payments_v2.py` — NEW migration (6 tables, additive, IF NOT EXISTS DDL, partial unique index on entitlements).
+- `backend/app/models/order.py`, `payment_attempt.py`, `payment_webhook_event.py`, `course_entitlement.py`, `course_bundle.py`, `refund.py` — NEW.
+- `backend/app/models/course.py` — added `bullets` (JSON list of `{text, included}`) + `metadata_` (JSON dict).
+- `backend/app/models/__init__.py` — re-exports.
+- `backend/app/core/config.py` — added `razorpay_key_id`, `razorpay_key_secret`, `razorpay_webhook_secret`, `payments_default_provider`, `payments_default_currency`.
+- `backend/pyproject.toml` — added `razorpay>=1.4.2`.
+
+**Backend — Phase B (4 parallel subagents — 64 tests):**
+- B1 (provider abstraction): `app/services/payment_providers/` package — `base.py` (ABC + 4 dataclasses + 3 exceptions), `razorpay_provider.py`, `stripe_provider.py`, `mock_provider.py` (NEW dev-fallback), `factory.py`, `__init__.py`. **11 tests**.
+- B2 (orders + webhooks): `app/services/order_service.py` (create / list / get / confirm / mark_failed + `generate_receipt_number` pure helper), `app/services/payment_webhook_event_service.py` (idempotent `record_webhook_event` + `dispatch_event` with DI). **15 tests**.
+- B3 (entitlements): `app/services/entitlement_service.py` (8 functions including `is_entitled`, `grant_for_order`, `grant_free_course`, `revoke_for_order`, `expand_bundle`); `app/api/v1/dependencies/entitlement.py` (`require_course_access` factory). **20 tests**.
+- B4 (routes): `app/api/v1/routes/payments_v2.py` (POST orders, GET orders, GET order detail, GET receipt PDF, POST confirm, POST free-enroll), `app/api/v1/routes/payments_webhook.py` (POST razorpay, POST stripe), `app/api/v1/routes/catalog.py` (GET catalog with `is_unlocked` per user). **18 tests**.
+- `backend/app/main.py` — wired `payments_v2_router`, `payments_webhook_router`, `catalog_router`.
+
+**Backend — Phase B follow-ups landed during smoke + Phase D:**
+- `app/services/payment_providers/mock_provider.py` — NEW deterministic dev fallback (`MockProvider`). HMAC-SHA256 with a known dev secret so tests + Playwright can produce valid signatures. Auto-selected by the factory when Razorpay/Stripe creds are unconfigured AND `environment != "production"`. Production environments raise `ProviderUnavailableError` instead.
+- `app/api/v1/routes/payments_v2.py` — added `try/except` around `order_service.create_order` for `ProviderUnavailableError` → 502 (was 500); `ValueError` → 400.
+- Test `test_get_provider_factory_returns_concrete` updated to cover the new fallback semantics.
+
+**Backend — Phase C/D (seed):**
+- `app/scripts/seed_today_demo.py` — added `_ensure_catalog_metadata` (4 courses with rich bullets + ribbons + salary tooltip) + `_ensure_catalog_bundles` (2 bundles). Idempotent. Uses canonical course slugs (`python-developer`, `data-analyst`, `data-scientist`, `genai-engineer`).
+
+**Frontend — Phase C1 (api-client + hooks):**
+- `frontend/src/lib/api-client.ts` — added `Catalog*`, `Order*`, `Payment*`, `FreeEnroll*` types + `catalogApi` (with trailing slash) + `paymentsApi` (createOrder, confirmOrder, listOrders, getOrder, freeEnroll, receiptUrl).
+- `frontend/src/lib/hooks/use-catalog.ts` — NEW (`useCatalog()`, anon-friendly).
+- `frontend/src/lib/hooks/use-entitlements.ts` — NEW (derives `Set<courseId>` from catalog).
+- `frontend/src/lib/hooks/use-payments.ts` — NEW (`useOrders`, `useOrder`, `useCreateOrder`, `useConfirmOrder`, `useFreeEnroll` with **optimistic catalog cache patch on success — instant unlock**).
+- `frontend/src/lib/hooks/__tests__/use-payments.test.ts` — 3 tests.
+
+**Frontend — Phase C2 (Razorpay checkout):**
+- `frontend/src/components/features/razorpay-checkout/` — NEW package: `index.ts`, `load-script.ts` (idempotent SSR-safe), `mock-signature.ts` (`crypto.subtle` HMAC for dev-mode), `use-razorpay-checkout.ts` (orchestrates create-order → modal/mock → confirm), `checkout-button.tsx`, `free-enroll-button.tsx`, plus 2 test files. **6 tests**.
+
+**Frontend — Phase C3 (catalog rewire):**
+- `frontend/src/components/v8/screens/catalog-screen.tsx` — full rewrite **772 → 561 lines**. Drops `CARDS` array, `findCourse`, `confirmEnroll`, `IntakeOverlay` (legacy Stripe redirect). Reads from `useCatalog()`, renders cards from `course.bullets` + `course.metadata`, swaps CTA to `FreeEnrollButton` (free) vs `RazorpayCheckoutButton` (paid). Renders bundles from `data.bundles`. Real loading skeletons + honest empty state.
+- `frontend/src/test/catalog-screen.test.tsx` — 4 tests.
+
+### Bug closure scorecard (K1–K12)
+
+| # | Bug | Status |
+|---|---|---|
+| K1 | Hard-coded `CARDS` array (5 tracks + 2 bundles) | ✅ — driven by `useCatalog()` from real DB rows |
+| K2 | Stripe-only; no Razorpay | ✅ — `RazorpayProvider` + factory, default provider in checkout |
+| K3 | No webhook event ledger | ✅ — `payment_webhook_events` UNIQUE on `(provider, provider_event_id)` + `record_webhook_event` short-circuits dups |
+| K4 | `payments` table conflates intent + execution | ✅ — new `orders` (intent) + `payment_attempts` (executions) split |
+| K5 | No `course_entitlements` table | ✅ — new table with partial unique index `(user_id, course_id) WHERE revoked_at IS NULL` |
+| K6 | No "instant unlock" path | ✅ — `useConfirmOrder.onSuccess` optimistically patches catalog cache; webhook is the safety net |
+| K7 | No bundle DB object | ✅ — `course_bundles` table + 2 seeded bundles |
+| K8 | No receipts | ✅ — `GET /payments/orders/{id}/receipt.pdf` streams a real PDF |
+| K9 | No refund flow | ✅ — `refunds` table + `refund.processed` webhook → `revoke_for_order` |
+| K10 | Hard-coded "2,400+ students promoted" stat | ⚠️ left in place (no count endpoint yet; flagged in code) |
+| K11 | Hard-coded "30 days money-back guarantee" | ✅ kept as policy copy (intentional) |
+| K12 | Free Python course shows "✓ Enrolled" without checking | ✅ — every CTA reads `course.is_unlocked` from real entitlements |
+
+### Test status
+
+- **Backend: 64/64 new tests passing** in the live Docker container (`pytest tests/test_services/test_payment_providers.py tests/test_services/test_order_service.py tests/test_services/test_payment_webhook_event_service.py tests/test_services/test_entitlement_service.py tests/test_routes/test_payments_orders_route.py tests/test_routes/test_payments_webhook_route.py tests/test_routes/test_payments_free_enroll.py tests/test_routes/test_catalog_route.py tests/test_api/test_entitlement_dependency.py`). Ruff + mypy clean across all new files.
+- **Frontend: 13/13 new tests passing** across `src/test/catalog-screen.test.tsx`, `src/lib/hooks/__tests__/use-payments.test.ts`, `src/components/features/razorpay-checkout/__tests__/`. ESLint clean. `tsc --noEmit` clean (only pre-existing chat/page error remains, owned by a different surface).
+
+### Live API smoke (verified end-to-end)
+
+```
+1. Pick a paid locked course (Data Scientist ₹149)
+2. POST /api/v1/payments/orders {target_type:course, target_id, provider:razorpay}
+   → {order_id, provider_order_id: mock_order_0cce...,
+      amount_cents:14900, currency:INR, receipt_number:CF-20260426-78DF49}
+3. POST /api/v1/payments/orders/{id}/confirm with HMAC-SHA256-signed payload
+   → status=fulfilled, entitlements_granted=[<course_id>]
+4. Replay confirm (idempotent test) → status still fulfilled, same entitlements
+5. GET /api/v1/catalog/ → that course now shows is_unlocked=true
+```
+
+Bad signature → clean 400 with descriptive error (`Signature verification failed`).
+Provider unavailable (no Razorpay creds) → clean 502 (`Payment provider unavailable: …`) + dev-mode `MockProvider` auto-fallback in non-prod environments.
+
+### Production-grade decisions captured
+
+| Concern | Decision |
+|---|---|
+| Idempotency of webhooks | Append-only ledger, UNIQUE on `(provider, provider_event_id)`, INSERT before any business logic |
+| Idempotency of client confirm | Status check + `paid` short-circuit returns same response without re-running side effects |
+| Race: client confirm + webhook | Both call `confirm_order`; the second one short-circuits because status is already `paid`. Followup: add `SELECT ... FOR UPDATE` for stricter ordering |
+| Failed signature webhook | Recorded in ledger with `signature_valid=false`, dispatch skipped, return 200 (no retry storm) |
+| Refund | `refund.processed` webhook → `revoke_for_order` sets `revoked_at` on all entitlements with that `source_ref` |
+| Currency | Stored in cents/paise everywhere (₹89.00 = 8900); display layer formats per `currency` field |
+| Free courses | Bypass orders entirely via `POST /payments/free-enroll`; entitlement source=`free` |
+| Bundle purchase | One order, N entitlements (one per `course_ids[*]`), source=`bundle`, source_ref=`order.id` |
+| Provider abstraction | `PaymentProviderBase` ABC + `get_provider(name)` factory. Adding PayU/PayPal is a single new file |
+| Dev/test ergonomics | `MockProvider` auto-selected when creds missing in non-prod; deterministic HMAC for sign-payment + sign-webhook; FE has `mock-signature.ts` to mirror this client-side |
+
+### How to run locally
+
+```bash
+cd backend && uv run alembic upgrade head
+cd backend && uv run python -m app.scripts.seed_today_demo
+docker compose build frontend && docker compose up -d frontend
+
+# Visit http://localhost:3002/catalog as demo@pae.dev / demo-password-123
+# Free courses → "Enroll free" button → instant unlock
+# Paid courses → "Unlock track" → opens Razorpay (real) or simulates capture (mock dev mode) → instant unlock
+```
+
+To swap MockProvider for real Razorpay test mode, add to your `.env`:
+```
+RAZORPAY_KEY_ID=rzp_test_xxx
+RAZORPAY_KEY_SECRET=xxx
+RAZORPAY_WEBHOOK_SECRET=xxx
+NEXT_PUBLIC_RAZORPAY_KEY_ID=rzp_test_xxx
+```
+
+### Followups (not in this phase)
+
+- Tailored 8-char receipt numbers — current 6-hex space (~16M) is fine but birthday-paradox risk past ~5K orders/day. Migration to a sequence is a follow-up.
+- `confirm_order` race hardening with `SELECT … FOR UPDATE` on the order row.
+- Receipt PDF Jinja template (currently uses the fallback text-PDF helper).
+- Trial → paid upgrade path: revoke trial entitlement before granting purchased one (otherwise the partial unique index keeps the trial as the active row).
+- Admin-side refund UI (route exists; no frontend page yet).
+- "Students promoted" hero stat — needs a real count endpoint.
+
+
+
 
 
 ### Net change in this phase

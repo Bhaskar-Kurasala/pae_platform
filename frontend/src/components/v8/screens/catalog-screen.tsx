@@ -1,69 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useSetV8Topbar } from "@/components/v8/v8-topbar-context";
 import { v8Toast } from "@/components/v8/v8-toast";
-import { useCourses } from "@/lib/hooks/use-courses";
-import { useAuthStore } from "@/stores/auth-store";
-import { billingApi, type CourseResponse } from "@/lib/api-client";
+import { useCatalog } from "@/lib/hooks/use-catalog";
+import { RazorpayCheckoutButton } from "@/components/features/razorpay-checkout/checkout-button";
+import { FreeEnrollButton } from "@/components/features/razorpay-checkout/free-enroll-button";
+import type {
+  CatalogBullet,
+  CatalogBundleResponse,
+  CatalogCourseResponse,
+} from "@/lib/api-client";
 
 type FilterKey = "all" | "free" | "beginner" | "intermediate" | "advanced" | "genai";
-
-interface OutcomeRow {
-  on: boolean;
-  text: React.ReactNode;
-}
-
-interface MetaCell {
-  text: React.ReactNode;
-}
 
 interface SalaryTooltip {
   eyebrow: string;
   stats: ReadonlyArray<{ v: string; l: string }>;
   foot: string;
-}
-
-interface PriceShape {
-  /** Free foundation course — render "Free" instead of a price. */
-  free?: boolean;
-  /** Strikethrough comparison price (marketing). Live price comes from the courses API. */
-  was?: string;
-  /** Bundle override: bundles have no DB row, so price is fixed in the UI. */
-  bundleAmt?: string;
-}
-
-interface CtaShape {
-  label: string;
-  variant?: "default" | "gold" | "enrolled";
-  /** When set, the CTA opens the enroll overlay for this track name. */
-  enroll?: { trackName: string; isBundle?: boolean };
-  /** When set, price + availability are looked up by this slug from the courses API. */
-  courseSlug?: string;
-  /** Disabled CTA — bundle/coming-soon card with no live course row. */
-  comingSoon?: boolean;
-}
-
-interface CardShape {
-  key: string;
-  cats: ReadonlyArray<FilterKey>;
-  accent: string;
-  accent2: string;
-  ribbon?: { text: string; dark?: boolean };
-  level: string;
-  levelColor?: string;
-  title: string;
-  roleSub: string;
-  outcomes: ReadonlyArray<OutcomeRow>;
-  meta: ReadonlyArray<MetaCell>;
-  price: PriceShape;
-  cta: CtaShape;
-  featured?: boolean;
-  locked?: boolean;
-  tooltip?: SalaryTooltip;
 }
 
 const CHIP_LABELS: ReadonlyArray<{ key: FilterKey; label: string }> = [
@@ -75,405 +30,195 @@ const CHIP_LABELS: ReadonlyArray<{ key: FilterKey; label: string }> = [
   { key: "genai", label: "GenAI" },
 ];
 
-const CARDS: ReadonlyArray<CardShape> = [
-  {
-    key: "python",
-    cats: ["free", "beginner"],
-    accent: "var(--forest)",
-    accent2: "var(--forest-3)",
-    level: "Level 1 · Free foundation",
-    title: "Python Developer",
-    roleSub:
-      "Clean functions, async I/O, error handling. The base every role ahead depends on.",
-    outcomes: [
-      {
-        on: true,
-        text: (
-          <>
-            <b>6 lessons</b> · fundamentals, OOP, APIs, testing, debugging, collab
-          </>
-        ),
-      },
-      {
-        on: true,
-        text: (
-          <>
-            <b>18 labs</b> with automated test suites
-          </>
-        ),
-      },
-      { on: true, text: <>1 CLI-tool capstone reviewed by your mentor</> },
-      { on: false, text: <>Spaced-repetition notebook across all lessons</> },
-    ],
-    meta: [
-      { text: <><b>45h</b> est.</> },
-      { text: <><b>6</b> weeks</> },
-      { text: <><b>92%</b> completion</> },
-    ],
-    price: { free: true },
-    cta: { label: "✓ Enrolled", variant: "enrolled", courseSlug: "python-developer" },
-  },
-  {
-    key: "data-analyst",
-    cats: ["beginner", "intermediate"],
-    accent: "var(--gold)",
-    accent2: "var(--gold-2)",
-    ribbon: { text: "Most popular" },
-    level: "Level 2 · Your next step",
-    levelColor: "#8d621b",
-    title: "Data Analyst",
-    roleSub:
-      "SQL joins that feel natural, pandas that scales, and dashboards a stakeholder reads without a walkthrough.",
-    outcomes: [
-      {
-        on: true,
-        text: (
-          <>
-            <b>8 lessons</b> · SQL, pandas at scale, viz, stakeholder comms
-          </>
-        ),
-      },
-      {
-        on: true,
-        text: (
-          <>
-            <b>22 labs</b> · real retail + marketing datasets
-          </>
-        ),
-      },
-      { on: true, text: <>Dashboard capstone graded by a working analyst</> },
-      { on: true, text: <>2 mock interviews + resume review with mentor</> },
-    ],
-    meta: [
-      { text: <><b>60h</b> est.</> },
-      { text: <><b>8</b> weeks</> },
-      { text: <><b>76%</b> placed in 90 days</> },
-    ],
-    price: { was: "$129" },
-    cta: {
-      label: "Unlock track",
-      variant: "gold",
-      enroll: { trackName: "Data Analyst" },
-      courseSlug: "data-analyst",
-    },
-    featured: true,
-    locked: true,
-    tooltip: {
-      eyebrow: "Why unlock Data Analyst",
-      stats: [
-        { v: "$78k", l: "Median entry salary (US)" },
-        { v: "12,400", l: "Open roles right now" },
-      ],
-      foot: "76% of CareerForge students land a role within 90 days of promotion",
-    },
-  },
-  {
-    key: "data-scientist",
-    cats: ["intermediate"],
-    accent: "#3a6ea3",
-    accent2: "#5888b5",
-    level: "Level 3 · Intermediate",
-    levelColor: "#3a6ea3",
-    title: "Data Scientist",
-    roleSub:
-      "Statistics you trust, experiments you run, and models that actually ship — not just notebooks.",
-    outcomes: [
-      {
-        on: true,
-        text: (
-          <>
-            <b>10 lessons</b> · stats, experimentation, ML foundations, deployment
-          </>
-        ),
-      },
-      {
-        on: true,
-        text: (
-          <>
-            <b>28 labs</b> · A/B tests, feature engineering, model ops
-          </>
-        ),
-      },
-      { on: true, text: <>Kaggle-grade capstone with peer + mentor review</> },
-      { on: false, text: <>Requires Data Analyst or equivalent foundation</> },
-    ],
-    meta: [
-      { text: <><b>90h</b> est.</> },
-      { text: <><b>12</b> weeks</> },
-      { text: <><b>64%</b> interview-ready in 120 days</> },
-    ],
-    price: {},
-    cta: {
-      label: "Unlock track",
-      enroll: { trackName: "Data Scientist" },
-      courseSlug: "data-scientist",
-    },
-    locked: true,
-    tooltip: {
-      eyebrow: "Why unlock Data Scientist",
-      stats: [
-        { v: "$112k", l: "Median salary (US)" },
-        { v: "8,200", l: "Open roles right now" },
-      ],
-      foot: "Build models that ship. The role for people who like science and shipping.",
-    },
-  },
-  {
-    key: "ml-engineer",
-    cats: ["advanced"],
-    accent: "#6d4a8f",
-    accent2: "#8f70ae",
-    level: "Level 4 · Advanced",
-    levelColor: "#6d4a8f",
-    title: "ML Engineer",
-    roleSub:
-      "Production ML — training pipelines that don't break on Monday, features that are versioned, models that are monitored.",
-    outcomes: [
-      {
-        on: true,
-        text: (
-          <>
-            <b>12 lessons</b> · pipelines, feature stores, serving, monitoring
-          </>
-        ),
-      },
-      {
-        on: true,
-        text: (
-          <>
-            <b>34 labs</b> · Docker, GPUs, batch + online inference
-          </>
-        ),
-      },
-      { on: true, text: <>End-to-end production ML system as capstone</> },
-      { on: false, text: <>Requires Data Scientist or equivalent</> },
-    ],
-    meta: [
-      { text: <><b>120h</b> est.</> },
-      { text: <><b>16</b> weeks</> },
-      { text: <><b>$145k</b> median post-placement</> },
-    ],
-    price: {},
-    cta: {
-      label: "Unlock track",
-      enroll: { trackName: "ML Engineer" },
-      courseSlug: "ml-engineer",
-    },
-    locked: true,
-    tooltip: {
-      eyebrow: "Why unlock ML Engineer",
-      stats: [
-        { v: "$145k", l: "Median salary (US)" },
-        { v: "5,800", l: "Open roles right now" },
-      ],
-      foot: "Where the actual ML lives. Production at scale, not toy notebooks.",
-    },
-  },
-  {
-    key: "genai-engineer",
-    cats: ["advanced", "genai"],
-    accent: "#9a4b3b",
-    accent2: "#be6a56",
-    level: "Level 5 · GenAI specialization",
-    levelColor: "#9a4b3b",
-    title: "GenAI Engineer",
-    roleSub:
-      "Agentic systems, production RAG, evals that catch real regressions, and LLMOps. Build what ships in 2026.",
-    outcomes: [
-      {
-        on: true,
-        text: (
-          <>
-            <b>14 lessons</b> · RAG, agents, evals, LLMOps, safety
-          </>
-        ),
-      },
-      {
-        on: true,
-        text: (
-          <>
-            <b>38 labs</b> · tool use, long-context, reasoning chains
-          </>
-        ),
-      },
-      { on: true, text: <>Agentic capstone + 1:1 mentor from a GenAI company</> },
-      { on: false, text: <>Requires ML Engineer or equivalent production experience</> },
-    ],
-    meta: [
-      { text: <><b>140h</b> est.</> },
-      { text: <><b>18</b> weeks</> },
-      { text: <><b>$180k+</b> median post-placement</> },
-    ],
-    price: {},
-    cta: {
-      label: "Unlock track",
-      enroll: { trackName: "GenAI Engineer" },
-      courseSlug: "genai-engineer",
-    },
-    locked: true,
-    tooltip: {
-      eyebrow: "Why unlock GenAI Engineer",
-      stats: [
-        { v: "$180k+", l: "Median salary (US)" },
-        { v: "3,400", l: "Open roles · 4× yoy" },
-      ],
-      foot:
-        "The fastest-growing role in tech. Most companies have 0–2 people who can do this.",
-    },
-  },
-  {
-    key: "bundle",
-    cats: ["genai"],
-    accent: "var(--gold)",
-    accent2: "var(--gold-2)",
-    ribbon: { text: "Bundle · save $178", dark: true },
-    level: "Full career arc",
-    levelColor: "#8d621b",
-    title: "Data Analyst → GenAI Engineer",
-    roleSub:
-      "All four paid tracks, in the sequence the platform recommends. Unlock the next the moment you close the current.",
-    outcomes: [
-      { on: true, text: <>Analyst + Scientist + ML Engineer + GenAI Engineer</> },
-      {
-        on: true,
-        text: (
-          <>
-            <b>122 labs</b> + 4 capstones + 8 mentor reviews
-          </>
-        ),
-      },
-      { on: true, text: <>Placement services + resume reviews at every level</> },
-      { on: true, text: <>Priority mentor matching across all four tracks</> },
-    ],
-    meta: [
-      { text: <><b>410h</b> est.</> },
-      { text: <><b>18 months</b> est.</> },
-      { text: <>Save <b>$178</b> vs. separate</> },
-    ],
-    price: { bundleAmt: "508", was: "$686" },
-    cta: {
-      label: "Unlock bundle",
-      variant: "gold",
-      enroll: { trackName: "Full arc bundle", isBundle: true },
-      comingSoon: true,
-    },
-  },
+// Rotating accent palette used when metadata.accent_color is missing.
+const ACCENT_PALETTE: ReadonlyArray<string> = [
+  "var(--forest)",
+  "var(--gold)",
+  "var(--purple)",
+  "#3a6ea3",
+  "#22a17e",
 ];
 
-interface EnrollState {
-  trackName: string;
-  price: string;
-  isBundle: boolean;
-  courseId: string | null;
-  comingSoon: boolean;
+const PLACEHOLDER_BULLETS: ReadonlyArray<CatalogBullet> = [
+  { text: "Course content coming soon", included: false },
+];
+
+function formatPrice(cents: number, currency: string): string {
+  if (cents <= 0) return "Free";
+  if (currency === "INR") {
+    return `₹${Math.round(cents / 100)}`;
+  }
+  const amount = (cents / 100).toFixed(2);
+  if (currency === "USD") return `$${amount}`;
+  return `${currency} ${amount}`;
 }
 
-function findCourse(
-  slug: string | undefined,
-  courses: ReadonlyArray<CourseResponse> | undefined,
-): CourseResponse | null {
-  if (!slug || !courses) return null;
-  return courses.find((c) => c.slug === slug) ?? null;
+function capitalize(value: string | null | undefined, fallback: string): string {
+  if (!value) return fallback;
+  return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
 }
 
-function formatPrice(priceCents: number): string {
-  if (priceCents <= 0) return "Free";
-  const dollars = priceCents / 100;
-  return `$${Number.isInteger(dollars) ? dollars.toFixed(0) : dollars.toFixed(2)}`;
+function levelLabel(difficulty: string | null | undefined, index: number): string {
+  const tier = capitalize(difficulty, "Beginner");
+  return `Level ${index + 1} · ${tier}`;
+}
+
+function truncate(text: string | null, max = 140): string {
+  if (!text) return "";
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trimEnd()}…`;
+}
+
+function bulletsFor(course: CatalogCourseResponse): ReadonlyArray<CatalogBullet> {
+  return course.bullets.length > 0 ? course.bullets : PLACEHOLDER_BULLETS;
+}
+
+function metaCellsFor(metadata: Record<string, unknown>): ReadonlyArray<string> {
+  const cells: string[] = [];
+  const push = (raw: unknown, suffix: string) => {
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+      cells.push(`${raw}${suffix}`);
+    }
+  };
+  push(metadata.est_hours, "h est.");
+  push(metadata.est_weeks, " weeks");
+  push(metadata.completion_pct, "% completion");
+  push(metadata.placement_pct, "% placed in 90 days");
+  push(metadata.lesson_count, " lessons");
+  push(metadata.lab_count, " labs");
+  return cells;
+}
+
+function readString(metadata: Record<string, unknown>, key: string): string | null {
+  const v = metadata[key];
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+function readSalaryTooltip(metadata: Record<string, unknown>): SalaryTooltip | null {
+  const raw = metadata.salary_tooltip;
+  if (!raw || typeof raw !== "object") return null;
+  const t = raw as Record<string, unknown>;
+  const eyebrow = typeof t.eyebrow === "string" ? t.eyebrow : null;
+  const foot = typeof t.foot === "string" ? t.foot : null;
+  const statsRaw = Array.isArray(t.stats) ? t.stats : null;
+  if (!eyebrow || !foot || !statsRaw) return null;
+  const stats: Array<{ v: string; l: string }> = [];
+  for (const item of statsRaw) {
+    if (item && typeof item === "object") {
+      const o = item as Record<string, unknown>;
+      if (typeof o.v === "string" && typeof o.l === "string") {
+        stats.push({ v: o.v, l: o.l });
+      }
+    }
+  }
+  if (stats.length === 0) return null;
+  return { eyebrow, stats, foot };
+}
+
+function genaiMatch(course: CatalogCourseResponse): boolean {
+  const tags = course.metadata.tags;
+  if (Array.isArray(tags) && tags.includes("genai")) return true;
+  const slug = course.slug.toLowerCase();
+  return slug.includes("genai") || slug.includes("/ai") || slug.includes("-ai") || slug.includes("ml") || slug.startsWith("ai");
+}
+
+function difficultyMatches(course: CatalogCourseResponse, key: FilterKey): boolean {
+  return (course.difficulty ?? "").toLowerCase() === key;
+}
+
+function applyFilter(
+  courses: ReadonlyArray<CatalogCourseResponse>,
+  filter: FilterKey,
+): ReadonlyArray<CatalogCourseResponse> {
+  if (filter === "all") return courses;
+  if (filter === "free") return courses.filter((c) => c.price_cents === 0);
+  if (filter === "genai") return courses.filter(genaiMatch);
+  return courses.filter((c) => difficultyMatches(c, filter));
+}
+
+interface HeroStats {
+  trackCount: string;
+  lessonsAndLabs: string;
+}
+
+function deriveHeroStats(
+  tracks: ReadonlyArray<CatalogCourseResponse>,
+  isLoading: boolean,
+): HeroStats {
+  if (isLoading && tracks.length === 0) {
+    return { trackCount: "—", lessonsAndLabs: "—" };
+  }
+  const total = tracks.reduce((acc, c) => {
+    const lessons = typeof c.metadata.lesson_count === "number" ? c.metadata.lesson_count : 0;
+    const labs = typeof c.metadata.lab_count === "number" ? c.metadata.lab_count : 0;
+    return acc + lessons + labs;
+  }, 0);
+  return {
+    trackCount: tracks.length > 0 ? String(tracks.length) : "—",
+    lessonsAndLabs: total > 0 ? String(total) : "—",
+  };
+}
+
+interface BundleIncluded {
+  titles: ReadonlyArray<string>;
+  more: number;
+}
+
+function bundleIncluded(
+  bundle: CatalogBundleResponse,
+  courses: ReadonlyArray<CatalogCourseResponse>,
+): BundleIncluded {
+  const byId = new Map(courses.map((c) => [c.id, c.title]));
+  const titles: string[] = [];
+  for (const id of bundle.course_ids) {
+    const t = byId.get(id);
+    if (t) titles.push(t);
+  }
+  if (titles.length === 0) {
+    return { titles: [`${bundle.course_ids.length} course(s)`], more: 0 };
+  }
+  const visible = titles.slice(0, 3);
+  return { titles: visible, more: Math.max(0, titles.length - visible.length) };
 }
 
 export function CatalogScreen() {
-  const router = useRouter();
-  const { isAuthenticated } = useAuthStore();
-  const { data: courses } = useCourses();
+  const { data, isLoading, error } = useCatalog();
+  const tracks = useMemo(() => data?.courses ?? [], [data]);
+  const bundles = useMemo(() => data?.bundles ?? [], [data]);
+
+  const heroStats = useMemo(
+    () => deriveHeroStats(tracks, isLoading),
+    [tracks, isLoading],
+  );
 
   useSetV8Topbar({
-    eyebrow: "Catalog · 5 career tracks",
+    eyebrow:
+      tracks.length > 0
+        ? `Catalog · ${tracks.length} career track${tracks.length === 1 ? "" : "s"}`
+        : "Catalog",
     titleHtml: "Every role is a track. Unlock the <i>next one</i> when ready.",
     chips: [],
     progress: 50,
   });
 
   const [filter, setFilter] = useState<FilterKey>("all");
-  const [enroll, setEnroll] = useState<EnrollState | null>(null);
-  const [checkoutLoading, setCheckoutLoading] = useState(false);
-  const [mounted, setMounted] = useState(false);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  const visibleCards = useMemo(
-    () => CARDS.filter((c) => filter === "all" || c.cats.includes(filter)),
-    [filter],
-  );
-
-  const closeEnroll = useCallback(() => setEnroll(null), []);
-
-  useEffect(() => {
-    if (!enroll) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeEnroll();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [enroll, closeEnroll]);
-
-  const openEnroll = useCallback(
-    (card: CardShape) => {
-      if (!card.cta.enroll) return;
-      const isBundle = !!card.cta.enroll.isBundle;
-      const course = findCourse(card.cta.courseSlug, courses);
-      const courseAvailable = !!course && course.is_published;
-      const livePrice = course ? formatPrice(course.price_cents) : null;
-      const bundlePrice = card.price.bundleAmt ? `$${card.price.bundleAmt}` : null;
-      setEnroll({
-        trackName: card.cta.enroll.trackName,
-        price: livePrice ?? bundlePrice ?? "",
-        isBundle,
-        courseId: courseAvailable ? course.id : null,
-        comingSoon: !!card.cta.comingSoon || !courseAvailable,
-      });
-    },
-    [courses],
-  );
-
-  const confirmEnroll = useCallback(async () => {
-    if (!enroll) return;
-    if (!isAuthenticated) {
-      v8Toast("Sign in to unlock this track.");
-      router.push("/login");
-      return;
-    }
-    if (enroll.comingSoon || !enroll.courseId) {
-      v8Toast("Coming soon.");
-      closeEnroll();
-      return;
-    }
-    setCheckoutLoading(true);
-    try {
-      const origin = typeof window !== "undefined" ? window.location.origin : "";
-      const { checkout_url } = await billingApi.createCheckout({
-        course_id: enroll.courseId,
-        success_url: `${origin}/portal?enrolled=${enroll.courseId}`,
-        cancel_url: `${origin}/catalog`,
-      });
-      window.location.href = checkout_url;
-    } catch {
-      v8Toast("Checkout failed. Try again in a moment.");
-    } finally {
-      setCheckoutLoading(false);
-    }
-  }, [enroll, isAuthenticated, router, closeEnroll]);
-
-  const ctaWord = enroll?.isBundle ? "bundle" : "track";
-  const titleSuffix = enroll?.isBundle ? "" : " track";
+  const visibleTracks = useMemo(() => applyFilter(tracks, filter), [tracks, filter]);
 
   return (
     <section className="screen active" id="screen-catalog">
       <div className="pad">
         <section className="card catalog-hero reveal">
-          <div className="eyebrow">Catalog</div>
+          <div className="eyebrow">
+            Catalog
+            <Link
+              href="/receipts"
+              className="catalog-receipts-link"
+              style={{ marginLeft: 12, fontSize: 12, color: "var(--ink-2)" }}
+            >
+              Receipts →
+            </Link>
+          </div>
           <h3>
             Every role is a track. Unlock the <i>next one</i> when you&apos;re ready.
           </h3>
@@ -483,14 +228,15 @@ export function CatalogScreen() {
           </p>
           <div className="stats">
             <div className="stat">
-              <div className="v">5</div>
+              <div className="v">{heroStats.trackCount}</div>
               <div className="l">career tracks</div>
             </div>
             <div className="stat">
-              <div className="v">148</div>
+              <div className="v">{heroStats.lessonsAndLabs}</div>
               <div className="l">lessons + labs</div>
             </div>
             <div className="stat">
+              {/* LATER: live aggregate — no count endpoint yet. */}
               <div className="v">2,400+</div>
               <div className="l">students promoted</div>
             </div>
@@ -514,115 +260,30 @@ export function CatalogScreen() {
           ))}
         </div>
 
-        <div className="course-grid" id="courseGrid">
-          {visibleCards.map((card) => {
-            const articleClasses = ["course-card"];
-            if (card.featured) articleClasses.push("featured");
-            if (card.locked) articleClasses.push("locked-card-v8");
-            const ctaClasses = ["course-cta"];
-            if (card.cta.variant === "gold") ctaClasses.push("gold");
-            if (card.cta.variant === "enrolled") ctaClasses.push("enrolled");
-            const handleCta =
-              card.cta.variant === "enrolled"
-                ? undefined
-                : card.cta.enroll
-                  ? () => openEnroll(card)
-                  : undefined;
-            const liveCourse = findCourse(card.cta.courseSlug, courses);
-            const liveAvailable = !!liveCourse && liveCourse.is_published;
-            const displayAmt: string | null = card.price.free
-              ? null
-              : liveAvailable
-                ? String(Math.round(liveCourse.price_cents / 100))
-                : (card.price.bundleAmt ?? null);
-            return (
-              <article
-                key={card.key}
-                className={articleClasses.join(" ")}
-                data-cat={card.cats.join(" ")}
-                style={
-                  {
-                    "--accent": card.accent,
-                    "--accent-2": card.accent2,
-                  } as React.CSSProperties
-                }
-              >
-                {card.ribbon ? (
-                  <div
-                    className="ribbon"
-                    style={
-                      card.ribbon.dark
-                        ? { background: "#10120e", color: "#fff" }
-                        : undefined
-                    }
-                  >
-                    {card.ribbon.text}
-                  </div>
-                ) : null}
-                <div
-                  className="level"
-                  style={card.levelColor ? { color: card.levelColor } : undefined}
-                >
-                  {card.level}
-                </div>
-                <h4>{card.title}</h4>
-                <div className="role-sub">{card.roleSub}</div>
-                <div className="course-outcomes">
-                  {card.outcomes.map((o, i) => (
-                    <div key={i} className="course-outcome">
-                      <span className={`dot${o.on ? " on" : ""}`}>{o.on ? "✓" : "·"}</span>
-                      <span>{o.text}</span>
-                    </div>
-                  ))}
-                </div>
-                <div className="course-meta-row">
-                  {card.meta.map((m, i) => (
-                    <span key={i}>{m.text}</span>
-                  ))}
-                </div>
-                <div className="course-foot">
-                  <div className="course-price">
-                    {card.price.free || (liveAvailable && liveCourse.price_cents === 0) ? (
-                      <span className="free">Free</span>
-                    ) : displayAmt ? (
-                      <>
-                        <span className="cur">$</span>
-                        <span className="amt">{displayAmt}</span>
-                        {card.price.was ? (
-                          <span className="was">{card.price.was}</span>
-                        ) : null}
-                      </>
-                    ) : (
-                      <span className="free">Coming soon</span>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    className={ctaClasses.join(" ")}
-                    onClick={handleCta}
-                    disabled={card.cta.variant === "enrolled"}
-                  >
-                    {card.cta.label}
-                  </button>
-                </div>
-                {card.tooltip ? (
-                  <div className="salary-tooltip">
-                    <div className="tooltip-eyebrow">{card.tooltip.eyebrow}</div>
-                    <div className="tooltip-stats">
-                      {card.tooltip.stats.map((s, i) => (
-                        <div key={i}>
-                          <div className="tooltip-stat-v">{s.v}</div>
-                          <div className="tooltip-stat-l">{s.l}</div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="tooltip-foot">{card.tooltip.foot}</div>
-                  </div>
-                ) : null}
-              </article>
-            );
-          })}
-        </div>
+        {error ? (
+          <div className="card" role="alert" style={{ borderColor: "var(--rose)" }}>
+            <h5>Couldn&apos;t load the catalog.</h5>
+            <p>Try refreshing the page in a moment.</p>
+          </div>
+        ) : null}
+
+        {isLoading && tracks.length === 0 ? (
+          <CatalogSkeletonGrid />
+        ) : tracks.length === 0 ? (
+          <div className="card empty-state" role="status">
+            <h5>No tracks published yet</h5>
+            <p>Check back soon — we&apos;re finalizing the next track release.</p>
+          </div>
+        ) : (
+          <div className="course-grid" id="courseGrid">
+            {visibleTracks.map((course, idx) => (
+              <CourseCard key={course.id} course={course} index={idx} />
+            ))}
+            {bundles.map((bundle) => (
+              <BundleCard key={bundle.id} bundle={bundle} courses={tracks} />
+            ))}
+          </div>
+        )}
 
         <div className="catalog-strip reveal">
           <div>
@@ -654,119 +315,247 @@ export function CatalogScreen() {
           </div>
         </div>
       </div>
-
-      {mounted
-        ? createPortal(
-            <EnrollOverlay
-              enroll={enroll}
-              checkoutLoading={checkoutLoading}
-              ctaWord={ctaWord}
-              titleSuffix={titleSuffix}
-              onClose={closeEnroll}
-              onConfirm={confirmEnroll}
-            />,
-            document.body,
-          )
-        : null}
     </section>
   );
 }
 
-interface EnrollOverlayProps {
-  enroll: EnrollState | null;
-  checkoutLoading: boolean;
-  ctaWord: string;
-  titleSuffix: string;
-  onClose: () => void;
-  onConfirm: () => void;
+interface CourseCardProps {
+  course: CatalogCourseResponse;
+  index: number;
 }
 
-function EnrollOverlay({
-  enroll,
-  checkoutLoading,
-  ctaWord,
-  titleSuffix,
-  onClose,
-  onConfirm,
-}: EnrollOverlayProps) {
+function CourseCard({ course, index }: CourseCardProps) {
+  const ribbonText = readString(course.metadata, "ribbon_text");
+  const accent = readString(course.metadata, "accent_color") ?? ACCENT_PALETTE[index % ACCENT_PALETTE.length];
+  const accent2 = readString(course.metadata, "accent_color_2") ?? accent;
+  const tooltip = readSalaryTooltip(course.metadata);
+  const bullets = bulletsFor(course);
+  const meta = metaCellsFor(course.metadata);
+  const description = truncate(course.description, 140);
+  const articleClasses = ["course-card"];
+  if (ribbonText) articleClasses.push("featured");
+  if (!course.is_unlocked && course.price_cents > 0) {
+    articleClasses.push("locked-card-v8");
+  }
+
+  const onUnlocked = () => {
+    v8Toast(`✓ ${course.title} unlocked`);
+  };
+
+  let cta: React.ReactNode;
+  if (course.is_unlocked) {
+    cta = (
+      <button type="button" className="course-cta enrolled" disabled>
+        ✓ Enrolled
+      </button>
+    );
+  } else if (course.price_cents === 0) {
+    cta = (
+      <FreeEnrollButton
+        courseId={course.id}
+        label="Enroll free"
+        className="course-cta"
+        onEnrolled={onUnlocked}
+      />
+    );
+  } else {
+    cta = (
+      <RazorpayCheckoutButton
+        targetType="course"
+        targetId={course.id}
+        label="Unlock track"
+        variant="gold"
+        className="course-cta gold"
+        onUnlocked={onUnlocked}
+      />
+    );
+  }
+
   return (
-    <div
-      className={`enroll-overlay${enroll ? " on" : ""}`}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+    <article
+      className={articleClasses.join(" ")}
+      data-cat={course.difficulty ?? "all"}
+      style={
+        {
+          "--accent": accent,
+          "--accent-2": accent2,
+        } as React.CSSProperties
+      }
     >
-      <div className="enroll-card" onClick={(e) => e.stopPropagation()}>
-        <button
-          type="button"
-          className="enroll-close"
-          onClick={onClose}
-          aria-label="Close"
-        >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 14 14"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-            >
-              <path d="M2 2l10 10M12 2L2 12" />
-            </svg>
-          </button>
-          <div className="enroll-seal">
-            <svg
-              width="30"
-              height="30"
-              viewBox="0 0 42 42"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="10,22 18,30 32,14" />
-            </svg>
+      {ribbonText ? <div className="ribbon">{ribbonText}</div> : null}
+      <div className="level">{levelLabel(course.difficulty, index)}</div>
+      <h4>{course.title}</h4>
+      <div className="role-sub">{description}</div>
+      <div className="course-outcomes">
+        {bullets.map((b, i) => (
+          <div key={i} className="course-outcome">
+            <span className={`dot${b.included ? " on" : ""}`}>
+              {b.included ? "✓" : "·"}
+            </span>
+            <span>{b.text}</span>
           </div>
-          <h4>{enroll ? `Unlock ${enroll.trackName}${titleSuffix}` : "Unlock track"}</h4>
-          <p>
-            {enroll?.isBundle
-              ? "You're one click from opening all four paid tracks, 122 labs, 4 capstones, and mentor reviews at every level. Money-back within 30 days."
-              : "You're one click from opening this track's lessons, labs, and mentor-graded capstone. Money-back within 30 days if the track isn't right."}
-          </p>
-          <div className="foot">
-            <button
-              type="button"
-              className="btn primary enroll-cta"
-              onClick={onConfirm}
-              disabled={checkoutLoading}
-            >
-              <span className="enroll-cta-label">
-                {enroll?.comingSoon
-                  ? "Coming soon"
-                  : checkoutLoading
-                    ? "Opening checkout…"
-                    : `Unlock my ${ctaWord} · ${enroll?.price ?? ""}`}
-              </span>
-            </button>
+        ))}
+      </div>
+      <div className="course-meta-row">
+        {meta.length > 0 ? (
+          meta.map((cell, i) => <span key={i}>{cell}</span>)
+        ) : (
+          <span>New track</span>
+        )}
+      </div>
+      <div className="course-foot">
+        <div className="course-price">
+          {course.price_cents === 0 ? (
+            <span className="free">Free</span>
+          ) : course.currency === "INR" ? (
+            <>
+              <span className="cur">₹</span>
+              <span className="amt">{Math.round(course.price_cents / 100)}</span>
+            </>
+          ) : (
+            <>
+              <span className="cur">{course.currency === "USD" ? "$" : `${course.currency} `}</span>
+              <span className="amt">{(course.price_cents / 100).toFixed(2)}</span>
+            </>
+          )}
+        </div>
+        {cta}
+      </div>
+      {tooltip ? (
+        <div className="salary-tooltip">
+          <div className="tooltip-eyebrow">{tooltip.eyebrow}</div>
+          <div className="tooltip-stats">
+            {tooltip.stats.map((s, i) => (
+              <div key={i}>
+                <div className="tooltip-stat-v">{s.v}</div>
+                <div className="tooltip-stat-l">{s.l}</div>
+              </div>
+            ))}
           </div>
-          <div className="enroll-reassure">
-            <svg
-              width="11"
-              height="11"
-              viewBox="0 0 14 14"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.7"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M7 1l5 2v4c0 3.5-2.5 5.5-5 6-2.5-.5-5-2.5-5-6V3l5-2z" />
-            </svg>
-          <span>30-day money-back guarantee · Secure checkout</span>
+          <div className="tooltip-foot">{tooltip.foot}</div>
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+interface BundleCardProps {
+  bundle: CatalogBundleResponse;
+  courses: ReadonlyArray<CatalogCourseResponse>;
+}
+
+function BundleCard({ bundle, courses }: BundleCardProps) {
+  const included = bundleIncluded(bundle, courses);
+  const accent = readString(bundle.metadata, "accent_color") ?? "var(--gold)";
+  const accent2 = readString(bundle.metadata, "accent_color_2") ?? "var(--gold-2)";
+  const ribbonText = readString(bundle.metadata, "ribbon_text");
+  const description = truncate(bundle.description, 180);
+
+  const onUnlocked = () => {
+    v8Toast(`✓ ${bundle.title} unlocked`);
+  };
+
+  return (
+    <article
+      className="course-card featured"
+      data-cat="bundle"
+      style={
+        {
+          "--accent": accent,
+          "--accent-2": accent2,
+        } as React.CSSProperties
+      }
+    >
+      {ribbonText ? (
+        <div className="ribbon" style={{ background: "#10120e", color: "#fff" }}>
+          {ribbonText}
+        </div>
+      ) : null}
+      <div className="level">Full career arc</div>
+      <h4>{bundle.title}</h4>
+      <div className="role-sub">{description}</div>
+      <div className="course-outcomes">
+        <div className="course-outcome">
+          <span className="dot on">✓</span>
+          <span>
+            {bundle.course_ids.length} course{bundle.course_ids.length === 1 ? "" : "s"} included
+          </span>
+        </div>
+        <div className="course-outcome">
+          <span className="dot on">✓</span>
+          <span>
+            {included.titles.join(" · ")}
+            {included.more > 0 ? ` + ${included.more} more` : ""}
+          </span>
         </div>
       </div>
+      <div className="course-meta-row">
+        <span>Bundle · save vs. separate</span>
+      </div>
+      <div className="course-foot">
+        <div className="course-price">
+          {bundle.currency === "INR" ? (
+            <>
+              <span className="cur">₹</span>
+              <span className="amt">{Math.round(bundle.price_cents / 100)}</span>
+            </>
+          ) : (
+            <>
+              <span className="cur">{bundle.currency === "USD" ? "$" : `${bundle.currency} `}</span>
+              <span className="amt">{(bundle.price_cents / 100).toFixed(2)}</span>
+            </>
+          )}
+        </div>
+        <RazorpayCheckoutButton
+          targetType="bundle"
+          targetId={bundle.id}
+          label="Unlock bundle"
+          variant="primary"
+          className="course-cta gold"
+          onUnlocked={onUnlocked}
+        />
+      </div>
+    </article>
+  );
+}
+
+function CatalogSkeletonGrid() {
+  const slots = Array.from({ length: 5 }, (_, i) => i);
+  return (
+    <div className="course-grid" id="courseGrid" data-state="loading">
+      {slots.map((i) => (
+        <article
+          key={i}
+          className="course-card"
+          aria-hidden
+          style={{ minHeight: 360 }}
+          data-testid="catalog-skeleton-card"
+        >
+          <div
+            className="level"
+            style={{
+              background: "var(--ink-7, #eee)",
+              height: 12,
+              width: 120,
+              borderRadius: 4,
+            }}
+          />
+          <h4 style={{ height: 22, background: "var(--ink-7, #eee)", borderRadius: 4, marginTop: 12 }} />
+          <div
+            className="role-sub"
+            style={{
+              height: 40,
+              background: "var(--ink-7, #f4f4f4)",
+              borderRadius: 4,
+              marginTop: 8,
+            }}
+          />
+          <div style={{ marginTop: 14, color: "var(--ink-3)", fontSize: 12 }}>Loading…</div>
+        </article>
+      ))}
     </div>
   );
 }
+
+// Internal — keep formatPrice exported via re-export for any sibling tests.
+export { formatPrice };

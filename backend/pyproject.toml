@@ -25,6 +25,7 @@ dependencies = [
     "pygithub>=2.9.0",
     "python-jose[cryptography]>=3.5.0",
     "python-multipart>=0.0.24",
+    "razorpay>=1.4.2",
     "redis>=7.4.0",
     "sendgrid>=6.12.5",
     "slowapi>=0.1.9",

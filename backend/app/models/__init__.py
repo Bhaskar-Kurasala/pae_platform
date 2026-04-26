@@ -2,7 +2,12 @@ from app.models.agent_action import AgentAction
 from app.models.ai_review import AIReview  # noqa: F401
 from app.models.application_kit import ApplicationKit  # noqa: F401
 from app.models.cohort_event import CohortEvent  # noqa: F401
+from app.models.course_bundle import CourseBundle  # noqa: F401
+from app.models.course_entitlement import CourseEntitlement  # noqa: F401
 from app.models.learning_session import LearningSession  # noqa: F401
+from app.models.order import Order  # noqa: F401
+from app.models.payment_attempt import PaymentAttempt  # noqa: F401
+from app.models.payment_webhook_event import PaymentWebhookEvent  # noqa: F401
 from app.models.portfolio_autopsy_result import PortfolioAutopsyResult  # noqa: F401
 from app.models.readiness_action_completion import (  # noqa: F401
     ReadinessActionCompletion,
@@ -10,6 +15,7 @@ from app.models.readiness_action_completion import (  # noqa: F401
 from app.models.readiness_workspace_event import (  # noqa: F401
     ReadinessWorkspaceEvent,
 )
+from app.models.refund import Refund  # noqa: F401
 from app.models.chat_attachment import ChatAttachment
 from app.models.chat_feedback import ChatMessageFeedback
 from app.models.chat_message import ChatMessage
@@ -151,4 +157,10 @@ __all__ = [
     "PortfolioAutopsyResult",
     "ReadinessActionCompletion",
     "ReadinessWorkspaceEvent",
+    "CourseBundle",
+    "CourseEntitlement",
+    "Order",
+    "PaymentAttempt",
+    "PaymentWebhookEvent",
+    "Refund",
 ]

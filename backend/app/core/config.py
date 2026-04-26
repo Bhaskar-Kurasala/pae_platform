@@ -70,6 +70,14 @@ class Settings(BaseSettings):
     sendgrid_api_key: str = ""
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
+    # Razorpay (Catalog refactor 2026-04-26). Defaults are non-functional
+    # placeholders so the app still starts in dev without secrets.
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = ""
+    razorpay_webhook_secret: str = ""
+    # Frontend uses ONLY the public key id (NEXT_PUBLIC_RAZORPAY_KEY_ID).
+    payments_default_provider: str = "razorpay"
+    payments_default_currency: str = "INR"
     github_token: str = ""
     pinecone_api_key: str = ""
     meilisearch_host: str = "http://localhost:7700"

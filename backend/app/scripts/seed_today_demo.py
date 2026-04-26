@@ -27,6 +27,7 @@ from app.core.hashing import hash_password
 from app.models.application_kit import ApplicationKit
 from app.models.cohort_event import CohortEvent
 from app.models.course import Course
+from app.models.course_bundle import CourseBundle
 from app.models.notebook_entry import NotebookEntry
 from app.models.portfolio_autopsy_result import PortfolioAutopsyResult
 from app.models.readiness_workspace_event import ReadinessWorkspaceEvent
@@ -756,6 +757,236 @@ async def _ensure_workspace_events(db: AsyncSession, *, user: User) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# Catalog metadata + bundles (Catalog refactor 2026-04-26)                    #
+# --------------------------------------------------------------------------- #
+# Each entry binds to an existing course slug (or creates one if missing) and
+# fills in the rich `bullets` + `metadata` columns the new Catalog screen
+# reads. Idempotent — reruns only update fields that look like defaults.
+CATALOG_METADATA: list[tuple[str, dict]] = [
+    (
+        # Use the canonical "python-developer" course slug — there's a
+        # separate "python-foundations" Today-seed course that powers the
+        # progress / lessons flow; we don't co-opt its title.
+        "python-developer",
+        {
+            "title_override": "Python Developer",
+            "price_cents": 0,
+            "difficulty": "beginner",
+            "bullets": [
+                {"text": "16 lessons · fundamentals, OOP, APIs, testing, debugging, collab", "included": True},
+                {"text": "18 labs with automated test suites", "included": True},
+                {"text": "1 CLI-tool capstone reviewed by your mentor", "included": True},
+                {"text": "Spaced-repetition notebook across all lessons", "included": False},
+            ],
+            "metadata": {
+                "level_label": "Level 1 · Free foundation",
+                "lesson_count": 16,
+                "lab_count": 18,
+                "est_hours": 45,
+                "est_weeks": 6,
+                "completion_pct": 92,
+                "accent_color": "var(--forest)",
+                "tags": ["python", "foundation"],
+            },
+        },
+    ),
+    (
+        "data-analyst",
+        {
+            "title_override": "Data Analyst",
+            "price_cents": 8900,  # ₹89 in INR or $89 in USD; backend stores cents
+            "difficulty": "intermediate",
+            "bullets": [
+                {"text": "8 lessons · SQL, pandas at scale, viz, stakeholder comms", "included": True},
+                {"text": "22 labs · real retail + marketing datasets", "included": True},
+                {"text": "Dashboard capstone graded by a working analyst", "included": True},
+                {"text": "2 mock interviews + resume review with mentor", "included": True},
+            ],
+            "metadata": {
+                "level_label": "Level 2 · Your next step",
+                "lesson_count": 8,
+                "lab_count": 22,
+                "est_hours": 60,
+                "est_weeks": 8,
+                "placement_pct": 76,
+                "accent_color": "var(--gold)",
+                "ribbon_text": "Most popular",
+                "tags": ["sql", "pandas", "analytics"],
+                "salary_tooltip": {
+                    "eyebrow": "Why unlock Data Analyst",
+                    "stats": [
+                        {"v": "$78k", "l": "Median entry salary (US)"},
+                        {"v": "12,400", "l": "Open roles right now"},
+                    ],
+                    "foot": "76% of CareerForge students land a role within 90 days of promotion",
+                },
+            },
+        },
+    ),
+    (
+        "data-scientist",
+        {
+            "title_override": "Data Scientist",
+            "price_cents": 14900,
+            "difficulty": "intermediate",
+            "bullets": [
+                {"text": "10 lessons · stats, experimentation, ML foundations, deployment", "included": True},
+                {"text": "28 labs · A/B tests, feature engineering, model ops", "included": True},
+                {"text": "Kaggle-grade capstone with peer + mentor review", "included": True},
+                {"text": "Requires Data Analyst or equivalent foundation", "included": False},
+            ],
+            "metadata": {
+                "level_label": "Level 3 · Intermediate",
+                "lesson_count": 10,
+                "lab_count": 28,
+                "est_hours": 90,
+                "est_weeks": 12,
+                "accent_color": "#3a6ea3",
+                "tags": ["stats", "ml"],
+            },
+        },
+    ),
+    (
+        "genai-engineer",
+        {
+            "title_override": "GenAI Engineer",
+            "price_cents": 19900,
+            "difficulty": "advanced",
+            "bullets": [
+                {"text": "12 lessons · LLMs, RAG, evals, deployment, observability", "included": True},
+                {"text": "24 labs · LangGraph agents, prompt eval, vector stores", "included": True},
+                {"text": "Production capstone: ship an agent to real users", "included": True},
+                {"text": "Mock interview with a working GenAI engineer", "included": True},
+            ],
+            "metadata": {
+                "level_label": "Level 4 · Advanced",
+                "lesson_count": 12,
+                "lab_count": 24,
+                "est_hours": 110,
+                "est_weeks": 14,
+                "accent_color": "#7C3AED",
+                "tags": ["genai", "llm", "rag"],
+            },
+        },
+    ),
+]
+
+
+async def _ensure_catalog_metadata(db: AsyncSession) -> int:
+    """Stamp `bullets` + `metadata` on each known course slug.
+
+    For courses that don't exist yet (e.g. data-scientist, genai-engineer),
+    create them with sensible defaults so the catalog has a populated grid
+    in dev. Title override + price + difficulty are also applied so the
+    cards render accurately.
+    """
+    updated = 0
+    for slug, spec in CATALOG_METADATA:
+        course = (
+            await db.execute(select(Course).where(Course.slug == slug))
+        ).scalar_one_or_none()
+        if course is None:
+            course = Course(
+                slug=slug,
+                title=spec["title_override"],
+                description=f"{spec['title_override']} career track.",
+                is_published=True,
+                difficulty=spec["difficulty"],
+                price_cents=spec["price_cents"],
+            )
+            db.add(course)
+            await db.flush()
+        # Title + price + difficulty are authoritative from the seed; only
+        # update fields that look like the model defaults so a hand-edited
+        # course in the DB isn't clobbered.
+        if course.title != spec["title_override"]:
+            course.title = spec["title_override"]
+        if course.price_cents != spec["price_cents"]:
+            course.price_cents = spec["price_cents"]
+        if course.difficulty != spec["difficulty"]:
+            course.difficulty = spec["difficulty"]
+        # Always overwrite bullets + metadata — they're catalog-card payload,
+        # not user-authored content.
+        course.bullets = list(spec["bullets"])
+        course.metadata_ = dict(spec["metadata"])
+        updated += 1
+    await db.commit()
+    log.info("seed.catalog.metadata", updated=updated)
+    return updated
+
+
+CATALOG_BUNDLES: list[tuple[str, str, str, int, list[str], dict]] = [
+    (
+        "data-career-arc",
+        "Data Career Arc",
+        "Python Developer → Data Analyst → Data Scientist. Save 30% vs buying tracks individually.",
+        18900,
+        ["python-developer", "data-analyst", "data-scientist"],
+        {
+            "level_label": "Bundle · Career arc",
+            "savings_pct": 30,
+            "accent_color": "#7C3AED",
+            "ribbon_text": "Save 30%",
+        },
+    ),
+    (
+        "ai-engineer-arc",
+        "AI Engineer Arc",
+        "Python Developer + GenAI Engineer. Built for self-taught engineers pivoting into LLM work.",
+        16900,
+        ["python-developer", "genai-engineer"],
+        {
+            "level_label": "Bundle · AI Engineer",
+            "savings_pct": 15,
+            "accent_color": "#1D9E75",
+        },
+    ),
+]
+
+
+async def _ensure_catalog_bundles(db: AsyncSession) -> int:
+    """Idempotent upsert of CATALOG_BUNDLES. Resolves slugs → course UUIDs at
+    seed time so the bundle's `course_ids` is always valid.
+    """
+    inserted = 0
+    for slug, title, description, price_cents, course_slugs, metadata in CATALOG_BUNDLES:
+        existing = (
+            await db.execute(select(CourseBundle).where(CourseBundle.slug == slug))
+        ).scalar_one_or_none()
+        # Resolve course slugs → UUID strings (skip any that don't exist yet).
+        resolved: list[str] = []
+        for cs in course_slugs:
+            row = (
+                await db.execute(select(Course.id).where(Course.slug == cs))
+            ).scalar_one_or_none()
+            if row is not None:
+                resolved.append(str(row))
+        if existing is None:
+            db.add(CourseBundle(
+                slug=slug,
+                title=title,
+                description=description,
+                price_cents=price_cents,
+                currency="INR",
+                course_ids=resolved,
+                metadata_=metadata,
+                is_published=True,
+                sort_order=inserted,
+            ))
+            inserted += 1
+        else:
+            existing.title = title
+            existing.description = description
+            existing.price_cents = price_cents
+            existing.course_ids = resolved
+            existing.metadata_ = metadata
+            existing.is_published = True
+    await db.commit()
+    log.info("seed.catalog.bundles", inserted=inserted)
+    return inserted
+
+
+# --------------------------------------------------------------------------- #
 # Top-level orchestration                                                     #
 # --------------------------------------------------------------------------- #
 async def seed(db: AsyncSession) -> None:
@@ -841,6 +1072,11 @@ async def seed(db: AsyncSession) -> None:
     strongest = autopsies[0] if autopsies else None
     await _ensure_application_kit(db, user=demo_user, autopsy=strongest)
     await _ensure_workspace_events(db, user=demo_user)
+
+    # Catalog: rich bullets + metadata on the 4 canonical career-track courses,
+    # plus 2 multi-course bundles. Idempotent rerun-safe.
+    await _ensure_catalog_metadata(db)
+    await _ensure_catalog_bundles(db)
 
     log.info("seed.today_demo.done", email=DEMO_EMAIL)
 

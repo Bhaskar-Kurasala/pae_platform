@@ -110,6 +110,7 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.application_kit import router as application_kit_router
     from app.api.v1.routes.auth import router as auth_router
     from app.api.v1.routes.billing import router as billing_router
+    from app.api.v1.routes.catalog import router as catalog_router
     from app.api.v1.routes.courses import router as courses_router
     from app.api.v1.routes.demo import router as demo_router
     from app.api.v1.routes.diagnostic import router as diagnostic_router
@@ -122,6 +123,10 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.misconceptions import router as misconceptions_router
     from app.api.v1.routes.notifications import router as notifications_router
     from app.api.v1.routes.oauth import router as oauth_router
+    from app.api.v1.routes.payments_v2 import router as payments_v2_router
+    from app.api.v1.routes.payments_webhook import (
+        router as payments_webhook_router,
+    )
     from app.api.v1.routes.portfolio_autopsy import router as portfolio_autopsy_router
     from app.api.v1.routes.confidence import router as confidence_router
     from app.api.v1.routes.preferences import router as preferences_router
@@ -170,7 +175,10 @@ def create_app() -> FastAPI:
         chat_stream_router,
         demo_router,
         billing_router,
+        catalog_router,
         oauth_router,
+        payments_v2_router,
+        payments_webhook_router,
         goals_router,
         notifications_router,
         preferences_router,

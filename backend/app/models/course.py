@@ -1,4 +1,4 @@
-from sqlalchemy import Integer, String, Text
+from sqlalchemy import JSON, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -17,6 +17,17 @@ class Course(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     difficulty: Mapped[str] = mapped_column(String(50), default="beginner", nullable=False)
     estimated_hours: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     github_repo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Catalog-card bullets — replaces hard-coded UI outcomes. Each bullet:
+    # {"text": str, "included": bool}. Empty list = use default catalog copy.
+    bullets: Mapped[list[dict]] = mapped_column(
+        JSON, nullable=False, default=list, server_default="[]"
+    )
+    # Free-form metadata for catalog rendering (lesson_count, lab_count,
+    # capstone_title, est_hours, est_weeks, completion_pct, placement_pct,
+    # level_label, ribbon_text, accent_color, salary_tooltip{...}).
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSON, nullable=False, default=dict, server_default="{}"
+    )
 
     lessons: Mapped[list["Lesson"]] = relationship(
         back_populates="course", lazy="select", order_by="Lesson.order"

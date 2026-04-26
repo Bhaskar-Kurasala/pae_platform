@@ -1405,4 +1405,154 @@ export const readinessEventsApi = {
   },
 };
 
+// ── Catalog + Payments v2 (DISC: payments-v2 + catalog refactor 2026-04-26) ─
+// Mirrors `backend/app/schemas/payments_v2.py`. Wire is snake_case so the FE
+// types preserve snake_case (no remapping). UUIDs travel as strings; datetimes
+// as ISO-8601 strings.
+
+export interface CatalogBullet {
+  text: string;
+  included: boolean;
+}
+
+export interface CatalogCourseResponse {
+  id: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  price_cents: number;
+  currency: string;
+  is_published: boolean;
+  difficulty: string;
+  bullets: CatalogBullet[];
+  metadata: Record<string, unknown>;
+  /** Per-user. False for anon callers. */
+  is_unlocked: boolean;
+}
+
+export interface CatalogBundleResponse {
+  id: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  price_cents: number;
+  currency: string;
+  /** UUIDs of the courses included in this bundle. */
+  course_ids: string[];
+  metadata: Record<string, unknown>;
+  is_published: boolean;
+}
+
+export interface CatalogResponse {
+  courses: CatalogCourseResponse[];
+  bundles: CatalogBundleResponse[];
+}
+
+export type PaymentTargetType = "course" | "bundle";
+export type PaymentProvider = "razorpay" | "stripe";
+
+export interface CreateOrderRequest {
+  target_type: PaymentTargetType;
+  target_id: string;
+  provider?: PaymentProvider;
+  /** When omitted, the route falls back to settings.payments_default_currency. */
+  currency?: string | null;
+}
+
+export interface CreateOrderResponse {
+  order_id: string;
+  provider: string;
+  provider_order_id: string;
+  amount_cents: number;
+  currency: string;
+  receipt_number: string;
+  /** May be null in dev when the MockProvider fallback is active. */
+  razorpay_key_id: string | null;
+  user_email: string;
+  user_name: string;
+  target_title: string;
+}
+
+export interface ConfirmOrderRequest {
+  razorpay_order_id?: string | null;
+  razorpay_payment_id?: string | null;
+  razorpay_signature?: string | null;
+}
+
+export interface ConfirmOrderResponse {
+  order_id: string;
+  status: string;
+  paid_at: string | null;
+  fulfilled_at: string | null;
+  /** Course UUIDs whose entitlements were granted (may be >1 for bundles). */
+  entitlements_granted: string[];
+}
+
+export interface FreeEnrollRequest {
+  course_id: string;
+}
+
+export interface FreeEnrollResponse {
+  course_id: string;
+  entitlement_id: string;
+  granted_at: string;
+}
+
+export interface PaymentAttemptItem {
+  id: string;
+  provider: string;
+  provider_payment_id: string | null;
+  amount_cents: number;
+  status: string;
+  failure_reason: string | null;
+  attempted_at: string;
+}
+
+export interface OrderListItem {
+  id: string;
+  target_type: string;
+  target_id: string;
+  target_title: string | null;
+  amount_cents: number;
+  currency: string;
+  status: string;
+  receipt_number: string | null;
+  created_at: string;
+}
+
+export interface OrderDetailResponse extends OrderListItem {
+  paid_at: string | null;
+  fulfilled_at: string | null;
+  failure_reason: string | null;
+  payment_attempts: PaymentAttemptItem[];
+}
+
+export const catalogApi = {
+  // Trailing slash matters — the FastAPI route is mounted at `/catalog/`.
+  get: () => api.get<CatalogResponse>("/api/v1/catalog/"),
+};
+
+export const paymentsApi = {
+  createOrder: (body: CreateOrderRequest) =>
+    api.post<CreateOrderResponse>("/api/v1/payments/orders", body),
+  confirmOrder: (orderId: string, body: ConfirmOrderRequest) =>
+    api.post<ConfirmOrderResponse>(
+      `/api/v1/payments/orders/${orderId}/confirm`,
+      body,
+    ),
+  listOrders: () =>
+    api.get<OrderListItem[]>("/api/v1/payments/orders"),
+  getOrder: (orderId: string) =>
+    api.get<OrderDetailResponse>(`/api/v1/payments/orders/${orderId}`),
+  freeEnroll: (body: FreeEnrollRequest) =>
+    api.post<FreeEnrollResponse>("/api/v1/payments/free-enroll", body),
+  /**
+   * Returns the absolute URL for the receipt PDF stream so callers can drop
+   * it into an `<a href download>` rather than fetching it through the JSON
+   * `request()` helper (which assumes JSON bodies).
+   */
+  receiptUrl: (orderId: string): string =>
+    `${API_BASE}/api/v1/payments/orders/${orderId}/receipt.pdf`,
+};
+
 export { ApiError, API_BASE, sanitizeNext };
