@@ -1,14 +1,10 @@
-import { Suspense } from "react";
-import { StudioScreen } from "@/components/v8/screens/studio-screen";
+import { redirect } from "next/navigation";
 
-export const metadata = {
-  title: "Studio · CareerForge",
-};
-
-export default function StudioPage() {
-  return (
-    <Suspense fallback={null}>
-      <StudioScreen />
-    </Suspense>
-  );
+/**
+ * P-Practice1: /studio is now a permanent redirect to the unified
+ * /practice surface (Capstone mode). The capstone bundle now lives inside
+ * the Practice workspace alongside the exercise catalog.
+ */
+export default function StudioRedirect() {
+  redirect("/practice?mode=capstone");
 }

@@ -24,7 +24,7 @@ const NAV_GROUPS: ReadonlyArray<{
     items: [
       { href: "/today", label: "Today" },
       { href: "/path", label: "My path" },
-      { href: "/studio", label: "Studio" },
+      { href: "/practice", label: "Practice" },
       { href: "/promotion", label: "Promotion" },
     ],
   },
@@ -36,11 +36,8 @@ const NAV_GROUPS: ReadonlyArray<{
     ],
   },
   {
-    label: "Practice",
-    items: [
-      { href: "/chat", label: "AI Tutor" },
-      { href: "/exercises", label: "Exercises" },
-    ],
+    label: "Coach",
+    items: [{ href: "/chat", label: "AI Tutor" }],
   },
   {
     label: "Explore",

@@ -2710,3 +2710,431 @@ button{cursor:pointer;border:0}
   margin: 0;
   border-top: 1px solid var(--line);
 }
+
+/* ──────────────────────────────────────────────────────────────────────
+   P-Practice1 (2026-04-28) — unified Practice workspace.
+   Distilled from the v10 Capstone Bundle mock; only the rules the
+   PracticeScreen component actually uses are pulled in here.
+   ────────────────────────────────────────────────────────────────── */
+
+.practice-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
+  position: relative;
+}
+.pbar-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.pbar-crumbs .pbar-root {
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+}
+.pbar-sep {
+  opacity: 0.5;
+}
+.pbar-crumb-ctx {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--gold-soft);
+  color: var(--gold);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.pbar-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--serif);
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.pbar-modes {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.pmode {
+  padding: 6px 11px;
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+  border: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pmode:hover {
+  color: var(--ink);
+}
+.pmode.active {
+  background: var(--ink);
+  color: #f6f0e3;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.pmode-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--gold-soft);
+  color: var(--gold);
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* ── Three-column workspace grid ── */
+.practice-grid {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) 360px;
+  gap: 18px;
+  align-items: start;
+}
+
+/* ── Left rail ── */
+.practice-rail {
+  position: sticky;
+  top: 96px;
+  border-radius: 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 12px 10px;
+  box-shadow: var(--shadow-sm);
+  max-height: calc(100vh - 130px);
+  overflow: auto;
+}
+.rail-eyebrow {
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 800;
+  padding: 6px 8px 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.rail-count {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--forest-soft);
+  color: var(--forest);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.rail-count.gold {
+  background: var(--gold-soft);
+  color: var(--gold);
+}
+.rail-group {
+  margin-top: 6px;
+}
+.rail-group-h {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--muted-2);
+  font-weight: 700;
+  padding: 8px 8px 4px;
+}
+.rail-task {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 9px;
+  border-radius: 9px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  background: transparent;
+  border: none;
+  text-align: left;
+  position: relative;
+}
+.rail-task:hover {
+  background: var(--panel-2);
+}
+.rail-task .task-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-2);
+  flex-shrink: 0;
+}
+.rail-task.active {
+  background: var(--panel-2);
+  color: var(--ink);
+  font-weight: 600;
+}
+.rail-task.active::before {
+  content: "";
+  position: absolute;
+  left: -2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 14px;
+  background: var(--forest-3);
+  border-radius: 2px;
+}
+.rail-task.active .task-dot {
+  background: var(--gold-2);
+}
+.rail-task .task-n {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Capstone file tree ── */
+.tree-root {
+  padding: 2px 4px;
+}
+.tree-folder {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-weight: 600;
+}
+.tree-children {
+  padding-left: 14px;
+  border-left: 1px dashed var(--line);
+  margin-left: 8px;
+}
+.tree-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-2);
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+  position: relative;
+}
+.tree-file:hover {
+  background: var(--panel-2);
+}
+.tree-file.active {
+  background: var(--panel-2);
+  color: var(--ink);
+  font-weight: 600;
+}
+.tree-file.active::before {
+  content: "";
+  position: absolute;
+  left: -9px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 14px;
+  background: var(--forest-3);
+  border-radius: 2px;
+}
+.tree-file .tf-icon {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.tree-file.editable .tf-icon {
+  color: var(--forest-3);
+}
+.tree-file.locked {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+.tree-file .tf-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-file .tf-badge {
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-family: var(--sans);
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.tree-file.editable .tf-badge {
+  background: rgba(78, 148, 112, 0.16);
+  color: var(--forest);
+}
+.tree-file.locked .tf-badge {
+  background: rgba(120, 120, 110, 0.14);
+  color: var(--muted);
+}
+
+/* ── Center editor (extends existing .editor) ── */
+.practice-editor {
+  position: relative;
+}
+.practice-editor .editor-bar {
+  padding: 12px 16px;
+}
+.editor-status {
+  font-size: 11px;
+  color: #8f8b80;
+  letter-spacing: 0.04em;
+  padding-right: 6px;
+}
+.practice-monaco-shell {
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  min-height: 560px;
+}
+
+/* ── Output / Tests pane shells ── */
+.trace-shell,
+.tests-shell {
+  padding: 18px 20px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--ink-2);
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 6px;
+  min-height: 320px;
+}
+.trace-shell pre {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.04);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.tests-summary {
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+.tests-summary strong {
+  color: var(--forest);
+}
+.tests-time {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.test-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  border: 1px solid transparent;
+  font-family: var(--sans);
+}
+.test-row.pass {
+  border-color: rgba(78, 148, 112, 0.25);
+}
+.test-row.fail {
+  border-color: rgba(224, 138, 116, 0.32);
+  background: rgba(224, 138, 116, 0.06);
+}
+.test-ic {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 800;
+  background: rgba(78, 148, 112, 0.22);
+  color: var(--forest);
+}
+.test-row.fail .test-ic {
+  background: rgba(224, 138, 116, 0.22);
+  color: var(--rose);
+}
+.test-body b {
+  display: block;
+  font-size: 13px;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-weight: 600;
+}
+.test-body span {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* ── Editor "running" state ── */
+.editor-btn.run.running {
+  position: relative;
+  pointer-events: none;
+}
+
+/* ── Right rail review panel (extends existing .review-panel) ── */
+.practice-review {
+  position: sticky;
+  top: 96px;
+  max-height: calc(100vh - 130px);
+  overflow: auto;
+}
+
+/* ── Tablet collapse ── */
+@media (max-width: 1280px) {
+  .practice-grid {
+    grid-template-columns: 220px minmax(0, 1fr) 320px;
+  }
+}
+@media (max-width: 1100px) {
+  .practice-grid {
+    grid-template-columns: 1fr;
+  }
+  .practice-rail,
+  .practice-review {
+    position: static;
+    max-height: none;
+  }
+}
+

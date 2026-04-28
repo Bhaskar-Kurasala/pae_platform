@@ -1443,3 +1443,94 @@ Hit both endpoints as `demo@pae.dev`:
   tests).
 - **Lint:** 0 new errors on changed files.
 
+---
+
+## P-Practice1 — Unified Practice workspace (2026-04-28)
+
+Three fragmented surfaces (`/exercises`, `/studio`, `/practice`) merged
+into one v8 workspace per the v10 mock. The new `/practice` carries:
+
+- A breadcrumb bar with **Practice / [Exercises | Capstone]** and a real
+  mode toggle that lives in the URL (`?mode=`).
+- A left rail that shows either the exercise catalog (grouped by
+  difficulty) or the capstone file tree (labs from `/path/summary`).
+- A center pane with a real Monaco editor, syntax highlighting, persisted
+  draft (localStorage), and three tabs: `main.py` / Output / Tests.
+- A right pane with the senior-review panel — score wheel + good/warn/
+  todo items derived from `/api/v1/senior-review`. Crucially, the request
+  now carries `problem_context` so the AI knows which exercise / capstone
+  the student is solving against. The senior-engineer agent already
+  threaded `problem_context` into its LLM prompt; we just plumbed it.
+- A Save-to-Notebook flow mirroring the Tutor save modal: opens a
+  dialog, accepts a free-form student note, POSTs the code + output as a
+  notebook entry tagged `exercise` or `capstone`. The note becomes the
+  front of an SRS card via the existing srs auto-seed pipeline.
+- "Run & review" button that runs the code in the sandbox
+  (`/api/v1/execute`) and immediately fires the review (`useSeniorReview`).
+- "Request review only" button for quick feedback without re-running.
+
+### Routes
+
+- `/practice/page.tsx` — now mounts `<PracticeScreen />`.
+- `/exercises/page.tsx` — `redirect("/practice?mode=exercises")`.
+- `/studio/page.tsx` — `redirect("/practice?mode=capstone")`.
+- `/practice/[problemId]` — untouched (per-exercise deep-link kept).
+
+### Sidebar
+
+The Core section reads **Today / My path / Practice / Promotion**.
+"Studio" and the duplicate Practice section are gone. AI Tutor moves
+into a new "Coach" section.
+
+### Files
+
+- **NEW** `frontend/src/components/v8/screens/practice-screen.tsx` (~600 LOC)
+  — full workspace, three sub-components (`CapstoneRail`, `ExerciseRail`,
+  `OutputPane`, `TestsPane`, `SaveDialog`).
+- **NEW** `frontend/src/lib/hooks/use-practice-workspace.ts` (~70 LOC)
+  — parallel-loads `exercises.list` + `path.summary`, derives the
+  capstone bundle from the active level's labs.
+- **NEW** `backend/tests/test_agents/test_senior_engineer_problem_context.py`
+  — 3 tests confirming exercise rubric flows into the LLM prompt.
+- **NEW** `frontend/src/test/practice-screen.test.tsx` — 7 tests with
+  mocked Monaco / hooks.
+- **MODIFIED** `frontend/src/app/v8.css` — added ~280 lines of
+  `.practice-*` / `.rail-task` / `.tree-file` / `.test-row` rules
+  borrowed from the v10 mock.
+- **MODIFIED** `frontend/src/components/v8/v8-sidebar.tsx` — relinked
+  Core to `/practice`, Coach group added.
+- **REPLACED** `frontend/src/app/(portal)/exercises/page.tsx` and
+  `frontend/src/app/(portal)/studio/page.tsx` with `redirect()` stubs.
+
+### Verification
+
+- 7/7 frontend Vitest tests for `practice-screen.test.tsx` pass.
+- 3/3 backend agent tests for `test_senior_engineer_problem_context.py`
+  pass.
+- Playwright walk at 1440×900 against the demo user:
+  1. `/practice` opens in capstone mode → empty state ("No capstone
+     yet" — demo course has no labs seeded yet).
+  2. Click `Exercises` toggle → URL flips to `?mode=exercises`, rail
+     shows 39 real exercises grouped Foundations / Core craft / Capstone.
+  3. Click "Retry with Exponential Backoff" → Monaco swaps to the
+     exercise's `starter_code`, breadcrumb updates.
+  4. Click "Run & review" → backend sandbox returns exit 0 + 3 traced
+     steps + quality 97/100; senior review responds with an
+     **exercise-aware** headline ("Skeleton only — no retry logic
+     implemented") and concrete next-step hint.
+  5. Click "Save to Notebook" → dialog opens, accept a free-form note,
+     click Save → notebook entry persisted with `tags: ['exercise']`,
+     user note captured, SRS card auto-seeded.
+  6. `/exercises` redirects to `/practice?mode=exercises`.
+  7. `/studio` redirects to `/practice?mode=capstone`.
+
+### Net change in this phase
+
+- **Backend:** 1 new test file (3 tests). No service changes —
+  `senior-review` already accepted `problem_context`.
+- **Frontend:** 1 new component (~600 LOC), 1 new hook (~70 LOC), 1
+  CSS bundle (~280 lines), 2 redirect stubs, 1 sidebar edit, 1 test
+  file (7 tests). Removed: ~640 LOC of obsolete `/practice` catalog
+  page and `/exercises` shadcn list.
+- **Lint:** 0 errors on changed files.
+
