@@ -6,7 +6,8 @@ import { useSetV8Topbar } from "@/components/v8/v8-topbar-context";
 import { useNotebookEntries, useNotebookSummary } from "@/lib/hooks/use-notebook";
 import { useDueCards } from "@/lib/hooks/use-srs";
 import { useAuthStore } from "@/stores/auth-store";
-import { NoteDetailDrawer } from "@/components/features/notebook/note-detail-drawer";
+import { NoteDetailModal } from "@/components/features/notebook/note-detail-modal";
+import { stripMarkdownToText, truncateAtWord } from "@/lib/markdown-text";
 import type {
   NotebookEntryOut,
   NotebookGraduatedFilter,
@@ -46,27 +47,27 @@ function buildPreview(entry: NotebookEntryOut): NotePreview {
   const graduated = entry.graduated_at !== null;
   const status = graduated ? "Graduated" : "In review";
 
+  // P-Notebook2 (2026-04-28) — strip markdown markers from the preview so
+  // the sticky-note tile reads as one clean blurb. Without this, raw
+  // `**bold**`, `# headings`, list bullets, and triple-backtick fences
+  // show through the small `<p>` and the card looks broken.
   const body = entry.user_note?.trim() || entry.content || "";
+  const cleanBody = stripMarkdownToText(body);
   const titleSource =
-    entry.title?.trim() || firstNonEmptyLine(body) || "Untitled note";
+    entry.title?.trim() ||
+    stripMarkdownToText(firstNonEmptyLine(body)) ||
+    "Untitled note";
   const title =
     titleSource.length > 80 ? `${titleSource.slice(0, 77).trimEnd()}…` : titleSource;
 
-  // Preview = the first 180 chars of the body, *excluding* the title line so
-  // we don't repeat ourselves.
-  let previewSource = body;
-  if (entry.title?.trim() && previewSource.startsWith(entry.title.trim())) {
-    previewSource = previewSource.slice(entry.title.trim().length).trim();
+  // Preview = first PREVIEW_CHAR_LIMIT chars of the *sanitized* body,
+  // excluding the title (so we don't repeat ourselves).
+  let previewSource = cleanBody;
+  const titleTrim = entry.title?.trim();
+  if (titleTrim && previewSource.startsWith(titleTrim)) {
+    previewSource = previewSource.slice(titleTrim.length).trim();
   }
-  const collapsed = previewSource
-    .split("\n")
-    .map((ln) => ln.trim().replace(/^[-*•]\s*/, "• "))
-    .filter(Boolean)
-    .join("  ");
-  const preview =
-    collapsed.length > PREVIEW_CHAR_LIMIT
-      ? `${collapsed.slice(0, PREVIEW_CHAR_LIMIT - 1).trimEnd()}…`
-      : collapsed;
+  const preview = truncateAtWord(previewSource, PREVIEW_CHAR_LIMIT);
 
   return {
     entry,
@@ -339,7 +340,7 @@ export function NotebookScreen() {
         </div>
       </div>
 
-      <NoteDetailDrawer
+      <NoteDetailModal
         open={selectedEntry !== null}
         onOpenChange={(next) => {
           if (!next) setSelectedEntry(null);
