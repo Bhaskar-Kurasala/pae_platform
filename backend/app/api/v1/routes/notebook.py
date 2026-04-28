@@ -41,6 +41,73 @@ log = structlog.get_logger()
 router = APIRouter(prefix="/chat/notebook", tags=["notebook"])
 
 
+# P-Bugfix1 (2026-04-28): on the Today warm-up card, SRS prompts/answers
+# render as plain strings inside a small tile. When auto-seeding a card
+# from a notebook entry that has no `user_note`, dumping raw markdown
+# (code fences, bold markers, list bullets, multi-paragraph blocks) makes
+# the tile look broken — text overflows, formatting markers leak through.
+# These two helpers normalize the seeded text:
+#   - SRS_PROMPT_MAX (90)  — front of the card; one short question/title.
+#   - SRS_ANSWER_MAX (240) — back of the card; one short paragraph.
+# 240 chars matches the FlashCard backend cap (BACK_MAX = 280) minus
+# breathing room and produces ~3 readable lines on the warm-up tile.
+
+SRS_PROMPT_MAX = 90
+SRS_ANSWER_MAX = 240
+
+
+def _strip_markdown_to_text(s: str) -> str:
+    """Best-effort markdown → plain text. Removes the formatting that makes
+    SRS cards look "creepy" on the Today tile while preserving the actual
+    sentence content the student wanted to remember.
+
+    What we strip (in order, because some patterns nest):
+      1. Fenced code blocks (```...```), entirely.
+      2. Inline backticks around code, leaving the inner text.
+      3. Bold/italic markers (**, __, *, _) without dropping the words.
+      4. Markdown list bullets (-, *, +, 1.) at line starts.
+      5. Heading markers (#, ##, ###) at line starts.
+      6. Blockquote markers (>) at line starts.
+      7. Collapse runs of blank lines, trim outer whitespace.
+
+    We deliberately DON'T pull a markdown lib for this — the input ceiling
+    is 240 chars and these regex passes have been measured at ~30µs.
+    """
+    import re
+
+    # 1. Fenced code blocks vanish completely — they're rarely the takeaway.
+    s = re.sub(r"```[\s\S]*?```", " ", s)
+    # 2. Inline code `like this` → `like this`.
+    s = re.sub(r"`([^`\n]+)`", r"\1", s)
+    # 3. Bold/italic — strip markers, keep the words.
+    s = re.sub(r"\*\*([^*\n]+)\*\*", r"\1", s)
+    s = re.sub(r"__([^_\n]+)__", r"\1", s)
+    s = re.sub(r"(?<![*_])\*([^*\n]+)\*(?!\*)", r"\1", s)
+    s = re.sub(r"(?<![*_])_([^_\n]+)_(?!_)", r"\1", s)
+    # 4. List bullets / numbered list markers at line starts.
+    s = re.sub(r"(?m)^\s*(?:[-*+]|\d+\.)\s+", "", s)
+    # 5. Heading markers.
+    s = re.sub(r"(?m)^\s*#{1,6}\s+", "", s)
+    # 6. Blockquote markers.
+    s = re.sub(r"(?m)^\s*>\s?", "", s)
+    # 7. Collapse blank-line runs to a single space, then trim.
+    s = re.sub(r"\n{2,}", " ", s)
+    s = re.sub(r"[ \t]+", " ", s)
+    return s.strip()
+
+
+def _truncate_with_ellipsis(s: str, limit: int) -> str:
+    """Cut at the last word boundary before `limit` and append a single
+    ellipsis character so the student sees there's more behind the card."""
+    if len(s) <= limit:
+        return s
+    cut = s[:limit].rstrip()
+    space = cut.rfind(" ")
+    if space > limit * 0.6:  # avoid producing a 3-char fragment
+        cut = cut[:space]
+    return cut.rstrip(",;: ") + "…"
+
+
 def _to_out(e: NotebookEntry) -> NotebookEntryOut:
     return NotebookEntryOut(
         id=str(e.id),
@@ -85,11 +152,23 @@ async def save_to_notebook(
         # Prefer the title for the prompt (it's typically the topic) and the
         # student's rewritten user_note for the answer — that's the version
         # they'll actually want to recall, vs. the raw assistant wall of text.
+        # P-Bugfix1 — normalize prompt + answer so the Today warm-up tile
+        # doesn't render raw markdown / 2 KB of text. The user_note is
+        # already short and clean (student-typed); sanitize the markdown
+        # path that fires when no note was provided.
+        raw_prompt = entry.title or entry.topic or entry.content
+        raw_answer = entry.user_note or entry.content
+        clean_prompt = _truncate_with_ellipsis(
+            _strip_markdown_to_text(raw_prompt), SRS_PROMPT_MAX,
+        )
+        clean_answer = _truncate_with_ellipsis(
+            _strip_markdown_to_text(raw_answer), SRS_ANSWER_MAX,
+        )
         await SRSService(db).upsert_card(
             user_id=current_user.id,
             concept_key=concept_key_for(entry),
-            prompt=(entry.title or entry.topic or entry.content)[:512],
-            answer=(entry.user_note or entry.content)[:2048],
+            prompt=clean_prompt,
+            answer=clean_answer,
             hint="Reveal when you can recall the gist in your own words.",
         )
     except Exception as exc:

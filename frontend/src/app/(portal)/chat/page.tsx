@@ -2160,7 +2160,7 @@ function InputBar({
     <div className="shrink-0 px-4 pb-4 pt-2">
       <div
         className={cn(
-          "max-w-5xl mx-auto rounded-3xl border bg-card shadow-lg transition-shadow",
+          "w-full mx-auto rounded-3xl border bg-card shadow-lg transition-shadow",
           "focus-within:shadow-xl focus-within:border-primary/40",
           isStreaming ? "border-primary/30" : "border-border/60",
           isDragging && "ring-2 ring-primary/40",
@@ -2504,7 +2504,7 @@ function ErrorBanner({ error, isStreaming, onRetry }: {
   };
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-6 pt-3" role="alert">
+    <div className="mx-auto w-full px-6 pt-3" role="alert">
       <div className="flex items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
         <div className="flex items-center gap-2">
           <Icon className="h-4 w-4 shrink-0" aria-hidden />
@@ -3243,7 +3243,7 @@ function ChatArea({
         {messages.length === 0 ? (
           <WelcomeScreen mode={mode} onPrompt={setInput} />
         ) : (
-          <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
+          <div className="w-full mx-auto px-6 py-6 space-y-6">
             {messages.map((msg, i) => {
               const isLast = i === messages.length - 1;
               // P1-1 — a message is "persisted" (has a real server id the
@@ -3340,7 +3340,7 @@ function ChatArea({
           remaining count AND the user is near the limit, so it doesn't
           distract during normal use. Non-interactive — purely informational. */}
       {rateLimitRemaining != null && rateLimitRemaining < 5 ? (
-        <div className="mx-auto w-full max-w-5xl px-6 pt-2" aria-live="polite">
+        <div className="mx-auto w-full px-6 pt-2" aria-live="polite">
           <span
             data-testid="rate-limit-pill"
             className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-3 py-1 text-xs text-muted-foreground"

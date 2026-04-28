@@ -850,6 +850,11 @@ button{cursor:pointer;border:0}
   backface-visibility:hidden;-webkit-backface-visibility:hidden;
   transition:transform .7s cubic-bezier(.4,.05,.2,1), box-shadow .7s var(--ease);
   display:flex;flex-direction:column;justify-content:center;
+  /* P-Bugfix1 — defend the warm-up tile against legacy long answers
+     (notebook entries seeded before the markdown sanitizer landed).
+     The card never overflows its container; runaway text scrolls
+     inside instead. */
+  overflow-y:auto;
 }
 .card-face-front{
   background:linear-gradient(180deg,#faf6ef,#f0e8d8);
@@ -2794,8 +2799,17 @@ button{cursor:pointer;border:0}
 }
 .pmode.active {
   background: var(--ink);
-  color: #f6f0e3;
+  color: var(--bg);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+/* In dark mode `--ink` is cream, so keep the active pill green-on-dark
+   instead of cream-on-cream which would render the label invisible. */
+[data-theme="dark"] .pmode.active {
+  background: var(--forest-2);
+  color: #0e1411;
+}
+[data-theme="dark"] .pmode {
+  color: var(--ink-2);
 }
 .pmode-tag {
   display: inline-block;
