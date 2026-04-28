@@ -28,6 +28,7 @@ from app.models.application_kit import ApplicationKit
 from app.models.cohort_event import CohortEvent
 from app.models.course import Course
 from app.models.course_bundle import CourseBundle
+from app.models.interview_session import InterviewSession
 from app.models.notebook_entry import NotebookEntry
 from app.models.portfolio_autopsy_result import PortfolioAutopsyResult
 from app.models.readiness_workspace_event import ReadinessWorkspaceEvent
@@ -989,6 +990,279 @@ async def _ensure_catalog_bundles(db: AsyncSession) -> int:
 # --------------------------------------------------------------------------- #
 # Top-level orchestration                                                     #
 # --------------------------------------------------------------------------- #
+async def _ensure_path_labs(
+    db: AsyncSession, *, course: Course, demo_user: User
+) -> int:
+    """Idempotent: attach 2-3 labs to every lesson in `course` and seed
+    one passing submission on the first lab so Path's lab tray renders
+    real "1 of 3 complete" copy.
+
+    Returns the number of new exercise rows inserted (for logging).
+    """
+    lessons_q = (
+        select(Lesson)
+        .where(Lesson.course_id == course.id, Lesson.is_deleted.is_(False))
+        .order_by(Lesson.order)
+    )
+    lessons = list((await db.execute(lessons_q)).scalars().all())
+    if not lessons:
+        return 0
+
+    LAB_BLUEPRINT: list[tuple[str, str, int, int]] = [
+        # (suffix, description, points, order)
+        ("Retry with exponential backoff",
+         "Write a function that retries a flaky API call up to 3 times, "
+         "doubling the wait each attempt.",
+         50, 1),
+        ("Rate-limit aware queue",
+         "Build a small queue that throttles outbound requests to stay "
+         "under a 10/min ceiling without dropping calls.",
+         80, 2),
+        ("Concurrent batch processor",
+         "Fan out 50 prompts through asyncio.gather and collect results "
+         "without losing ordering.",
+         110, 3),
+    ]
+
+    inserted = 0
+    # Seed labs across 10 lessons so the "current lesson window" the Path
+    # service picks (lessons 8/9/10/11 for the demo user) always has labs.
+    for lesson in lessons[:10]:
+        for letter_idx, (suffix, desc, points, order) in enumerate(LAB_BLUEPRINT):
+            label = f"Lab {chr(ord('A') + letter_idx)} · {suffix}"
+            existing = (
+                await db.execute(
+                    select(Exercise).where(
+                        Exercise.lesson_id == lesson.id,
+                        Exercise.title == label,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                continue
+            db.add(Exercise(
+                lesson_id=lesson.id,
+                title=label,
+                description=desc,
+                exercise_type="coding",
+                difficulty="medium",
+                pass_score=70,
+                points=points,
+                order=order,
+            ))
+            inserted += 1
+    if inserted:
+        await db.flush()
+        log.info("seed.path_labs.created", count=inserted)
+
+    # Mark the first lab on the FIRST lesson as passed by the demo user.
+    first_lab = (
+        await db.execute(
+            select(Exercise)
+            .where(Exercise.lesson_id == lessons[0].id)
+            .order_by(Exercise.order)
+        )
+    ).scalars().first()
+    if first_lab is not None:
+        sub = (
+            await db.execute(
+                select(ExerciseSubmission).where(
+                    ExerciseSubmission.student_id == demo_user.id,
+                    ExerciseSubmission.exercise_id == first_lab.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if sub is None:
+            db.add(ExerciseSubmission(
+                student_id=demo_user.id,
+                exercise_id=first_lab.id,
+                status="passed",
+                score=85,
+                code="def retry(fn): ...",
+                feedback="Backoff logic looks clean — consider adding jitter.",
+            ))
+            await db.flush()
+            log.info("seed.path_labs.first_passed", student=demo_user.email)
+    return inserted
+
+
+async def _ensure_proof_wall_submissions(
+    db: AsyncSession, *, peers: list[User]
+) -> int:
+    """Two peer-shared submissions with high scores so the Path proof wall
+    renders 2 cards.
+
+    Idempotent: keys on (student_id, code-snippet hash). We need at least one
+    Exercise to attach to — finds the first non-capstone exercise. Returns
+    the number of new submissions added.
+    """
+    if len(peers) < 2:
+        return 0
+    ex = (
+        await db.execute(
+            select(Exercise)
+            .where(Exercise.is_deleted.is_(False), Exercise.is_capstone.is_(False))
+            .order_by(Exercise.order)
+        )
+    ).scalars().first()
+    if ex is None:
+        return 0
+
+    proof_payload: list[tuple[User, str, int]] = [
+        (
+            peers[0],
+            (
+                "async def ask(prompt):\n"
+                "    try:\n"
+                "        resp = await client.messages.create(...)\n"
+                "        return resp.content[0].text\n"
+                "    except APIError:\n"
+                "        return await retry(prompt)"
+            ),
+            87,
+        ),
+        (
+            peers[1],
+            (
+                "class RateLimiter:\n"
+                "    async def wait(self):\n"
+                "        while self.full():\n"
+                "            await asyncio.sleep(1)\n"
+                "        return True"
+            ),
+            91,
+        ),
+    ]
+
+    inserted = 0
+    for peer, snippet, score in proof_payload:
+        existing = (
+            await db.execute(
+                select(ExerciseSubmission).where(
+                    ExerciseSubmission.student_id == peer.id,
+                    ExerciseSubmission.exercise_id == ex.id,
+                    ExerciseSubmission.shared_with_peers.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            continue
+        db.add(ExerciseSubmission(
+            student_id=peer.id,
+            exercise_id=ex.id,
+            code=snippet,
+            status="passed",
+            score=score,
+            feedback="Solid pattern — peer-worthy.",
+            shared_with_peers=True,
+            share_note="Felt like the cleanest version after 4 tries.",
+        ))
+        inserted += 1
+    if inserted:
+        await db.flush()
+        log.info("seed.proof_wall.created", count=inserted)
+    return inserted
+
+
+async def _ensure_promotion_interviews(
+    db: AsyncSession, *, demo_user: User, count: int = 1
+) -> int:
+    """Seed `count` completed practice interviews so the Promotion rung
+    "2 practice interviews" reads as in-progress (not locked at 0/2).
+
+    Defaults to 1 so the gate stays demonstrably "current" rather than
+    auto-fired — we want demo users to SEE the locked state, then complete
+    interviews to feel the unlock.
+    """
+    existing = (
+        await db.execute(
+            select(InterviewSession).where(
+                InterviewSession.user_id == demo_user.id,
+                InterviewSession.status == "completed",
+            )
+        )
+    ).scalars().all()
+    if len(existing) >= count:
+        return 0
+    needed = count - len(existing)
+    now = _now()
+    for i in range(needed):
+        db.add(InterviewSession(
+            user_id=demo_user.id,
+            mode="behavioral",
+            status="completed",
+            target_role="Data Analyst",
+            level="entry",
+            overall_score=78.0,
+            created_at=now - timedelta(days=2 + i),
+        ))
+    await db.flush()
+    log.info("seed.promotion_interviews.created", count=needed)
+    return needed
+
+
+async def _ensure_promotion_skill_states(
+    db: AsyncSession, *, demo_user: User, skills: dict[str, Skill]
+) -> int:
+    """Mark a couple of skills as `mastered` / `proficient` so the Path
+    constellation has visible "done" / "current" stars (instead of every
+    star reading "Upcoming").
+
+    Targets the canonical production slugs (`python-basics`, `http-rest`,
+    `python-oop`) — they live in the seeded skills graph and appear in the
+    constellation's top-5 picks because they have the lowest difficulty.
+    Falls back gracefully if a slug isn't present.
+    """
+    inserted_or_updated = 0
+    targets = [
+        ("python-basics", "mastered", 0.95),
+        ("python-data-structures", "mastered", 0.9),
+        ("http-rest", "proficient", 0.7),
+        # Synthetic slugs from the demo seed's own _ensure_skills() — kept
+        # so the Today screen's current_focus query still returns one of
+        # these (which is what powers the "APIs" focus card).
+        ("apis", "mastered", 0.9),
+        ("async_python", "proficient", 0.7),
+    ]
+
+    # Pull every real Skill row keyed by slug so we can find canonical
+    # production skills as well as the synthetic ones in the demo seed.
+    all_skills_by_slug: dict[str, Skill] = {
+        s.slug: s for s in (await db.execute(select(Skill))).scalars().all()
+    }
+
+    for slug, level, conf in targets:
+        skill = skills.get(slug) or all_skills_by_slug.get(slug)
+        if skill is None:
+            continue
+        state = (
+            await db.execute(
+                select(UserSkillState).where(
+                    UserSkillState.user_id == demo_user.id,
+                    UserSkillState.skill_id == skill.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if state is None:
+            db.add(UserSkillState(
+                user_id=demo_user.id,
+                skill_id=skill.id,
+                mastery_level=level,
+                confidence=conf,
+                last_touched_at=_now() - timedelta(hours=2),
+            ))
+            inserted_or_updated += 1
+        else:
+            if state.mastery_level != level:
+                state.mastery_level = level
+                state.confidence = conf
+                inserted_or_updated += 1
+    if inserted_or_updated:
+        await db.flush()
+        log.info("seed.skill_states.updated", count=inserted_or_updated)
+    return inserted_or_updated
+
+
 async def seed(db: AsyncSession) -> None:
     log.info("seed.today_demo.start", email=DEMO_EMAIL)
 
@@ -1077,6 +1351,21 @@ async def seed(db: AsyncSession) -> None:
     # plus 2 multi-course bundles. Idempotent rerun-safe.
     await _ensure_catalog_metadata(db)
     await _ensure_catalog_bundles(db)
+
+    # Path screen demo data — 2-3 labs per lesson on the active course, one
+    # passing submission so the lab tray reads "1 of 3 complete", and two
+    # peer-shared submissions for the proof wall.
+    await _ensure_path_labs(
+        db, course=course_objs["python-foundations"], demo_user=demo_user
+    )
+    await _ensure_proof_wall_submissions(db, peers=peer_users)
+
+    # Promotion screen demo data — 1 completed practice interview (so the
+    # "2 practice interviews" rung reads as in-progress, not locked at 0/2)
+    # and 2 mastered/proficient skill states (so the constellation has
+    # visible progress instead of all-upcoming).
+    await _ensure_promotion_interviews(db, demo_user=demo_user, count=1)
+    await _ensure_promotion_skill_states(db, demo_user=demo_user, skills=skills)
 
     log.info("seed.today_demo.done", email=DEMO_EMAIL)
 

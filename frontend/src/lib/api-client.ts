@@ -1555,4 +1555,127 @@ export const paymentsApi = {
     `${API_BASE}/api/v1/payments/orders/${orderId}/receipt.pdf`,
 };
 
+// ── Path screen aggregator (P-Path1) ───────────────────────────────────
+export type PathStarState = "done" | "current" | "upcoming" | "goal";
+export type PathLessonStatus = "done" | "current" | "upcoming";
+export type PathLabStatus = "done" | "current" | "locked";
+
+export interface PathStar {
+  /** Label may include `\n` for a forced line break inside the star tile. */
+  label: string;
+  sub: string;
+  state: PathStarState;
+  badge: string;
+}
+
+export interface PathLab {
+  id: string;
+  title: string;
+  description: string | null;
+  duration_minutes: number;
+  status: PathLabStatus;
+}
+
+export interface PathLesson {
+  id: string;
+  title: string;
+  meta: string;
+  duration_minutes: number;
+  status: PathLessonStatus;
+  labs: PathLab[];
+  labs_completed: number;
+}
+
+export interface PathLevel {
+  badge: string;
+  title: string;
+  blurb: string;
+  progress_percentage: number;
+  lessons: PathLesson[];
+  state: "current" | "upcoming" | "goal";
+  unlock_course_id: string | null;
+  unlock_price_cents: number | null;
+  unlock_currency: string | null;
+  unlock_lesson_count: number | null;
+  unlock_lab_count: number | null;
+}
+
+export interface PathProofEntry {
+  submission_id: string;
+  code_snippet: string;
+  author_name: string;
+  score: number;
+  promoted: boolean;
+}
+
+export interface PathSummaryResponse {
+  overall_progress: number;
+  active_course_id: string | null;
+  active_course_title: string | null;
+  constellation: PathStar[];
+  levels: PathLevel[];
+  proof_wall: PathProofEntry[];
+}
+
+export const pathApi = {
+  summary: () => api.get<PathSummaryResponse>("/api/v1/path/summary"),
+};
+
+// ── Promotion screen aggregator (P-Promo1) ─────────────────────────────
+export type PromotionRungState = "done" | "current" | "locked";
+export type PromotionGateStatus =
+  | "not_ready"
+  | "ready_to_promote"
+  | "promoted";
+export type PromotionRungKind =
+  | "lessons_foundation"
+  | "lessons_complete"
+  | "capstone_submitted"
+  | "interviews_complete";
+
+export interface PromotionRung {
+  kind: PromotionRungKind;
+  title: string;
+  detail: string;
+  state: PromotionRungState;
+  progress: number;
+  short_label: string;
+}
+
+export interface PromotionRoleTransition {
+  from_role: string;
+  to_role: string;
+}
+
+export interface PromotionStats {
+  completed_lessons: number;
+  total_lessons: number;
+  due_card_count: number;
+  completed_interviews: number;
+  capstone_submissions: number;
+}
+
+export interface PromotionSummaryResponse {
+  overall_progress: number;
+  rungs: PromotionRung[];
+  role: PromotionRoleTransition;
+  stats: PromotionStats;
+  gate_status: PromotionGateStatus;
+  promoted_at: string | null;
+  promoted_to_role: string | null;
+  user_first_name: string | null;
+}
+
+export interface PromotionConfirmResponse {
+  promoted_at: string;
+  promoted_to_role: string;
+}
+
+export const promotionApi = {
+  summary: () =>
+    api.get<PromotionSummaryResponse>("/api/v1/promotion/summary"),
+  confirm: () =>
+    api.post<PromotionConfirmResponse>("/api/v1/promotion/confirm", {}),
+};
+
 export { ApiError, API_BASE, sanitizeNext };

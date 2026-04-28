@@ -20,6 +20,12 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     stripe_customer_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Promotion gate — set once when the student crosses ALL four rungs.
+    # Used to fire the takeover exactly once and to render "Promoted on …" copy.
+    promoted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    promoted_to_role: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     enrollments: Mapped[list["Enrollment"]] = relationship(back_populates="student", lazy="select")
     submissions: Mapped[list["ExerciseSubmission"]] = relationship(

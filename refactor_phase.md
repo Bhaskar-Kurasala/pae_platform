@@ -1312,3 +1312,134 @@ At 1440px viewport: chat column 720px → 780px (+8%). Rail trimmed 360px → 30
 - **Frontend:** 1 CSS edit (`v8.css`, ~95 added lines), 1 component edit (`tutor-screen.tsx`, ~40 added lines).
 - **Lint:** 0 new errors on changed files.
 
+---
+
+## P-Path1 + P-Promo1 — Path & Promotion screens to production (2026-04-27)
+
+Pattern continues from Today / Tutor / Notebook / Job Readiness / Catalog.
+Both screens were full of editorial fallbacks (DEFAULT_STARS, DEFAULT_LESSONS,
+hardcoded labs A/B/C, hardcoded "$89", `motivationToRole` map, `overallProgress
+= 78` fallback). Replaced with two new aggregator endpoints that hydrate the
+entire screens in one round-trip.
+
+### Schema
+
+Migration `0048_path_promotion`:
+- `users.promoted_at` (timestamp, nullable) — set when the gate flips for
+  the first time so the takeover fires once and only once.
+- `users.promoted_to_role` (string 128, nullable) — what they were
+  promoted to. Lets later visits render "Promoted on Apr 27, 2026".
+
+No new tables. The Path screen reuses existing
+`skills` / `user_skill_states` / `saved_skill_path` / `lessons` /
+`exercises` / `exercise_submissions` (peer-shared filter). Promotion
+reuses `goal_contracts` / `student_progress` / `exercise_submissions`
+(capstone) / `interview_sessions`.
+
+### Backend
+
+**`/api/v1/path/summary`** (GET) — assembles:
+- 6-star constellation (5 ordered skills from saved-path or
+  difficulty-sorted; 6th star is the goal from `goal.target_role`).
+- 3-rung ladder: current course (with a 4-lesson window that ALWAYS
+  includes the active "current" lesson — never leaves the user with 4
+  done lessons and no "current" card to act on), upsell (lowest-priced
+  unenrolled course, real `price_cents`/`metadata`), goal step.
+- Lesson rows include real labs (Exercise rows joined on `lesson_id`)
+  with status derived from per-user submissions.
+- Proof wall: top 2 peer-shared submissions ordered by score desc.
+
+**`/api/v1/promotion/summary`** (GET) — four rungs derived from real signals:
+1. `lessons_foundation` — first ~50% of lessons.
+2. `lessons_complete` — every enrolled lesson.
+3. `capstone_submitted` — student has submitted a capstone exercise.
+4. `interviews_complete` — 2+ completed `interview_sessions`.
+
+Plus `gate_status` ∈ `{not_ready, ready_to_promote, promoted}`, role
+transition (from `goal.target_role`, not the old motivation map),
+stats, and `user_first_name`. Strict-ordering rule: rungs 3 and 4 stay
+locked until the prior rung is done — even if a student stamps a
+capstone draft early, the visual ladder reads honestly.
+
+**`/api/v1/promotion/confirm`** (POST) — flips `users.promoted_at` once
+the gate is `ready_to_promote`. Idempotent (a second call returns the
+existing record). 409 when the gate isn't open.
+
+### Pure-function design
+
+Both aggregators ran heavy queries via `asyncio.gather`. The rung
+builder for Promotion is a pure function (`_build_rungs`) over four
+counts so it's trivial to unit test (4 boundary tests cover the
+state-machine corners).
+
+### Frontend
+
+- `lib/api-client.ts` — added `pathApi.summary`, `promotionApi.summary`,
+  `promotionApi.confirm` plus all schema types (`PathStar`, `PathLab`,
+  `PathLevel`, `PromotionRung`, `PromotionGateStatus`, etc.).
+- `lib/hooks/use-path-summary.ts` — single `useQuery` gated by
+  `isAuthenticated`, 30s `staleTime`.
+- `lib/hooks/use-promotion-summary.ts` — `useQuery` + `useMutation`.
+  The mutation's `onSuccess` patches the cached summary so the screen
+  flips to `gate_status: "promoted"` without a refetch round-trip.
+- `components/v8/screens/path-screen.tsx` — full rewrite. ~530 → ~410
+  lines. All hardcoded copy and lab samples deleted. Lab tray expands
+  on the current lesson; "Labs coming soon" empty state when an active
+  lesson has no exercises seeded yet.
+- `components/v8/screens/promotion-screen.tsx` — full rewrite. The
+  takeover now fires only when `gate_status === "ready_to_promote"`
+  (auto-opens once on first eligibility, can be reopened from the
+  "Open promotion ceremony" button). `Begin <role>` POSTs `/confirm`
+  and routes to `/today` on settle. Already-promoted state shows
+  "Promoted on <date>" disabled.
+
+### Demo seed
+
+- `_ensure_path_labs` — 3 labs per lesson on the first 10 lessons of
+  Python Foundations (so the lesson window's current lesson always has
+  labs). First lab on lesson 1 marked passed.
+- `_ensure_proof_wall_submissions` — 2 peer-shared submissions with
+  scores 87 and 91 so the proof wall renders 2 cards.
+- `_ensure_promotion_interviews` — 1 completed interview so the rung
+  reads "1/2 in progress" rather than locked at 0.
+- `_ensure_promotion_skill_states` — 5 mastery rows on the canonical
+  production slugs (`python-basics`, `python-data-structures`,
+  `http-rest`) so the constellation has visible done/current stars.
+
+All idempotent — running the seed twice no-ops cleanly.
+
+### Tests
+
+- **Backend (27 new):** 11 in `test_path_summary_service.py` (helpers +
+  full integration), 9 in `test_promotion_summary_service.py` (rung
+  builder + integration + idempotent confirm), 2 in
+  `test_path_summary_route.py`, 3 in `test_promotion_summary_route.py`,
+  plus 2 covering strict ordering on the rung builder. **27/27 pass.**
+- **Frontend (13 new):** 7 in `path-screen.test.tsx` (constellation +
+  lessons + lab tray + upsell + proof wall + browse-catalog fallback +
+  empty proof wall), 6 in `promotion-screen.test.tsx` (rung rendering +
+  target_role + locked button + ready button + promoted button +
+  confirm flow). **13/13 pass.**
+
+### Verification
+
+Hit both endpoints as `demo@pae.dev`:
+- `/path/summary` returns 6-star constellation (`Python Basics → Python
+  Data Structures → HTTP & REST [current] → Git Workflow → Tailwind CSS
+  → Data Analyst [goal]`), Level 1 with 4 lessons (including current
+  lesson 9 with 3 labs), upsell (Python Developer), goal (Data Analyst),
+  2 proof-wall entries.
+- `/promotion/summary` returns 4 rungs in honest state: foundation
+  current (63% — 12/19), lessons_complete locked, capstone locked
+  (strict ordering — early draft doesn't count), interviews locked.
+  `gate_status: not_ready`. `role: Python Developer → Data Analyst`.
+
+### Net change in this phase
+
+- **Backend:** 1 migration, 2 schemas, 2 services, 2 routes (3
+  endpoints), seed extended (4 new helpers), 4 test files (27 tests).
+- **Frontend:** 1 api-client expansion, 2 new hooks, 2 fully-rewritten
+  screens (~940 lines deleted, ~620 added), 2 new test files (13
+  tests).
+- **Lint:** 0 new errors on changed files.
+
