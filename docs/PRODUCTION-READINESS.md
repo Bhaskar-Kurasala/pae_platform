@@ -393,7 +393,7 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### D1 — Database backups (highest priority of the whole plan)
 
-- [ ] **D1.1** Fly cron machine that runs `pg_dump $NEON_URL | gzip | aws s3 cp - s3://r2-bucket/backups/$(date +%Y%m%d-%H%M).sql.gz` daily at 04:00 UTC.
+- [~] **D1.1** Fly cron machine that runs `pg_dump $NEON_URL | gzip | aws s3 cp - s3://r2-bucket/backups/$(date +%Y%m%d-%H%M).sql.gz` daily at 04:00 UTC. claimed-by: track-d
   - **Touches:** `infra/backup/Dockerfile`, `infra/backup/backup.sh`, `fly-backup.toml`
   - **Acceptance:** A backup file lands in R2 every night.
   - **Done note:**
