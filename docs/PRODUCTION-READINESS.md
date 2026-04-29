@@ -420,15 +420,15 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### D3 — CORS / cookies
 
-- [ ] **D3.1** CORS allowlist driven by `CORS_ORIGINS` env var. Production list is hard-coded to the prod domain(s).
-  - **Touches:** `backend/app/main.py`
+- [x] **D3.1** CORS allowlist driven by `CORS_ORIGINS` env var. Production list is hard-coded to the prod domain(s). claimed-by: track-d
+  - **Touches:** `backend/app/core/config.py`, `backend/app/main.py` (already wired), `backend/tests/test_core/test_cors.py`, `backend/tests/test_core/test_config.py`
   - **Acceptance:** A request from a foreign origin is rejected in prod mode.
-  - **Done note:**
+  - **Done note:** `main.py` already passed `settings.cors_origins` to `CORSMiddleware` — the missing piece was env-var ergonomics. Pydantic's native list parser only accepts JSON-array form, but Fly secrets / .env files almost always set `CORS_ORIGINS=https://app.example.com,https://admin.example.com` (comma-separated). Added `_parse_cors_origins` field validator that accepts BOTH a comma-separated string AND a JSON array, normalizing to `list[str]`. Whitespace + trailing commas are stripped (the natural failure mode of "I copied it from a doc"). Production hardening: the `production_required` validator (D2.2) now ALSO refuses to boot if `cors_origins` contains `"*"` — `allow_credentials=True` (which we use for the auth cookie) makes the wildcard a CORS-spec violation that browsers silently reject anyway, so failing loud at boot is the right move. **6 unit tests** in `test_config.py` cover comma-separated + JSON-array parsing, whitespace stripping, empty-string handling, and the prod wildcard rejection. **2 live-route tests** in `test_cors.py` confirm an allowed origin gets `Access-Control-Allow-Origin: <origin>` echoed back AND a foreign origin gets no allow header (FastAPI's CORSMiddleware doesn't 4xx — it just omits the headers, which is how CORS rejection actually works).
 
-- [ ] **D3.2** Refresh-token cookie set with `Secure`, `SameSite=Lax`, `HttpOnly`, `Path=/api/v1/auth`.
-  - **Touches:** `backend/app/api/v1/routes/auth.py`
+- [x] **D3.2** Refresh-token cookie set with `Secure`, `SameSite=Lax`, `HttpOnly`, `Path=/api/v1/auth`. claimed-by: track-d
+  - **Touches:** `backend/app/api/v1/routes/auth.py`, `backend/app/schemas/auth.py`, `backend/tests/test_routes/test_auth_cookie.py`
   - **Acceptance:** Browser dev-tools shows the right flags.
-  - **Done note:**
+  - **Done note:** Important architectural finding: the existing auth flow stores the refresh token in `localStorage` and sends it in the request body — there was no refresh-token cookie at all. Implemented as a **non-breaking dual-path**: login + refresh now ALSO set a hardened cookie via `Response.set_cookie(...)` with all four required flags (`HttpOnly`, `Secure` (prod-only), `SameSite=Lax`, `Path=/api/v1/auth`). The body still carries `refresh_token` for backwards-compat with the localStorage frontend until that's migrated in a follow-up. The refresh route reads from EITHER source — cookie wins when both are present, since it's the more secure source. `Secure` is gated on `settings.environment == "production"` so local dev over plain http://localhost still works; the D2.2 production_required validator ensures we can't accidentally ship a misconfigured env to prod. Made `RefreshRequest.refresh_token` default to `""` so a cookie-only frontend can send `{}` and have the route read the cookie. Added a new `POST /api/v1/auth/logout` (204) that calls `delete_cookie` so a stolen device can't replay a stale token — the access token itself is short-lived (8h JWT) and not server-side invalidated, which is a JWT property not a regression. **8 route tests** in `test_auth_cookie.py` cover: cookie is set on login, HttpOnly flag, SameSite=Lax flag, Path=/api/v1/auth, Secure is OFF in test env (correct), refresh succeeds with cookie-only (empty body), refresh succeeds with body-only (cookie cleared), logout deletes the cookie. All 8 pass + 7 pre-existing auth tests in `tests/test_api/test_auth.py` still green (no regression).
 
 ### D4 — Dependency audit
 

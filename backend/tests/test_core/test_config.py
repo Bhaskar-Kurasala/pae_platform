@@ -178,3 +178,48 @@ def test_strong_secret_helper_is_case_insensitive_on_fragments() -> None:
 
 def test_strong_secret_helper_accepts_random() -> None:
     assert Settings._is_strong_secret(_STRONG_SECRET, 32) is True
+
+
+# ── PR3/D3.1 CORS_ORIGINS parsing ─────────────────────────────────────────
+
+
+def test_cors_origins_parses_comma_separated() -> None:
+    """The natural Fly-secret / .env form is comma-separated."""
+    s = Settings(  # type: ignore[call-arg]
+        environment="development",
+        cors_origins="https://a.example.com,https://b.example.com",  # type: ignore[arg-type]
+    )
+    assert s.cors_origins == ["https://a.example.com", "https://b.example.com"]
+
+
+def test_cors_origins_parses_json_array() -> None:
+    """Pydantic's native JSON-array form still works."""
+    s = Settings(  # type: ignore[call-arg]
+        environment="development",
+        cors_origins='["https://a.example.com","https://b.example.com"]',  # type: ignore[arg-type]
+    )
+    assert s.cors_origins == ["https://a.example.com", "https://b.example.com"]
+
+
+def test_cors_origins_strips_whitespace() -> None:
+    s = Settings(  # type: ignore[call-arg]
+        environment="development",
+        cors_origins="https://a.com , https://b.com ,",  # type: ignore[arg-type]
+    )
+    assert s.cors_origins == ["https://a.com", "https://b.com"]
+
+
+def test_cors_origins_empty_string_is_empty_list() -> None:
+    s = Settings(  # type: ignore[call-arg]
+        environment="development",
+        cors_origins="",  # type: ignore[arg-type]
+    )
+    assert s.cors_origins == []
+
+
+def test_production_rejects_cors_wildcard() -> None:
+    """`*` + `allow_credentials=True` is a CORS-spec violation. Better
+    to fail at boot than ship a silently-broken app."""
+    kwargs = _strong_prod_kwargs() | {"cors_origins": ["*"]}
+    with pytest.raises(ValueError, match="cors_origins"):
+        Settings(**kwargs)  # type: ignore[arg-type]

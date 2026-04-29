@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # PR3/D2.2 — values that look like dev defaults and must NOT appear in
@@ -119,8 +119,51 @@ class Settings(BaseSettings):
     # SendGrid
     sendgrid_from_email: str = "noreply@pae.dev"
 
-    # CORS
+    # CORS — PR3/D3.1 allowlist driven by `CORS_ORIGINS` env var.
+    #
+    # Env-var form: comma-separated list of origins, e.g.
+    #   CORS_ORIGINS=https://app.example.com,https://admin.example.com
+    #
+    # JSON-array form is ALSO accepted for compatibility with Pydantic's
+    # native list parser:
+    #   CORS_ORIGINS=["https://app.example.com","https://admin.example.com"]
+    #
+    # Wildcard (`*`) is allowed for dev only — in production, the
+    # `production_required` validator (D2.2) will fail the boot if you
+    # ship `*` because `allow_credentials=True` makes that a CORS spec
+    # violation that browsers will silently reject anyway.
     cors_origins: list[str] = ["http://localhost:3000"]
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _parse_cors_origins(cls, value: object) -> object:
+        """Accept either a JSON array OR a comma-separated string.
+
+        Fly secrets / .env files default to the latter —
+        `CORS_ORIGINS=https://a.com,https://b.com` is the natural way to
+        set this and Pydantic's native parser would reject it as
+        invalid JSON. We normalize both forms to a `list[str]` here so
+        downstream code never has to second-guess."""
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return []
+            if stripped.startswith("["):
+                # JSON-array form: parse it ourselves so this validator
+                # always returns a list (Pydantic's `mode='before'`
+                # then sees a list and skips its own list-parsing path).
+                import json
+
+                try:
+                    parsed = json.loads(stripped)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"CORS_ORIGINS looks like JSON but didn't parse: {exc}") from exc
+                if not isinstance(parsed, list):
+                    raise ValueError("CORS_ORIGINS JSON must decode to a list")
+                return [str(item) for item in parsed]
+            # Comma-separated form.
+            return [item.strip() for item in stripped.split(",") if item.strip()]
+        return value
 
     # Feature flags
     feature_tailored_resume_agent: bool = False
@@ -206,6 +249,18 @@ class Settings(BaseSettings):
             problems.append(
                 "redis_url is missing or matches a dev default "
                 "(set REDIS_HOST / REDIS_PORT to a managed Redis endpoint)"
+            )
+
+        # PR3/D3.1 — CORS wildcard in production is a CORS-spec
+        # violation when paired with `allow_credentials=True` (which
+        # we use). Browsers silently reject it, but better to fail
+        # loud at boot than ship a quietly-broken app.
+        if "*" in self.cors_origins:
+            problems.append(
+                "cors_origins contains '*' which is invalid in production "
+                "(allow_credentials=True forbids the wildcard). Set "
+                "CORS_ORIGINS to an explicit comma-separated list of HTTPS "
+                "origins."
             )
 
         if problems:
