@@ -105,11 +105,50 @@ class BaseAgent(ABC):
             input_tokens = state.metadata.get("input_tokens")
             output_tokens = state.metadata.get("output_tokens")
             if input_tokens is not None or output_tokens is not None:
+                # PR3/C7.1 — emit a structured `llm.call` event per
+                # agent run with everything PostHog (or any downstream
+                # cost dashboard) needs to compute SUM(cost) BY user.
+                # We compute the cost in INR via the existing pricing
+                # table in llm_factory; if the model is unknown we
+                # emit 0 and rely on the absolute ₹20 circuit breaker.
+                from app.agents.llm_factory import estimate_cost_inr
+                from app.core.telemetry import capture as telemetry_capture
+
+                cost_inr = estimate_cost_inr(
+                    model=self.model,
+                    input_tokens=int(input_tokens or 0),
+                    output_tokens=int(output_tokens or 0),
+                )
+                # USD too — easier for the Anthropic budget dashboard.
+                cost_usd = round(cost_inr / 84.0, 6) if cost_inr else 0.0
+
                 self._log.info(
-                    "agent.tokens_used",
-                    agent=self.name,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
+                    "llm.call",
+                    agent_name=self.name,
+                    model=self.model,
+                    tokens_in=input_tokens,
+                    tokens_out=output_tokens,
+                    duration_ms=duration_ms,
+                    user_id=state.student_id,
+                    status=status,
+                    cost_estimate_usd=cost_usd,
+                    cost_estimate_inr=cost_inr,
+                )
+                # Telemetry is no-op when POSTHOG_KEY is unset
+                # (PR3/C3.1). Fire-and-forget; the SDK handles queue.
+                telemetry_capture(
+                    state.student_id or None,
+                    "llm.call",
+                    {
+                        "agent_name": self.name,
+                        "model": self.model,
+                        "tokens_in": input_tokens,
+                        "tokens_out": output_tokens,
+                        "duration_ms": duration_ms,
+                        "status": status,
+                        "cost_estimate_usd": cost_usd,
+                        "cost_estimate_inr": cost_inr,
+                    },
                 )
 
             async with AsyncSessionLocal() as session:

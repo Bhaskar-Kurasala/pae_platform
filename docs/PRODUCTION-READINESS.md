@@ -357,6 +357,7 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 - [ ] **C4.1** Frontend Sentry. `@sentry/nextjs` with source-map upload at build time.
   - **Touches:** `frontend/sentry.client.config.ts`, `frontend/sentry.server.config.ts`, `frontend/next.config.js`
   - **Acceptance:** Throw in dev → see in Sentry; stack trace is readable (TS source, not minified).
+  - **claimed-by:** track-o
   - **Done note:**
 
 - [x] **C5.1** Backend Sentry. `sentry-sdk[fastapi]` with PII filtering. Tags: `route`, `user_id`, `agent_name`.
@@ -383,10 +384,11 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### C7 — Cost tracking per LLM call
 
-- [ ] **C7.1** Instrument every Anthropic call to log `{event: "llm.call", agent_name, model, tokens_in, tokens_out, duration_ms, user_id, cost_estimate_usd}`.
-  - **Touches:** `backend/app/agents/base_agent.py`, `backend/app/agents/llm_factory.py`
+- [x] **C7.1** Instrument every Anthropic call to log `{event: "llm.call", agent_name, model, tokens_in, tokens_out, duration_ms, user_id, cost_estimate_usd}`.
+  - **Touches:** `backend/app/agents/base_agent.py`, `backend/tests/test_agents/test_llm_cost_tracking.py` (new)
   - **Acceptance:** Daily aggregate via PostHog `SUM(cost_estimate_usd) BY user_id` is queryable.
-  - **Done note:**
+  - **claimed-by:** track-o
+  - **Done note:** Wired into the existing `BaseAgent.log_action` chokepoint — every successful agent run already flowed through it after `_merge_token_usage` (which extracts LangChain's `usage_metadata` dict). Added a `llm.call` structlog event with the spec'd shape (agent_name, model, tokens_in, tokens_out, duration_ms, user_id, status, cost_estimate_usd, cost_estimate_inr) and a parallel `telemetry.capture()` call so the same payload lands in PostHog. Pricing table is the existing `_PRICING_USD_PER_1M` in `llm_factory.py` — reusing it keeps cost computation in one place and means the existing ₹20 cost-cap circuit breaker shares its source of truth. Three guarantees verified: (1) successful runs emit the event with non-zero cost when the model is in the pricing table; (2) agents that don't call an LLM (spaced_repetition, knowledge_graph — pure-Python SM-2 / EMA computation) skip the event entirely so the dashboard isn't polluted with zero-token rows; (3) unknown models (e.g. self-hosted MiniMax variant) emit the event with cost=0 rather than crashing — the absolute ₹20 circuit breaker covers actual budget protection. **3 unit tests pass** in `test_llm_cost_tracking.py` covering all three paths.
 
 ### C8 — Slow-query log
 
