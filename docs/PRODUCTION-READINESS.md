@@ -245,10 +245,10 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
   - **Acceptance:** `SHOW statement_timeout;` in a test connection reads `5s`.
   - **Done note:** Added via asyncpg's `server_settings` connect arg on the engine — every new connection executes `SET statement_timeout = '5000'` automatically. Verified live via a one-shot async script that opens a connection through the configured engine: `SHOW statement_timeout` returns `5s`. A runaway query is now caught by Postgres itself with `ERROR:  canceling statement due to statement timeout`, which our PR2/B4.1 exception handler wraps in the stable error envelope. 5s is intentionally generous — the slowest aggregator (Today) completes in <300ms p95 against the demo dataset; anything over 5s is an indexing bug.
 
-- [ ] **B5.3** Frontend `fetch` calls that may stream or take >10s wrap in `AbortController` with a 30s timeout (chat stream is exempt — different lifetime).
-  - **Touches:** `frontend/src/lib/api-client.ts`
+- [x] **B5.3** Frontend `fetch` calls that may stream or take >10s wrap in `AbortController` with a 30s timeout (chat stream is exempt — different lifetime).
+  - **Touches:** `frontend/src/lib/api-client.ts`, `frontend/src/lib/__tests__/api-client-timeout.test.ts`
   - **Acceptance:** A frozen backend doesn't hang the UI forever; user sees a "request took too long" toast after 30s.
-  - **Done note:**
+  - **Done note:** Added `fetchWithTimeout()` helper that wraps every `fetch` call in `request()` with a 30s `AbortController`. On abort, throws a typed `ApiTimeoutError` with a user-readable message ("Request took too long. Try again in a moment."). Both the initial request and the post-401-refresh retry are wrapped (otherwise a wedged backend after token refresh would still hang). Constant matches the backend's `_LLM_TIMEOUT_S` so client and server give up at the same wall-clock moment. Streaming endpoints (chat SSE) explicitly bypass this helper. 3 Vitest tests confirm: happy path resolves, abort raises `ApiTimeoutError`, and the error's `.message` is user-readable for `toast.error(err.message)`.
 
 ### B6 — Idempotency on writes
 
