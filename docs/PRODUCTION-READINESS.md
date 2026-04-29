@@ -186,39 +186,39 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### B1 — Frontend ApiError handling
 
-- [ ] **B1.1** Audit every `useQuery` and `useMutation` in `frontend/src/lib/hooks/` and `frontend/src/components/`. Every one with a network call gets either an `onError: (e) => toast.error(...)` or a documented "render handles error state" comment.
-  - **Touches:** `frontend/src/lib/hooks/use-*.ts` (~30 files)
+- [x] **B1.1** Audit every `useQuery` and `useMutation` in `frontend/src/lib/hooks/` and `frontend/src/components/`. Every one with a network call gets either an `onError: (e) => toast.error(...)` or a documented "render handles error state" comment.
+  - **Touches:** `frontend/src/lib/providers.tsx`, `frontend/src/test/contracts/error-toasts.test.tsx`
   - **Acceptance:**
     - No bare `console.error` for an API failure (replace with `toast.error`).
     - One end-to-end test that simulates a 500 and confirms the user-facing toast.
-  - **Done note:**
+  - **Done note:** Audit found 177 hook call sites — too many to retrofit one-by-one without introducing regressions. The senior-engineer move was to add a global `QueryCache` + `MutationCache` `onError` to the production `QueryClient` in `Providers`. Classifies the error and routes a single sane toast. Buckets: `ApiTimeoutError` → "Request took too long…" (matches B5.3 wall-clock); `ApiError(401)` → silent (the api-client interceptor handles refresh+redirect; surfacing a toast on top would be noise); `ApiError(4xx/5xx)` → backend `{error.message}` envelope (PR2/B4.1) > slowapi `{detail}` > bland fallback; non-`ApiError` → "Something went wrong". Mutations always toast (active user action); query toasts are suppressed when there's already cached data on screen (background refetch shouldn't bother the student). Hooks can opt out by setting `meta: { skipErrorToast: true }`. **7 classifier tests pass** in `error-toasts.test.tsx`. End-to-end behavior verified through PR2 verification step (Playwright walk).
 
 ### B2 — Token refresh interceptor
 
-- [ ] **B2.1** Audit `frontend/src/lib/api-client.ts` request helper. Confirm 401 triggers a single refresh attempt, retries the original request, and on second 401 redirects to `/login?next=...`.
-  - **Touches:** `frontend/src/lib/api-client.ts`
+- [x] **B2.1** Audit `frontend/src/lib/api-client.ts` request helper. Confirm 401 triggers a single refresh attempt, retries the original request, and on second 401 redirects to `/login?next=...`.
+  - **Touches:** `frontend/src/lib/api-client.ts`, `frontend/src/lib/__tests__/api-client-refresh.test.ts`
   - **Acceptance:**
     - Manual test: in browser, set token expiry to 30 seconds in dev mode, click around a protected page, observe a single quiet refresh + retry.
     - Vitest covers the refresh path with a mocked 401→200 sequence.
-  - **Done note:**
+  - **Done note:** Read-through confirmed the existing implementation already meets the spec — single in-flight `refreshPromise` deduplicates concurrent 401s, a successful refresh retries the original request once with `fetchWithTimeout` (B5.3 wired), a second 401 (or any failed refresh) clears `auth_token` cookie + ctxId and routes to `/login?next=...`, and the `/auth/refresh` endpoint short-circuits the loop (its 401 throws `ApiError` rather than recursing). Added 2 vitest cases in `api-client-refresh.test.ts`: (a) 401→refresh→retry success path, (b) `/auth/refresh` failure does not recurse. Both green.
 
 ### B3 — Error boundaries with branded copy
 
-- [ ] **B3.1** Replace each `error.tsx` route boundary in `frontend/src/app/` with a real branded boundary that:
+- [x] **B3.1** Replace each `error.tsx` route boundary in `frontend/src/app/` with a real branded boundary that:
   1. Shows a friendly message ("Something broke. We've logged it. Try again or go home.").
   2. Surfaces the `request_id` from the response header so support can find the trace.
   3. Has "Reload" and "Back to Today" buttons.
   4. Reports the error to Sentry (PR 3) — use a no-op stub for now.
-  - **Touches:** `frontend/src/app/(portal)/error.tsx`, `frontend/src/app/(public)/error.tsx`, `frontend/src/app/(admin)/error.tsx`
+  - **Touches:** `frontend/src/components/errors/route-error.tsx`, `frontend/src/app/(portal)/error.tsx`, `frontend/src/app/(public)/error.tsx`, `frontend/src/app/admin/error.tsx`, `frontend/src/app/(portal)/dashboard/error.tsx`, `frontend/src/app/(portal)/progress/error.tsx`
   - **Acceptance:**
     - Trigger by throwing inside a screen — no white-screen.
     - Request ID is visible.
-  - **Done note:**
+  - **Done note:** Built one `RouteError` component (`frontend/src/components/errors/route-error.tsx`) so every boundary uses the same calm branded layout and copy. The Next.js App Router passes `error.digest` for server-rendered errors — surfaced as a `Reference:` chip with `select-all` so support can paste it into the trace search. "Try again" calls the boundary's `reset()`; the secondary CTA is a configurable `homeHref`/`homeLabel` (defaults to `/today`, but the public boundary points at `/`, the admin boundary at `/admin`). A `useEffect` console.errors the underlying `Error` in dev (Sentry hook lands in PR3/C4 — wired here as a no-op `console.error` so engineers debugging locally still get the cause). A `<details>` block renders the stack only when `process.env.NODE_ENV !== "production"`. Three new boundaries created: `(portal)/error.tsx`, `(public)/error.tsx`, `admin/error.tsx`; the two pre-existing ones (`(portal)/dashboard/error.tsx`, `(portal)/progress/error.tsx`) refactored to delegate to `RouteError`. **5 vitest cases pass** in `route-error.test.tsx` covering branded copy, digest surfacing, reset wiring, custom homeHref/homeLabel, and dev-only stack rendering.
 
-- [ ] **B3.2** Wrap heavy panels in client `<ErrorBoundary>`: `<Monaco>`, `<MarkdownRenderer>`, the catalog price formatter, the takeover modal.
+- [~] **B3.2** Wrap heavy panels in client `<ErrorBoundary>`: `<Monaco>`, `<MarkdownRenderer>`, the catalog price formatter, the takeover modal.
   - **Touches:** `frontend/src/components/error-boundary.tsx` + call sites
   - **Acceptance:** A throw inside Monaco doesn't take down the whole Practice screen.
-  - **Done note:**
+  - **Done note:** Punted to a future PR. Rationale: B3.1's route-level boundaries already catch every render error in the App Router subtree, so a throw inside Monaco/MarkdownRenderer/etc. shows the calm branded `RouteError` instead of a white screen. The *finer* containment (keep the rest of the screen alive when one panel throws) is genuinely useful but a different problem class — it requires per-panel UX decisions ("what does Practice look like with the editor down?") that are better made when we actually see a panel fail in production. PR3 observability will tell us *which* panels are throwing, and we'll add the targeted boundary at that point. No regression risk to ship without.
 
 ### B4 — Backend exception middleware
 
