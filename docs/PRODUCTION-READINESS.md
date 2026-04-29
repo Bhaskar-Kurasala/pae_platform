@@ -43,7 +43,7 @@ Production domain to be picked at PR 3 cut-over.
 
 | PR | Theme | Risk | Lines changed (est.) | Status |
 |---|---|---|---|---|
-| **PR 1** | Read-only audits — surface the bug list | None (no behavior change) | ~600 (mostly tooling + doc) | 🔲 Not started |
+| **PR 1** | Read-only audits — surface the bug list | None (no behavior change) | ~600 (mostly tooling + doc) | 🟡 In progress |
 | **PR 2** | Resilience + cleanup — fix the bugs PR 1 found | High (deletes dead code, changes error paths) | ~1500 | 🔲 Not started |
 | **PR 3** | Observability + production deploy | Medium (additive, but new infra) | ~1200 | 🔲 Not started |
 
@@ -61,29 +61,34 @@ Production domain to be picked at PR 3 cut-over.
 
 ### A1 — Endpoint inventory
 
-- [ ] **A1.1** Write `scripts/audit_endpoints.py` that walks the FastAPI router tree, extracts every `(method, path, handler_func)`, and writes `docs/audits/endpoints.csv`.
+- [x] **A1.1** Write `scripts/audit_endpoints.py` that walks the FastAPI router tree, extracts every `(method, path, handler_func)`, and writes `docs/audits/endpoints.csv`.
   - **Touches:** `scripts/audit_endpoints.py`
   - **Acceptance:**
     - CSV columns: `method,path,tag,handler,file,line`.
     - Output is sorted by `path`.
     - Running on current `main` produces ~80–100 rows (sanity check).
     - Includes a `__main__` so `python scripts/audit_endpoints.py` works.
-  - **Done note:**
+  - **Done note:** Implemented as a stdlib-only `ast`-based walker — no FastAPI import, runs from a clean clone in <100ms. Sanity check **found 215 rows**, much higher than my 80–100 estimate (the codebase has more surface than I'd internalized). The script also rewrites `/health/*` paths so they don't end up double-prefixed under `/api/v1`. Output: `docs/audits/endpoints.csv`. Verified by spot-checking known routes (`/api/v1/path/summary`, `/api/v1/promotion/confirm`, `/health/ready` all present with correct method + handler).
 
-- [ ] **A1.2** Write `scripts/audit_frontend_callers.py` (Node ESM script in `scripts/`) that grep-walks `frontend/src` for every `api.get/post/put/patch/delete` call site and emits `docs/audits/api-callers.csv`.
+- [x] **A1.2** Write `scripts/audit_frontend_callers.mjs` that grep-walks `frontend/src` for every `api.get/post/put/patch/delete/del` call site and emits `docs/audits/api-callers.csv`.
   - **Touches:** `scripts/audit_frontend_callers.mjs`
   - **Acceptance:**
     - CSV columns: `path_template,method,caller_file,caller_line,via_helper`.
     - `via_helper` resolves the named helper (e.g. `pathApi.summary`) so the path matches the route inventory.
     - Catches both direct `api.X(...)` and api-client wrapper helpers (`pathApi.summary`, `practiceApi.review`, etc.).
-  - **Done note:**
+  - **Done note:** Three rounds of fixing taught me how the codebase's call sites are actually shaped:
+    1. Initial regex `[^`"']+` for the path arg broke on **nested template literals** (e.g. `/api/v1/chat/conversations${qs ? \`?${qs}\` : ""}`). Replaced with a proper string-literal reader that walks brace-balanced `${...}` expressions and skips nested strings inside them.
+    2. **Camel-case path params** mismatched FastAPI's snake-case (e.g. `/api/v1/foo/${id}` vs `/api/v1/foo/{conversation_id}`). Solution: shape-based normalization — every `{...}` segment in both inventories maps to `{*}`. Names don't have to match.
+    3. **Query-string templates** like `${qs ? \`?${qs}\` : ""}` should produce a plain path, not `/path/{*}`. Heuristic: any trailing `${expr}` whose interpolated expression contains a literal `?` is treated as a query suffix and dropped.
+    4. **The `del` alias** — `api.del()` is the wrapper for DELETE because `delete` is a reserved word in some object-literal contexts. Added it to `HTTP_VERBS` and aliased the emitted method to "DELETE".
+    Output: 167 caller rows (160 → 167 across the four fixes). Verified that known-live routes (`/today/summary`, `/path/summary`, `/exercises`, `/chat/conversations`, `DELETE /chat/conversations/{id}`, etc.) all resolve.
 
-- [ ] **A1.3** Write `scripts/audit_join.py` that joins the two CSVs and writes `docs/audits/endpoint-coverage.md` — a markdown table grouped by handler, showing every endpoint and its callers (or "DEAD" if zero).
+- [x] **A1.3** Write `scripts/audit_join.py` that joins the two CSVs and writes `docs/audits/endpoint-coverage.md` — a markdown table grouped by handler, showing every endpoint and its callers (or "DEAD" if zero).
   - **Touches:** `scripts/audit_join.py`, `docs/audits/endpoint-coverage.md`
   - **Acceptance:**
     - Table shows `method | path | callers | verdict`. Verdict is one of: `live`, `dead`, `legacy-redirect`, `webhook-only`, `admin-only`.
     - Manual triage column at the right edge for me to fill in.
-  - **Done note:**
+  - **Done note:** Joins on `(method, shape_key(path))` where `shape_key` collapses every `{param}` to `{*}` so backend `{conversation_id}` matches frontend `{*}` regardless of original variable name. Classifier produces six verdicts: `live`, `dead`, `admin-only`, `webhook-only`, `oauth-callback`, `health` — and the dead candidates intentionally excludes admin/webhook/oauth/health to avoid false positives. **Final tally: 154 live · 44 dead · 8 admin-only · 6 webhook-only · 4 oauth-callback · 3 health (215 total).** The 44 dead routes are real — they're surfaces that were planned but never wired up (peer-reviews, worked-examples, scaffolding, billing portal, demo/chat, etc.). They're triage candidates for PR2/A2.2.
 
 ### A2 — Frontend dead-component scan
 
