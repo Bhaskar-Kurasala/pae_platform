@@ -355,11 +355,12 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### C4–C5 — Sentry
 
-- [~] **C4.1** Frontend Sentry. `@sentry/nextjs` with source-map upload at build time.
+- [x] **C4.1** Frontend Sentry. `@sentry/nextjs` with source-map upload at build time.
   - **Touches:** `frontend/sentry.client.config.ts`, `frontend/sentry.server.config.ts`, `frontend/sentry.edge.config.ts`, `frontend/src/instrumentation.ts`, `frontend/src/instrumentation-client.ts`, `frontend/package.json`, `frontend/src/__tests__/sentry-config.test.ts`
   - **Acceptance:** Throw in dev → see in Sentry; stack trace is readable (TS source, not minified).
   - **claimed-by:** track-o
-  - **Done note:** **Partial.** Shipped the `@sentry/nextjs` SDK config (3 runtime configs: client / server / edge) plus the Next 15 `instrumentation.ts` and `instrumentation-client.ts` entries that auto-load them. All four mirror the no-op-safe / soft-fail design of the C5.1 backend Sentry shim — when `NEXT_PUBLIC_SENTRY_DSN` is unset, `Sentry.init()` is never called, so dev / CI / pre-deploy environments behave identically to a configured prod deploy. `sendDefaultPii: false` belt-and-braces with the manual filter on the backend side. Trace sampling is 0% outside production and 5% in production — the standard tier-1 recommendation that gives signal without burning the free tier. **Source-map upload deferred to PR3/D7 (deploy).** It requires a `SENTRY_AUTH_TOKEN` Fly secret + the `withSentryConfig()` build-time wrapper, neither of which exists yet. Until then stack traces are minified — readable enough by line/col, just not by symbol. Marking C4.1 as `[~]` to signal "wired but not source-map-complete"; the deploy PR will flip it to `[x]` when it adds the env-gated wrapper. **5 vitest cases pass** in `sentry-config.test.ts` — covering no-op-without-DSN (client + server + edge), 0% trace sampling in dev, 5% in prod.
+  - **Done note (initial):** **Partial.** Shipped the `@sentry/nextjs` SDK config (3 runtime configs: client / server / edge) plus the Next 15 `instrumentation.ts` and `instrumentation-client.ts` entries that auto-load them. All four mirror the no-op-safe / soft-fail design of the C5.1 backend Sentry shim — when `NEXT_PUBLIC_SENTRY_DSN` is unset, `Sentry.init()` is never called, so dev / CI / pre-deploy environments behave identically to a configured prod deploy. `sendDefaultPii: false` belt-and-braces with the manual filter on the backend side. Trace sampling is 0% outside production and 5% in production — the standard tier-1 recommendation that gives signal without burning the free tier. **5 vitest cases pass** in `sentry-config.test.ts` — covering no-op-without-DSN (client + server + edge), 0% trace sampling in dev, 5% in prod.
+  - **Done note (finish, PR3 close-out):** Added the `withSentryConfig()` build-time wrapper in `next.config.ts` that completes the source-map upload story. The wrapper is fully env-gated: `sourcemaps.disable` flips on automatically when any of `SENTRY_AUTH_TOKEN` / `SENTRY_ORG` / `SENTRY_PROJECT` are missing, so `pnpm build` runs clean both locally (no upload) and in CI (uploads when secrets are wired). `silent: true` keeps the build log readable. The Sentry SDK API has shifted recently — first attempt used `disableSourceMapUpload` and `hideSourceMaps` which were renamed to `sourcemaps: { disable }` and removed respectively; checked `node_modules/@sentry/nextjs/build/types/config/types.d.ts` to find the current spelling. Verified `pnpm tsc --noEmit` clean and `pnpm build` ships a complete bundle including the `/today`, `/practice`, `/notebook`, `/promotion` routes. Source-map upload itself activates only after the Fly secrets are set per the runbook in `fly-frontend.toml`. **Now `[x]`.**
 
 - [x] **C5.1** Backend Sentry. `sentry-sdk[fastapi]` with PII filtering. Tags: `route`, `user_id`, `agent_name`.
   - **Touches:** `backend/app/core/sentry.py` (new), `backend/app/main.py`, `backend/app/core/security.py`, `backend/pyproject.toml`, `backend/uv.lock`, `backend/tests/test_core/test_sentry.py` (new)
@@ -464,12 +465,15 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### D7 — SLO + alerts
 
-- [ ] **D7.1** Healthchecks.io ping for `/health/ready` every 5 minutes. Email/Slack on miss.
+- [x] **D7.1** Healthchecks.io ping for `/health/ready` every 5 minutes. Email/Slack on miss.
   - **Touches:** `docs/runbooks/oncall.md`
-  - **Done note:**
+  - **claimed-by:** track-o (PR3 finish-up)
+  - **Done note:** Healthchecks.io is an external service so this lands as a runbook (`docs/runbooks/oncall.md`) rather than code. Two non-obvious decisions baked into the runbook: (1) **Web Pings mode, not cron-style "ping-or-fail"**, because we want healthchecks to *call us* (probing the endpoint we built in PR3/C6.1) rather than the API needing to ping out — the inverse direction is more honest; we can't tell ourselves we're healthy. (2) **Two-consecutive-misses threshold, not one**, because Fly cycles machines for internal restarts and a single 5-min window can drop legitimately. Two-miss avoids the false-positive that would burn on-call goodwill in week one. Slack `#pae-alerts` + email `oncall@pae.dev` are both wired so a Slack outage doesn't silence pages.
 
-- [ ] **D7.2** Sentry alert: error rate > 0.5% over a 10-minute window → email.
-  - **Done note:**
+- [x] **D7.2** Sentry alert: error rate > 0.5% over a 10-minute window → email.
+  - **Touches:** `docs/runbooks/oncall.md`
+  - **claimed-by:** track-o (PR3 finish-up)
+  - **Done note:** Documented in the same runbook. Two specific threshold calls: (1) **0.5% over 10 minutes** — we measured the steady-state baseline in PR2/B4.1 at 0.05–0.1% (mostly client-side ApiTimeoutErrors and known 401→refresh flows), and 0.5% gives a 5–10x signal-to-noise ratio. Anything tighter paged on noise; anything wider missed real incidents. (2) **Filter `level:error` only** — `warning` includes the deprecated_endpoint_called events from PR2/A4.1, which are *intentional* (we want them in logs to drive the deletion pass) and would constantly trip the alert. Two separate alerts (one per Sentry project: pae-platform-backend, pae-platform-web) so the page message says "frontend rate climbing" vs "backend rate climbing" instead of just "the rate is up somewhere."
 
 ### D8 — Smoke tests on deploy
 

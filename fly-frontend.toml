@@ -1,0 +1,77 @@
+# PR3/D7 — Fly.io deploy config for the Next.js frontend.
+#
+# Separate Fly app from the API (`fly.toml`) so the two scale
+# independently. A frontend-only redeploy doesn't recycle live API
+# connections, and an API outage doesn't take the marketing pages
+# down.
+#
+# Setup (one-time):
+#   1. fly apps create pae-platform-web
+#   2. fly secrets set --app pae-platform-web \
+#        NEXT_PUBLIC_API_URL=https://pae-platform.fly.dev    \
+#        NEXT_PUBLIC_SENTRY_DSN=https://...@sentry.io/...    \
+#        NEXT_PUBLIC_SENTRY_ENV=production                   \
+#        NEXT_PUBLIC_POSTHOG_KEY=phc_...                     \
+#        NEXT_PUBLIC_POSTHOG_HOST=https://...                \
+#        # Optional — if unset, withSentryConfig in next.config.ts
+#        # skips source-map upload and stack traces stay minified
+#        # (still readable by line/col, just not by symbol):
+#        SENTRY_AUTH_TOKEN=...                               \
+#        SENTRY_ORG=...                                      \
+#        SENTRY_PROJECT=...
+#
+#   3. fly deploy --config fly-frontend.toml --dockerfile frontend/Dockerfile
+
+app = "pae-platform-web"
+
+primary_region = "iad"            # same region as the API for low-latency BFF calls.
+
+kill_signal = "SIGTERM"
+kill_timeout = "10s"              # Next standalone shuts down quickly; no DB drain to worry about.
+
+[build]
+  dockerfile = "frontend/Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  NEXT_TELEMETRY_DISABLED = "1"
+  NEXT_PUBLIC_SENTRY_ENV = "production"
+
+# ─── HTTP service ───────────────────────────────────────────────────
+# Next standalone server listens on PORT (3000 by default per the
+# Dockerfile). Fly handles TLS at the edge.
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1        # one always-warm so the marketing page is fast.
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 300              # Next can handle a lot more than the API per CPU.
+    hard_limit = 400
+
+# Next standalone exposes /api/health for liveness OOTB; keep this
+# light so Fly probes don't keep the machine warm artificially —
+# auto_stop_machines reverses that economy.
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "get"
+  path = "/"
+  protocol = "http"
+  timeout = "5s"
+  type = "http"
+
+# ─── VM sizing ──────────────────────────────────────────────────────
+# Next standalone is much lighter than the API — 256MB easily fits
+# the server bundle + warm caches. Bump if SSR pages start OOMing.
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256
+
+[processes]
+  app = ""    # use Dockerfile CMD: `node server.js`
