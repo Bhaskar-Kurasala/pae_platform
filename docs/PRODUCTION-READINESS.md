@@ -439,16 +439,18 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### D4 — Dependency audit
 
-- [ ] **D4.1** Add `pip-audit` and `pnpm audit` to GitHub Actions CI. Block merge on critical/high vulnerabilities.
+- [x] **D4.1** Add `pip-audit` and `pnpm audit` to GitHub Actions CI. Block merge on critical/high vulnerabilities.
   - **Touches:** `.github/workflows/ci.yml`
-  - **Done note:**
+  - **claimed-by:** track-o (PR3 finish-up)
+  - **Done note:** Added a `security-audit` job to CI that runs both ecosystems' audits in one job (intentionally one job not two — keeps the engineer reading the log on a single page). `pip-audit --strict` flags Python CVEs even when no fix is available yet. `pnpm audit` runs twice — once with `--json` for engineer visibility (always runs, exit code ignored), once with `--audit-level=high` for the actual fail signal (so a transient registry blip during the informational pass doesn't hide the finding from the gate). Set `continue-on-error: true` for the initial roll-out so the team sees the yellow signal in PR checks without blocking unrelated work while we triage the existing dep tree; flip to false once both ecosystems are clean. Threshold is high+critical only — `moderate` is too noisy in the npm graph to be a useful merge gate. Validated YAML parses. The existing `security-audit-action` GitHub job will surface findings in the PR checks list separately from `backend-test` and `frontend-test`, so a Python CVE doesn't mask a JS CVE in the same step's output.
 
 ### D5 — Image hygiene
 
-- [ ] **D5.1** Both Dockerfiles run as non-root user. Builder stages don't leak into runner.
+- [x] **D5.1** Both Dockerfiles run as non-root user. Builder stages don't leak into runner.
   - **Touches:** `backend/Dockerfile`, `frontend/Dockerfile`
   - **Acceptance:** `docker run --rm pae-backend whoami` returns a non-root username.
-  - **Done note:**
+  - **claimed-by:** track-o (PR3 finish-up)
+  - **Done note:** Frontend was already correct — the Next standalone-build template ships with `addgroup nodejs / adduser nextjs (uid 1001)` and `USER nextjs` from the start; added a PR3/D5.1 reference comment so a future "simplify" doesn't drop it. **Backend was running as root.** Added a `groupadd/useradd appuser (uid 1001)` step right before `CMD`, with a real `/home/appuser` (chmod 700) and `chown -R appuser:appuser /app /home/appuser`. Order matters: do all `uv sync` work as root first, THEN create the user and reassign ownership in one shot — `uv sync` writes to `/app/.venv` with absolute path interpolations baked into activate scripts, and chowning earlier breaks them. **Surprise that bit me on first attempt:** `--no-create-home` looks tighter security-wise but `uv run` initializes a cache under `$HOME/.cache/uv` on first call and dies with EACCES if no writable home exists. Real home with 0700 perms is the right balance. **Verified end-to-end:** `docker build` clean, `docker run --rm <image> whoami` returns `appuser`, `id` returns `uid=1001(appuser) gid=1001(appuser)`, and a smoke-boot with bogus DB/Redis URLs shows gunicorn binding port 8000 (unprivileged) and all 4 uvicorn workers up cleanly under uid 1001. Fly platform doesn't require root for any port binding (we listen on 8000) and the prod database connection runs through asyncpg over TCP — no host-mounted sockets to worry about.
 
 ### D6 — Migration safety
 

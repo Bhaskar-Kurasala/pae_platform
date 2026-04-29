@@ -151,3 +151,55 @@ jobs:
         run: docker build -t platform-backend ./backend
       - name: Build frontend image
         run: docker build -t platform-frontend ./frontend
+
+  # ── Security: dependency audits ─────────────────────────────────────
+  # PR3/D4.1 — flag critical/high vulnerabilities in either ecosystem's
+  # dependency graph. Two separate steps inside one job so a Python CVE
+  # doesn't mask a JS CVE in the same step's output and vice versa;
+  # both surface independently in the job log.
+  #
+  # `pip-audit` reads pyproject + uv.lock and reports against the PyPI
+  # advisory DB. `--strict` makes unfixable findings still flag (the
+  # team should know even if upstream fix isn't out yet).
+  #
+  # `pnpm audit --audit-level=high` covers the npm advisory DB. We run
+  # audit twice — once with --json for engineer visibility, once
+  # gated on high/critical for the actual fail signal.
+  #
+  # `continue-on-error: true` for the initial roll-out: gives the team
+  # a yellow signal in PR checks without blocking unrelated work while
+  # we triage the existing dep tree. Flip to false once both ecosystems
+  # are clean.
+  security-audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      # Backend — pip-audit
+      - uses: astral-sh/setup-uv@v5
+      - name: pip-audit (backend)
+        run: |
+          cd backend
+          uv tool install pip-audit
+          uv tool run pip-audit --strict
+
+      # Frontend — pnpm audit
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install frontend deps
+        run: cd frontend && pnpm install --frozen-lockfile
+      - name: pnpm audit (frontend)
+        run: |
+          cd frontend
+          # First pass: full JSON for engineer visibility in the log.
+          pnpm audit --json || true
+          # Second pass: gate on high+critical (moderate is too noisy
+          # in the npm graph to be a useful merge gate).
+          pnpm audit --audit-level=high

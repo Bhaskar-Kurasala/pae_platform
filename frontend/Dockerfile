@@ -29,6 +29,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# PR3/D5.1 — non-root runtime. This was already in place from the
+# original Next standalone Dockerfile pattern; keeping the comment
+# in case anyone tries to "simplify" it later. Verify with:
+# `docker run --rm <image> whoami` → "nextjs".
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
