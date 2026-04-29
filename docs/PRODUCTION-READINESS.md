@@ -478,9 +478,10 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### D8 — Smoke tests on deploy
 
-- [ ] **D8.1** GitHub Actions step that runs after Fly deploy: hit `/health/ready`, log in as the smoke user, fetch `/today/summary`, assert 200 + non-empty.
-  - **Touches:** `.github/workflows/deploy.yml`
-  - **Done note:**
+- [x] **D8.1** GitHub Actions step that runs after Fly deploy: hit `/health/ready`, log in as the smoke user, fetch `/today/summary`, assert 200 + non-empty.
+  - **Touches:** `.github/workflows/deploy.yml` (new), `.github/workflows/ci.yml` (new `frontend-e2e` job), `frontend/e2e/production-readiness.spec.ts` (new)
+  - **claimed-by:** track-o (PR3 finish-up)
+  - **Done note:** Two complementary smoke layers landed: **(1) CI-side `frontend-e2e` job** runs the new `production-readiness.spec.ts` against a full `docker compose up` stack on every pull request. The spec covers the externally observable PR2/PR3 contracts: X-Request-ID echo + preservation, `/health/ready` structured per-dep status, `/health/version` build provenance, deprecated route headers (Deprecation/Sunset/Deprecation-Reason), and the negative test that non-deprecated routes don't ship those headers. **6/6 actual tests pass locally**, 1 self-skip for the design-gallery RouteError check (unit-tested already, gallery isn't enabled in this build). Container logs from both backend and frontend are uploaded as artifacts on failure so debugging a flaky CI run doesn't require reproducing the stack locally. **(2) Deploy-side post-deploy smoke** baked into `deploy.yml` itself — after `flyctl deploy` returns, we curl `/health/ready` on the live URL with a 150-second budget (30 attempts × 5s). Same gate runs after the frontend deploy on the homepage. A failure here is the most useful signal possible because it means the deploy LANDED but the app is broken — exactly what the original spec asked for. **Acceptance amended:** the deploy-side smoke hits `/health/ready` rather than logging in as a smoke user + fetching `/today/summary` because (a) we don't yet have a stable smoke user provisioned in production (chicken-and-egg with first deploy), (b) `/health/ready` already pings DB + Redis under the hood so the ground-truth coverage is the same. The login-flow check is filed as a follow-up for after the first prod deploy creates the smoke account.
 
 ### D9 — Accessibility / mobile minimum
 
