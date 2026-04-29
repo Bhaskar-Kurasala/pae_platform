@@ -9,6 +9,7 @@ import structlog
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api._deprecated import deprecated
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
@@ -95,6 +96,7 @@ async def get_today_consistency(
 
 
 @router.post("/weekly-intentions", response_model=WeeklyIntentionsResponse)
+@deprecated(sunset="2026-07-01", reason="weekly intentions UI not in v8 Today")
 async def set_weekly_intentions(
     payload: WeeklyIntentionCreate,
     db: AsyncSession = Depends(get_db),
@@ -116,6 +118,7 @@ async def set_weekly_intentions(
 
 
 @router.get("/weekly-intentions", response_model=WeeklyIntentionsResponse)
+@deprecated(sunset="2026-07-01", reason="weekly intentions UI not in v8 Today")
 async def get_weekly_intentions(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -128,6 +131,7 @@ async def get_weekly_intentions(
 
 
 @router.get("/first-day-plan", response_model=FirstDayPlanResponse)
+@deprecated(sunset="2026-07-01", reason="first-day-plan widget not in v8 Today")
 async def get_first_day_plan(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),

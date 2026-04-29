@@ -2,6 +2,7 @@ import structlog
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api._deprecated import deprecated
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
@@ -36,6 +37,7 @@ async def list_questions() -> DiagnosticQuestionsResponse:
 
 
 @router.post("/cta-decision", response_model=DiagnosticCTAResponse)
+@deprecated(sunset="2026-07-01", reason="diagnostic legacy -- superseded by readiness events")
 async def record_diagnostic_cta(
     payload: DiagnosticCTARequest,
     db: AsyncSession = Depends(get_db),

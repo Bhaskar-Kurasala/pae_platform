@@ -18,6 +18,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api._deprecated import deprecated
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user
@@ -100,6 +101,7 @@ def _require_flag() -> None:
 
 
 @router.post("/sessions", response_model=StartDiagnosticResponse)
+@deprecated(sunset="2026-07-01", reason="diagnostic legacy -- superseded by readiness events")
 async def post_start_session(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -125,6 +127,7 @@ async def post_start_session(
     "/sessions/{session_id}/turn",
     response_model=TurnResponse,
 )
+@deprecated(sunset="2026-07-01", reason="diagnostic legacy -- superseded by readiness events")
 async def post_turn(
     session_id: uuid.UUID,
     payload: TurnRequest,
@@ -162,6 +165,7 @@ async def post_turn(
     "/sessions/{session_id}/finalize",
     response_model=FinalizeResponse,
 )
+@deprecated(sunset="2026-07-01", reason="diagnostic legacy -- superseded by readiness events")
 async def post_finalize_session(
     session_id: uuid.UUID,
     payload: FinalizeRequest,
@@ -231,6 +235,7 @@ async def post_abandon_session(
 
 
 @router.get("/sessions", response_model=PastDiagnosesResponse)
+@deprecated(sunset="2026-07-01", reason="diagnostic legacy -- superseded by readiness events")
 async def get_past_diagnoses(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -251,6 +256,7 @@ async def get_past_diagnoses(
     "/sessions/{session_id}/next-action/click",
     response_model=NextActionClickResponse,
 )
+@deprecated(sunset="2026-07-01", reason="diagnostic legacy -- superseded by readiness events")
 async def post_next_action_click(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -278,6 +284,7 @@ async def post_next_action_click(
     "/sessions/{session_id}/check-completion",
     response_model=CompletionCheckResponse,
 )
+@deprecated(sunset="2026-07-01", reason="diagnostic legacy -- superseded by readiness events")
 async def post_check_completion(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -307,6 +314,7 @@ async def post_check_completion(
 
 
 @router.get("/north-star", response_model=NorthStarRateResponse)
+@deprecated(sunset="2026-07-01", reason="diagnostic legacy -- superseded by readiness events")
 async def get_north_star_rate(
     window_days: int = 14,
     db: AsyncSession = Depends(get_db),

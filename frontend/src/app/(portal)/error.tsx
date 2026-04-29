@@ -2,7 +2,11 @@
 
 import { RouteError } from "@/components/errors/route-error";
 
-export default function DashboardError({
+/**
+ * Portal-wide error boundary. Catches any uncaught render exception in
+ * any (portal) route and shows the branded fallback. PR2/B3.1.
+ */
+export default function PortalError({
   error,
   reset,
 }: {

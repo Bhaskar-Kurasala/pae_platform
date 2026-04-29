@@ -9,11 +9,12 @@ import uuid
 from datetime import UTC, datetime
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.core.security import get_current_user
 from app.models.notebook_entry import NotebookEntry
 from app.models.user import User
@@ -131,6 +132,45 @@ async def save_to_notebook(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> NotebookEntryOut:
+    # PR2/B6.1 — Redis idempotency. Two clicks of "Save" within 60s on
+    # the same payload produce the same NotebookEntry, not two. The hash
+    # covers the canonicalized payload, so saving the SAME message with
+    # an EDITED user_note 10 minutes later still creates a fresh entry
+    # (intentional — that's a real second action). Practice/Studio saves
+    # already mint a unique message_id per click, but a duplicate POST
+    # caused by network jitter would still produce two rows; this lock
+    # closes that hole too.
+    from app.services.idempotency import (
+        DEFAULT_TTL_SECONDS,
+        fetch_or_lock,
+        make_request_hash,
+        store_result,
+    )
+
+    request_hash = make_request_hash(
+        user_id=str(current_user.id),
+        payload={
+            "message_id": payload.message_id,
+            "conversation_id": payload.conversation_id,
+            "content": payload.content,
+            "title": payload.title,
+            "user_note": payload.user_note,
+            "source_type": payload.source_type or "chat",
+            "topic": payload.topic,
+            "tags": sorted(payload.tags or []),
+        },
+    )
+    replayed, prior = await fetch_or_lock(
+        prefix="notebook_save", request_hash=request_hash
+    )
+    if replayed and prior is not None:
+        log.info(
+            "notebook.saved_idempotent_replay",
+            user_id=str(current_user.id),
+            entry_id=prior.get("id"),
+        )
+        return NotebookEntryOut.model_validate(prior)
+
     entry = NotebookEntry(
         user_id=current_user.id,
         message_id=payload.message_id,
@@ -179,11 +219,23 @@ async def save_to_notebook(
         )
 
     log.info("notebook.saved", user_id=str(current_user.id), entry_id=str(entry.id))
-    return _to_out(entry)
+    out = _to_out(entry)
+    # PR2/B6.1 — populate the idempotency slot so a duplicate POST
+    # within the TTL replays this exact response instead of writing a
+    # second row. Best-effort: store_result swallows Redis failures.
+    await store_result(
+        prefix="notebook_save",
+        request_hash=request_hash,
+        result=out.model_dump(mode="json"),
+        ttl=DEFAULT_TTL_SECONDS,
+    )
+    return out
 
 
 @router.post("/summarize", response_model=NoteSummarizeResponse)
+@limiter.limit("15/minute")
 async def summarize_for_save(
+    request: Request,
     payload: NoteSummarizeRequest,
     current_user: User = Depends(get_current_user),
 ) -> NoteSummarizeResponse:

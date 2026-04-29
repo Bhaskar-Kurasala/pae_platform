@@ -4,6 +4,7 @@ import structlog
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api._deprecated import deprecated
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
@@ -49,6 +50,7 @@ async def chat(
 
 
 @router.get("/list", response_model=list[AgentInfo])
+@deprecated(sunset="2026-07-01", reason="no live UI caller -- admin lists via /admin/agents/health")
 async def list_agents(
     current_user: User = Depends(get_current_user),
 ) -> list[dict[str, str]]:

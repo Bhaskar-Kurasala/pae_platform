@@ -105,6 +105,44 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshInFlight;
 }
 
+// PR2/B5.3 — hard wall-clock cap on every API request that flows
+// through this helper. 30 seconds matches the backend's
+// `_LLM_TIMEOUT_S` so a stuck LLM call gives up at the same moment
+// on both sides; the user sees a deterministic "request took too
+// long" toast (PR2/B1.1) instead of a hung spinner.
+//
+// Streaming endpoints (chat SSE, anything that intentionally lives
+// >30s) MUST NOT use this helper. They wire their own
+// AbortController with their own lifetime.
+const REQUEST_TIMEOUT_MS = 30_000;
+
+class ApiTimeoutError extends Error {
+  constructor() {
+    super("Request took too long. Try again in a moment.");
+    this.name = "ApiTimeoutError";
+  }
+}
+
+/** Race a promise against an AbortController-driven timer. */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new ApiTimeoutError();
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -113,7 +151,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  let res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  let res = await fetchWithTimeout(
+    `${API_BASE}${path}`,
+    { ...init, headers },
+    REQUEST_TIMEOUT_MS,
+  );
 
   // On 401 with an existing token, attempt a single silent refresh + retry.
   // Skip for the refresh endpoint itself to avoid infinite loops.
@@ -121,7 +163,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const fresh = await refreshAccessToken();
     if (fresh) {
       const retryHeaders = { ...headers, Authorization: `Bearer ${fresh}` };
-      res = await fetch(`${API_BASE}${path}`, { ...init, headers: retryHeaders });
+      res = await fetchWithTimeout(
+        `${API_BASE}${path}`,
+        { ...init, headers: retryHeaders },
+        REQUEST_TIMEOUT_MS,
+      );
     }
   }
 
@@ -1678,4 +1724,4 @@ export const promotionApi = {
     api.post<PromotionConfirmResponse>("/api/v1/promotion/confirm", {}),
 };
 
-export { ApiError, API_BASE, sanitizeNext };
+export { ApiError, ApiTimeoutError, API_BASE, sanitizeNext };
