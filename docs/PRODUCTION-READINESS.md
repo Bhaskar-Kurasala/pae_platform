@@ -45,7 +45,7 @@ Production domain to be picked at PR 3 cut-over.
 |---|---|---|---|---|
 | **PR 1** | Read-only audits — surface the bug list | None (no behavior change) | ~2200 (tooling + tests + doc) | ✅ Merged (`1786f65`) |
 | **PR 2** | Resilience + cleanup — fix the bugs PR 1 found | High (deletes dead code, changes error paths) | ~1500 | ✅ Merged (`44b29c6`) |
-| **PR 3** | Observability + production deploy | Medium (additive, but new infra) | ~1200 | 🟡 In progress (3 parallel tracks) |
+| **PR 3** | Observability + production deploy | Medium (additive, but new infra) | ~1200 | 🟢 Substantially landed (`5f9e262`) — D4.1, D5.1, screen-level C3.2 events still pending |
 
 **Sequencing rule:** No agent starts a task in PR N+1 until PR N is **merged and verified in production**. This prevents agents stomping on each other and ensures every PR ships a complete, testable slice.
 
@@ -57,9 +57,9 @@ PR 3 is the first PR where parallelism actually pays off — most tasks have non
 
 | Track | Owner-agent | Tasks | Branch | Status |
 |---|---|---|---|---|
-| **O — Observability** | (claim) | C1, C2, C3, C4, C5, C7 | `prod/pr3-track-o` | 🔲 |
-| **H — Health & Ops** | (claim) | C6, C8, D6, D8 | `prod/pr3-track-h` | 🔲 |
-| **D — Deploy & Infra** | (claim) | **D1 (backups, do first)**, D2, D3, D4, D5, D7 | `prod/pr3-track-d` | 🔲 |
+| **O — Observability** | track-o (this session) | C1.1 ✅ · C2.1 ✅ · C3.1 ✅ · C3.2 [~] · C4.1 [~] · C5.1 ✅ · C7.1 ✅ | `prod/pr3-track-o` | ✅ Merged (`5f9e262`) |
+| **H — Health & Ops** | track-h (background agent) | C6.1+C6.2 ✅ · C6.3 ✅ · C8.1 ✅ · D6.1 ✅ | `prod/pr3-track-h` | ✅ Merged (`374336f`) |
+| **D — Deploy & Infra** | track-d (background agent) | **D1.1+1.2+1.3 ✅** · D2.1+2.2 ✅ · D3.1+3.2 ✅ · D4.1 🔲 · D5.1 🔲 · D7 🔲 | `prod/pr3-track-d` | ✅ Merged (`19ab8b7`) — D4/D5/D7 follow-up |
 
 **Coordination protocol for PR 3 tracks:**
 1. Each track works on its own branch off latest `main`. Daily rebase.
