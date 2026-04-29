@@ -1,4 +1,20 @@
-import { cookies } from "next/headers";
+"use client";
+
+/**
+ * /admin/audit-log — recent agent_actions feed.
+ *
+ * Was previously a server component reading `access_token` from
+ * cookies — but that cookie is never set in this codebase (auth
+ * pipeline uses localStorage; only `auth_role` is cookified for
+ * middleware routing). Server fetch always 401'd silently and the
+ * page rendered the "No agent actions recorded yet." empty state
+ * forever. Converting to a client component using the same
+ * useQuery + api.get pattern as the other working admin screens.
+ */
+
+import { useQuery } from "@tanstack/react-query";
+
+import { api } from "@/lib/api-client";
 
 interface AuditItem {
   id: string;
@@ -8,20 +24,6 @@ interface AuditItem {
   status: string;
   duration_ms: number | null;
   created_at: string;
-}
-
-async function getAuditLog(): Promise<AuditItem[]> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get("access_token")?.value;
-  const resp = await fetch(
-    `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/v1/admin/audit-log?limit=100`,
-    {
-      headers: { Authorization: `Bearer ${token ?? ""}` },
-      cache: "no-store",
-    },
-  );
-  if (!resp.ok) return [];
-  return resp.json() as Promise<AuditItem[]>;
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -38,8 +40,17 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-export default async function AuditLogPage() {
-  const items = await getAuditLog();
+export default function AuditLogPage() {
+  const { data, isLoading, isError, error } = useQuery<AuditItem[]>({
+    queryKey: ["admin", "audit-log"],
+    queryFn: () => api.get<AuditItem[]>("/api/v1/admin/audit-log?limit=100"),
+    // Audit-log is the kind of thing an admin tabs back to expecting
+    // it to be fresh; 30s keeps it lively without hammering the API.
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+
+  const items = data ?? [];
 
   return (
     <div className="p-6 md:p-8">
@@ -50,7 +61,13 @@ export default async function AuditLogPage() {
         </p>
       </div>
 
-      {items.length === 0 ? (
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : isError ? (
+        <p className="text-sm text-destructive">
+          Failed to load audit log: {(error as Error)?.message ?? "unknown error"}
+        </p>
+      ) : items.length === 0 ? (
         <p className="text-sm text-muted-foreground">No agent actions recorded yet.</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border">

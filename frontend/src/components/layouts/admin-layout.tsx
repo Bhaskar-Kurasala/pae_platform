@@ -5,14 +5,11 @@ import { usePathname } from "next/navigation";
 import {
   Activity,
   AlertTriangle,
-  BarChart3,
-  BookOpen,
   ClipboardList,
   Flame,
   LayoutDashboard,
   LineChart,
   MessageSquare,
-  Settings,
   Users,
   Zap,
 } from "lucide-react";
@@ -21,6 +18,14 @@ import { Separator } from "@/components/ui/separator";
 import { Kbd } from "@/components/ui/kbd";
 import { SkipToContent } from "@/components/layouts/skip-to-content";
 
+// Sidebar nav — every entry MUST point at a route that has a page.tsx.
+// Three previously-listed entries (`/admin/courses`, `/admin/analytics`,
+// `/admin/settings`) were aspirational scaffolding from earlier phases —
+// no page.tsx existed for any of them, so Next's prefetch on hover
+// 404'd and clicks landed on the global error boundary. Removed
+// pending the actual screens being built. The `/admin/courses/[id]/edit`
+// route still exists for editing a single course (linked from the
+// console's row actions), it just doesn't have a list page yet.
 const adminNavItems = [
   { href: "/admin", label: "Overview", icon: LayoutDashboard },
   { href: "/admin/pulse", label: "Pulse", icon: Activity },
@@ -28,12 +33,9 @@ const adminNavItems = [
   { href: "/admin/confusion", label: "Confusion", icon: Flame },
   { href: "/admin/at-risk", label: "At-risk", icon: AlertTriangle },
   { href: "/admin/feedback", label: "Feedback", icon: MessageSquare },
-  { href: "/admin/courses", label: "Courses", icon: BookOpen },
   { href: "/admin/agents", label: "Agents", icon: Zap },
-  { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/admin/audit-log", label: "Audit Log", icon: ClipboardList },
   { href: "/admin/content-performance", label: "Content Perf", icon: LineChart },
-  { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
 
 interface AdminLayoutProps {
