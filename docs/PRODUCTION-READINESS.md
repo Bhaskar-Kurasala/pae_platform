@@ -386,10 +386,10 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### C8 — Slow-query log
 
-- [ ] **C8.1** Set Postgres `log_min_duration_statement = 500` in the Neon dashboard / connection params. Log slow queries to Sentry as performance issues.
-  - **Touches:** `backend/app/core/database.py`, Neon config
+- [x] **C8.1** Set Postgres `log_min_duration_statement = 500` in the Neon dashboard / connection params. Log slow queries to Sentry as performance issues. claimed-by: track-h
+  - **Touches:** `backend/app/core/database.py`, `backend/tests/test_core/test_slow_query_log.py`
   - **Acceptance:** A deliberately slow query shows up in the slow-query log.
-  - **Done note:**
+  - **Done note:** Implemented as a SQLAlchemy `before_cursor_execute` / `after_cursor_execute` event pair on the engine's `sync_engine` facet — async engines dispatch cursor events on the sync side in 2.0, and the listener target has to match. `before_cursor_execute` stashes a `perf_counter()` timestamp on `context._query_start_perf`; `after_cursor_execute` reads it back, computes elapsed milliseconds, and emits a `log.warning("slow_query", duration_ms=..., threshold_ms=..., sql=..., params=..., executemany=...)` if elapsed exceeds the 500ms threshold. SQL and params are truncated at 500 / 200 chars respectively with a `…[+N chars]` sentinel so a 1MB blob doesn't blow up a log line. Threshold lives as `SLOW_QUERY_THRESHOLD_MS` constant — tunable via env if it ever needs tightening, but a constant is simpler for now (most aggregator queries finish <100ms p95). Two design notes worth recording: (1) deliberately app-side rather than Postgres-side `log_min_duration_statement` because the spec calls for a structlog `slow_query` event the app owns — Sentry / PostHog ingestion (PR3/C5) reads structlog, not Postgres logs. (2) The `_attach_slow_query_logger` helper is exposed (not name-mangled) so tests can reattach it to a scratch SQLite engine — they do, in `test_slow_query_log.py`. **4 unit tests pass** (truncate-passthrough, truncate-suffix, slow-emits, fast-quiet); structlog's stdout-via-PrintLoggerFactory means the slow-emits test asserts against `capsys.readouterr().out` and parses the JSON line. No conflict with existing SQLAlchemy event setup — the pre-existing engine code didn't register any cursor events. The Neon-side `log_min_duration_statement` config is intentionally NOT set here; that's runtime DB config Track D will configure when the Neon project is provisioned.
 
 ### D1 — Database backups (highest priority of the whole plan)
 
