@@ -409,14 +409,14 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### D2 — Secrets
 
-- [ ] **D2.1** Generate a 32-byte JWT secret. Document rotation procedure.
+- [x] **D2.1** Generate a 32-byte JWT secret. Document rotation procedure. claimed-by: track-d
   - **Touches:** `docs/runbooks/secret-rotation.md`
-  - **Done note:**
+  - **Done note:** Process docs only — no actual secrets in the repo. `docs/runbooks/secret-rotation.md` documents three equivalent generators (Python `secrets.token_urlsafe(32)`, `openssl rand -base64 32`, `head -c 32 /dev/urandom | base64`), the rotation triggers (quarterly hygiene, suspected leak, engineer departure, CVE), the sanity-check rules that match the D2.2 validator, and the hard-cutover Fly secrets procedure. Multi-secret graceful rotation (no forced re-login window) is captured as a follow-up — the current backend has a single `secret_key` and a graceful rotation needs a `secret_keys: list[str]` change that's out of scope for PR3/D2. The runbook also covers Anthropic / Razorpay / Neon / R2 / Sentry / PostHog rotations and includes a one-line-per-rotation log table at the bottom. **Section 2** of the runbook explicitly cross-references the D2.2 validator so an operator can sanity-check a candidate secret offline before pushing it to Fly.
 
-- [ ] **D2.2** Pydantic `production_required` validator: when `ENV=production`, refuses to boot if `JWT_SECRET`, `ANTHROPIC_API_KEY`, `DATABASE_URL`, `REDIS_URL` are missing or look like dev defaults.
-  - **Touches:** `backend/app/core/config.py`
+- [x] **D2.2** Pydantic `production_required` validator: when `ENV=production`, refuses to boot if `JWT_SECRET`, `ANTHROPIC_API_KEY`, `DATABASE_URL`, `REDIS_URL` are missing or look like dev defaults. claimed-by: track-d
+  - **Touches:** `backend/app/core/config.py`, `backend/tests/test_core/test_config.py`
   - **Acceptance:** Booting with `ENV=production` and a default JWT raises; with strong values, boots cleanly.
-  - **Done note:**
+  - **Done note:** Implemented as a `@model_validator(mode="after")` on `Settings` (not a per-field validator — we need to read `environment` and the four secrets on the same instance, plus the `database_url` / `redis_url` derived properties). When `environment.lower() != "production"` it's a no-op. In production it walks the four critical secrets and accumulates errors before raising so a single deploy attempt names every offending field — a partial fix that surfaces a new error on the next boot wastes wall-clock during the cutover. Dev-default detection uses a tight set of seven substrings (`changeme`, `test-secret`, `dev-secret`, `local-dev`, `sk-test-mock`, `postgres:postgres`, `masterkey123`) drawn from the actual placeholders shipped in our codebase — false-negative-biased to avoid flagging a strong random key. Case-insensitive. The error message points to `docs/runbooks/secret-rotation.md` so a frantic deploy operator has the fix in front of them. **15 unit tests in `tests/test_core/test_config.py`** cover dev/test/staging no-op paths, the happy production path with a Neon-style URL, every required secret individually broken, multi-error reporting, and the `_is_strong_secret` helper. All 15 pass via `docker cp` + `pytest tests/test_core/test_config.py`.
 
 ### D3 — CORS / cookies
 
