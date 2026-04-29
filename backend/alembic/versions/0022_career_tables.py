@@ -27,7 +27,14 @@ def upgrade() -> None:
     op.create_table(
         "resumes",
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("user_id", UUID(as_uuid=True), nullable=False, index=True),
+        # PR3/D6.1 — `index=True` was previously combined with the explicit
+        # `op.create_index("ix_resumes_user_id", ...)` two lines below,
+        # which on a fresh Postgres raises `DuplicateTableError` because
+        # SQLAlchemy auto-generates an index with the same name. Drop the
+        # implicit index here and let the explicit `create_index` own the
+        # naming. Same final schema state; just no longer rejected on a
+        # cold migration apply.
+        sa.Column("user_id", UUID(as_uuid=True), nullable=False),
         sa.Column("title", sa.String(255), nullable=False, server_default="My Resume"),
         sa.Column("summary", sa.Text(), nullable=True),
         sa.Column("skills_snapshot", sa.JSON(), nullable=True),

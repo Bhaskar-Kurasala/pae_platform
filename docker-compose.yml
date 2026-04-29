@@ -41,11 +41,18 @@ services:
       - ./backend/alembic:/app/alembic
       - ./backend/alembic.ini:/app/alembic.ini
     restart: unless-stopped
+    # PR3/C6.3 — readiness probe ensures the container is marked unhealthy
+    # only when the API can actually serve traffic. Hits `/health/ready`,
+    # which 200s when DB+Redis are reachable and 503s otherwise. The probe
+    # treats any non-2xx HTTP response as failure (urlopen raises
+    # `HTTPError` on 503, which exits the python -c with non-zero).
+    # `start_period` gives the app time for migrations + LLM client init.
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 20s
 
   # ── Celery Worker (async tasks) ──
   celery-worker:
