@@ -316,15 +316,15 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### C1–C2 — Request tracing + structured logs
 
-- [ ] **C1.1** Middleware in `backend/app/core/middleware.py` that:
+- [x] **C1.1** Middleware in `backend/app/core/middleware.py` that:
   1. Generates `request_id = uuid4().hex[:16]` if not present.
   2. Stores it on a contextvar so `structlog.get_logger()` calls auto-include it.
   3. Sets `X-Request-ID` on the response.
   4. Frontend `api-client.ts` reads `X-Request-ID` from every response and stashes it on a `lastRequestId` ref so error toasts can show it.
-  - **Touches:** `backend/app/core/request_id.py` (already exists from PR2/B4.1), `frontend/src/lib/api-client.ts` (new — capture + expose lastRequestId)
+  - **Touches:** `backend/app/core/request_id.py` (already shipped in PR2/B4.1), `frontend/src/lib/api-client.ts`, `frontend/src/lib/error-toast.ts` (new), `frontend/src/lib/providers.tsx` (now imports the extracted classifier), `frontend/src/lib/__tests__/api-client-request-id.test.ts`, `frontend/src/test/contracts/error-toasts.test.tsx`
   - **Acceptance:** Every log line for a request has the same `request_id`. UI errors show "Reference: abc123de" so support can search by it.
   - **claimed-by:** track-o
-  - **Done note:**
+  - **Done note:** Backend C1 piece (1-3) was already shipped in PR2/B4.1 — `RequestIDMiddleware` in `backend/app/core/request_id.py` clears + binds `structlog.contextvars` per request and echoes `X-Request-ID` on every response. The remaining C1 work was frontend (4) and toast surfacing. Three changes: (a) `api-client.ts::fetchWithTimeout` now reads `X-Request-ID` off every response and writes it to a module-scoped `lastRequestId`, exposed via `getLastRequestId()`. The `request<T>` failure path additionally stamps `requestId` onto every thrown `ApiError` so the toast classifier can prefer the per-error id (more accurate when toasts coalesce or fire async). (b) Extracted `showErrorToast` from `providers.tsx` into a new `lib/error-toast.ts` module. The PR2/B1.1 test (`error-toasts.test.tsx`) was previously re-deriving the classifier locally — the extraction lets the test exercise the *real* function so a regression there can't silently sneak through. (c) Added a `withReference(text, id)` helper that appends `Reference: <8-char-id>` to every toast when an id is available. The full UUID is shortened to its first 8 hex chars (no dashes) — enough to grep production logs, friendlier than the 36-char form. Three id sources, in priority order: `err.requestId` (response header captured at throw time) > `body.error.request_id` (PR2/B4.1 envelope) > `getLastRequestId()` (module fallback for non-ApiError paths like timeouts). **+4 tests** in `api-client-request-id.test.ts` covering capture-on-success, no-clobber, ApiError stamping, and the no-header case. **Updated `error-toasts.test.tsx`** to import the real classifier and added 4 reference-suffix cases (per-error id, fallback to module getter, no-id case, header-id beats envelope-id when both present). All 15 toast tests pass; 10 adjacent api-client tests still green.
 
 - [ ] **C2.1** Audit every `except` block. Every one logs with structured fields: `event=...`, `user_id=...`, `request_id=...`, plus relevant context. No bare `except: pass`. No `print`.
   - **Touches:** `backend/app/**/*.py`

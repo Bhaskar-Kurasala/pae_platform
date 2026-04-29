@@ -5,10 +5,32 @@ class ApiError extends Error {
     public status: number,
     message: string,
     public body?: unknown,
+    public requestId?: string,
   ) {
     super(message);
     this.name = "ApiError";
   }
+}
+
+// PR3/C1.1 — last X-Request-ID we saw on any API response. The backend
+// (RequestIDMiddleware in app/core/request_id.py, shipped in PR2/B4.1)
+// echoes a UUID4 in the X-Request-ID header on every response. We stash
+// the latest one in module scope so error toasts can show it as a
+// "Reference:" tag students can paste to support, even when the failure
+// path is non-ApiError (network blips, ApiTimeoutError, etc.) and so
+// has no body to read it out of.
+//
+// `getLastRequestId()` is the one read API; `_setLastRequestId` is
+// `_`-prefixed to flag it as internal-only — only the api-client itself
+// should write it.
+let lastRequestId: string | null = null;
+
+export function getLastRequestId(): string | null {
+  return lastRequestId;
+}
+
+function _setLastRequestId(id: string | null): void {
+  if (id) lastRequestId = id;
 }
 
 interface StoredAuth {
@@ -132,7 +154,14 @@ async function fetchWithTimeout(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    // PR3/C1.1 — capture the trace ID so error toasts can ship it.
+    // Header may be cased differently across fetch implementations;
+    // Headers.get() is case-insensitive per Fetch spec but be explicit.
+    _setLastRequestId(
+      res.headers.get("X-Request-ID") ?? res.headers.get("x-request-id"),
+    );
+    return res;
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       throw new ApiTimeoutError();
@@ -193,7 +222,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     } else {
       message = res.statusText;
     }
-    throw new ApiError(res.status, message, detail);
+    // PR3/C1.1 — attach the X-Request-ID so the toast classifier can
+    // surface "Reference: abc123de" without re-reading module state.
+    const requestId =
+      res.headers.get("X-Request-ID") ??
+      res.headers.get("x-request-id") ??
+      undefined;
+    throw new ApiError(res.status, message, detail, requestId ?? undefined);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
