@@ -83,6 +83,36 @@ describe("stripMarkdownToText", () => {
   });
 });
 
+// PR1/A5.1 — regression: verify the chat-sidebar-title sanitization
+// pipeline (`stripMarkdownToText` → `truncateAtWord`) produces clean
+// titles from raw markdown. The bug this guards against: a question
+// that asks "**why does `asyncio.gather` work?**" used to ship its `**`
+// and backticks straight into the conversation list as the title.
+describe("chat sidebar title synthesis", () => {
+  function synthesize(raw: string): string {
+    return truncateAtWord(stripMarkdownToText(raw), 60);
+  }
+
+  it("strips markdown markers from a typical chat first-message", () => {
+    const raw = "**Why does `asyncio.gather` run things concurrently?**";
+    expect(synthesize(raw)).toBe(
+      "Why does asyncio.gather run things concurrently?",
+    );
+  });
+
+  it("survives code-fenced first-messages without leaking backticks", () => {
+    const raw = "```python\nimport os\n```\nExplain this snippet.";
+    const out = synthesize(raw);
+    expect(out).not.toMatch(/```/);
+    expect(out).toContain("Explain this snippet");
+  });
+
+  it("falls back to plain text when there is no markdown", () => {
+    const raw = "What is RAG and when do I use it?";
+    expect(synthesize(raw)).toBe("What is RAG and when do I use it?");
+  });
+});
+
 describe("truncateAtWord", () => {
   it("returns the input unchanged when shorter than the limit", () => {
     expect(truncateAtWord("short", 30)).toBe("short");

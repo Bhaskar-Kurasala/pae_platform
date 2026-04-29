@@ -43,7 +43,7 @@ Production domain to be picked at PR 3 cut-over.
 
 | PR | Theme | Risk | Lines changed (est.) | Status |
 |---|---|---|---|---|
-| **PR 1** | Read-only audits — surface the bug list | None (no behavior change) | ~600 (mostly tooling + doc) | 🔲 Not started |
+| **PR 1** | Read-only audits — surface the bug list | None (no behavior change) | ~2200 (tooling + tests + doc) | 🟢 Ready for merge |
 | **PR 2** | Resilience + cleanup — fix the bugs PR 1 found | High (deletes dead code, changes error paths) | ~1500 | 🔲 Not started |
 | **PR 3** | Observability + production deploy | Medium (additive, but new infra) | ~1200 | 🔲 Not started |
 
@@ -61,44 +61,49 @@ Production domain to be picked at PR 3 cut-over.
 
 ### A1 — Endpoint inventory
 
-- [ ] **A1.1** Write `scripts/audit_endpoints.py` that walks the FastAPI router tree, extracts every `(method, path, handler_func)`, and writes `docs/audits/endpoints.csv`.
+- [x] **A1.1** Write `scripts/audit_endpoints.py` that walks the FastAPI router tree, extracts every `(method, path, handler_func)`, and writes `docs/audits/endpoints.csv`.
   - **Touches:** `scripts/audit_endpoints.py`
   - **Acceptance:**
     - CSV columns: `method,path,tag,handler,file,line`.
     - Output is sorted by `path`.
     - Running on current `main` produces ~80–100 rows (sanity check).
     - Includes a `__main__` so `python scripts/audit_endpoints.py` works.
-  - **Done note:**
+  - **Done note:** Implemented as a stdlib-only `ast`-based walker — no FastAPI import, runs from a clean clone in <100ms. Sanity check **found 215 rows**, much higher than my 80–100 estimate (the codebase has more surface than I'd internalized). The script also rewrites `/health/*` paths so they don't end up double-prefixed under `/api/v1`. Output: `docs/audits/endpoints.csv`. Verified by spot-checking known routes (`/api/v1/path/summary`, `/api/v1/promotion/confirm`, `/health/ready` all present with correct method + handler).
 
-- [ ] **A1.2** Write `scripts/audit_frontend_callers.py` (Node ESM script in `scripts/`) that grep-walks `frontend/src` for every `api.get/post/put/patch/delete` call site and emits `docs/audits/api-callers.csv`.
+- [x] **A1.2** Write `scripts/audit_frontend_callers.mjs` that grep-walks `frontend/src` for every `api.get/post/put/patch/delete/del` call site and emits `docs/audits/api-callers.csv`.
   - **Touches:** `scripts/audit_frontend_callers.mjs`
   - **Acceptance:**
     - CSV columns: `path_template,method,caller_file,caller_line,via_helper`.
     - `via_helper` resolves the named helper (e.g. `pathApi.summary`) so the path matches the route inventory.
     - Catches both direct `api.X(...)` and api-client wrapper helpers (`pathApi.summary`, `practiceApi.review`, etc.).
-  - **Done note:**
+  - **Done note:** Three rounds of fixing taught me how the codebase's call sites are actually shaped:
+    1. Initial regex `[^`"']+` for the path arg broke on **nested template literals** (e.g. `/api/v1/chat/conversations${qs ? \`?${qs}\` : ""}`). Replaced with a proper string-literal reader that walks brace-balanced `${...}` expressions and skips nested strings inside them.
+    2. **Camel-case path params** mismatched FastAPI's snake-case (e.g. `/api/v1/foo/${id}` vs `/api/v1/foo/{conversation_id}`). Solution: shape-based normalization — every `{...}` segment in both inventories maps to `{*}`. Names don't have to match.
+    3. **Query-string templates** like `${qs ? \`?${qs}\` : ""}` should produce a plain path, not `/path/{*}`. Heuristic: any trailing `${expr}` whose interpolated expression contains a literal `?` is treated as a query suffix and dropped.
+    4. **The `del` alias** — `api.del()` is the wrapper for DELETE because `delete` is a reserved word in some object-literal contexts. Added it to `HTTP_VERBS` and aliased the emitted method to "DELETE".
+    Output: 167 caller rows (160 → 167 across the four fixes). Verified that known-live routes (`/today/summary`, `/path/summary`, `/exercises`, `/chat/conversations`, `DELETE /chat/conversations/{id}`, etc.) all resolve.
 
-- [ ] **A1.3** Write `scripts/audit_join.py` that joins the two CSVs and writes `docs/audits/endpoint-coverage.md` — a markdown table grouped by handler, showing every endpoint and its callers (or "DEAD" if zero).
+- [x] **A1.3** Write `scripts/audit_join.py` that joins the two CSVs and writes `docs/audits/endpoint-coverage.md` — a markdown table grouped by handler, showing every endpoint and its callers (or "DEAD" if zero).
   - **Touches:** `scripts/audit_join.py`, `docs/audits/endpoint-coverage.md`
   - **Acceptance:**
     - Table shows `method | path | callers | verdict`. Verdict is one of: `live`, `dead`, `legacy-redirect`, `webhook-only`, `admin-only`.
     - Manual triage column at the right edge for me to fill in.
-  - **Done note:**
+  - **Done note:** Joins on `(method, shape_key(path))` where `shape_key` collapses every `{param}` to `{*}` so backend `{conversation_id}` matches frontend `{*}` regardless of original variable name. Classifier produces six verdicts: `live`, `dead`, `admin-only`, `webhook-only`, `oauth-callback`, `health` — and the dead candidates intentionally excludes admin/webhook/oauth/health to avoid false positives. **Final tally: 154 live · 44 dead · 8 admin-only · 6 webhook-only · 4 oauth-callback · 3 health (215 total).** The 44 dead routes are real — they're surfaces that were planned but never wired up (peer-reviews, worked-examples, scaffolding, billing portal, demo/chat, etc.). They're triage candidates for PR2/A2.2.
 
 ### A2 — Frontend dead-component scan
 
-- [ ] **A2.1** Add `knip` and `ts-prune` as dev deps; configure `knip.json` to scan `frontend/src/**`.
-  - **Touches:** `frontend/package.json`, `frontend/knip.json`
+- [x] **A2.1** Add `knip` as a dev dep; configure `knip.json` to scan `frontend/src/**` with the App Router entry points and dev/test files ignored.
+  - **Touches:** `frontend/package.json`, `frontend/knip.json`, `docs/audits/dead-frontend.md`
   - **Acceptance:**
     - `pnpm exec knip` runs in <30s and emits a categorized list (unused exports, unused files, unused deps).
     - Output committed to `docs/audits/dead-frontend.md` for triage.
-  - **Done note:**
+  - **Done note:** `pnpm add -D knip` plus a `knip.json` that lists the App Router entry points (page/layout/error/not-found/loading/route/middleware) so knip can correctly walk the dependency graph from there. Test files and Storybook stories are ignored. **Findings: 52 unused files · 23 unused exports · 2 unused exported types · 9 unused npm deps · 1 unused devDep.** The unused-file haul is dominated by the now-superseded `<StudioLayout>` family (entire `src/components/features/studio/` directory — the v8 PracticeScreen replaced it) and the v8 `studio-screen.tsx` file itself. Skipped `ts-prune` since `knip` already flags unused exports — no value in running both. PR2/A2.3 will delete after manual triage. Output: `docs/audits/dead-frontend.md`.
 
 ### A3 — Schema↔UI invariant tests
 
 This is the highest-leverage item in this PR. It will *find* most of the bugs you suspect exist.
 
-- [ ] **A3.1** Write `backend/tests/test_contracts/test_aggregator_contracts.py`. For each aggregator endpoint, the test:
+- [x] **A3.1** Write `backend/tests/test_contracts/test_aggregator_contracts.py`. For each aggregator endpoint, the test:
   1. Logs in as a seeded user.
   2. Calls the endpoint.
   3. Walks the **frontend's TypeScript interface** for the response (we'll snapshot the relevant ones into Python literal at the top of the test file — these are read-only contracts, so a manual sync is fine for now).
@@ -108,45 +113,44 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
     - `GET /api/v1/today/summary`
     - `GET /api/v1/path/summary`
     - `GET /api/v1/promotion/summary`
-    - `GET /api/v1/readiness/overview`
     - `GET /api/v1/catalog/`
     - `GET /api/v1/exercises`
     - `GET /api/v1/chat/notebook`
     - `GET /api/v1/srs/due`
+    - (Skipped `readiness/overview` — its response shape is much larger and gets its own contract slice in PR2 alongside the redesign.)
   - **Acceptance:**
     - Each endpoint has its own test with a clear failure message.
     - Failures itemize the field name(s) that drifted.
     - Tests pass on current `main` (they're additive — they don't fix anything, just guard).
-  - **Done note:**
+  - **Done note:** Implemented a reusable shape-walker (`assert_shape`) with declarative primitives — `REQUIRED`, `REQUIRED_NONNULL`, `OPTIONAL`, `list_of(spec)`, and nested dicts — so each aggregator's spec mirrors its TS interface 1:1. The walker accumulates errors before raising so a single test run names every field that drifted. Six self-tests guard the walker itself (missing required, null in non-null, optional absent, list element drift, aggregated errors, nested objects). **13 tests pass on a fresh user (7 aggregator + 6 self-tests).** Failure mode is loud and field-precise — exactly what we wanted.
 
-- [ ] **A3.2** Write `frontend/src/test/contracts/api-shape.test.ts`. For each api-client interface, snapshot the field set; if the snapshot drifts, CI fails. Catches the *frontend* side of the same drift.
+- [x] **A3.2** Write `frontend/src/test/contracts/api-shape.test.ts`. For each api-client interface, snapshot the field set; if the snapshot drifts, CI fails. Catches the *frontend* side of the same drift.
   - **Touches:** `frontend/src/test/contracts/api-shape.test.ts`, `frontend/src/test/contracts/__snapshots__/`
   - **Acceptance:**
     - One snapshot per public interface (`PathSummaryResponse`, `PromotionSummaryResponse`, `TodaySummaryResponse`, `PracticeReviewRecord`, `NotebookEntryOut`).
     - Running on current `main` writes the initial snapshots and passes.
-  - **Done note:**
+  - **Done note:** Implemented a `shape()` helper that walks a TS fixture and emits its sorted-key, primitive-type-tagged shape. Each public response interface gets a fixture (TypeScript catches dropped fields at compile time) plus a Vitest snapshot (snapshot catches *added* fields). 7 interfaces locked down: `TodaySummaryResponse`, `PathSummaryResponse`, `PromotionSummaryResponse`, `CatalogResponse`, `ExerciseResponse`, `NotebookEntryOut`, `SRSCard`. **7/7 tests pass; snapshot-on-disk verified stable across multiple re-runs.** Together with A3.1 this prevents drift in either direction. Sync rule documented at the top of the file.
 
 ### A5 — Markdown / preview leak audit
 
-- [ ] **A5.1** Grep for every place that dumps an entry's `content` or `body` into a small `<p>` or preview tile. Replace each with `stripMarkdownToText(...) + truncateAtWord(...)`.
+- [x] **A5.1** Grep for every place that dumps an entry's `content` or `body` into a small `<p>` or preview tile. Replace each with `stripMarkdownToText(...) + truncateAtWord(...)`.
   - **Touches:**
-    - `frontend/src/app/(portal)/chat/page.tsx` (sidebar preview)
-    - `frontend/src/components/v8/screens/today-screen.tsx` (micro-wins, capstone preview)
-    - Any other call site Grep finds
+    - `frontend/src/app/(portal)/chat/page.tsx` (chat sidebar conversation title synthesis)
+    - `frontend/src/lib/__tests__/markdown-text.test.ts` (3 new regression tests)
   - **Acceptance:**
     - One Vitest test per touched file confirms a markdown-laden fixture renders as plain text.
     - Manual check: chat sidebar previews no longer show `**bold**` or ` ``` ` fences.
-  - **Done note:**
+  - **Done note:** Audit found that the only *active* preview-leak surface was the chat-sidebar conversation-title synthesis at `chat/page.tsx:3093`, where `last.content.slice(0, 60)` was passing raw markdown straight into the conversation-list title (which is also reused by the v8 Tutor screen "Recent conversations" rail). Replaced with `truncateAtWord(stripMarkdownToText(last.content), 60)`. Other preview surfaces audited: notebook (already fixed in `3e8e988`), Today micro-wins (backend-controlled labels), Today capstone (backend-controlled title), suggested-prompt cards (static text) — all safe. 3 regression tests added for the chat-sidebar synthesis pipeline so the fix can't be quietly reverted.
 
 ### Deliverable
 
-- [ ] **A-OUT** Generate `docs/AUDIT-2026-04-28.md` summarizing:
+- [x] **A-OUT** Generate `docs/AUDIT-2026-04-28.md` summarizing:
   - Dead endpoints (with proposed deletions)
   - Dead frontend exports (with proposed deletions)
   - Schema drift findings (likely 5–15 items)
   - Markdown leak fixes already applied
   - Recommended PR 2 ticket ordering based on what was found
-  - **Done note:**
+  - **Done note:** `docs/AUDIT-2026-04-28.md` lands the consolidated review-ready report. Section 1 (endpoints): 154 live · 44 dead · 8 admin · 6 webhook · 4 oauth · 3 health out of 215. Section 2 (frontend dead code): 52 unused files dominated by the legacy `<StudioLayout>` family (~28 files / ~3000 LOC), plus 23 unused exports and 9 unused npm deps. Section 3 (schema invariants): 14 contract tests landed (7 backend + 7 frontend snapshots) — drift now fails CI. Section 4 (markdown leaks): chat-sidebar title synthesis was the only active leak; fixed inline this PR with regression tests. The report contains a "Sign-off requested" section asking Bhaskar to approve the dead-route + dead-component deletion lists before PR2 starts.
 
 **PR 1 verification:** `make test && make lint` green; audit doc reviewed by Bhaskar; merge.
 

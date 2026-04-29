@@ -1,0 +1,179 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`API response shape contracts > CatalogResponse 1`] = `
+{
+  "bundles": [],
+  "courses": [],
+}
+`;
+
+exports[`API response shape contracts > ExerciseResponse 1`] = `
+{
+  "description": "string",
+  "difficulty": "string",
+  "due_at": "object",
+  "exercise_type": "string",
+  "github_template_url": "object",
+  "id": "string",
+  "is_capstone": "boolean",
+  "lesson_id": "string",
+  "order": "number",
+  "pass_score": "number",
+  "points": "number",
+  "rubric": "object",
+  "solution_code": "object",
+  "starter_code": "object",
+  "test_cases": "object",
+  "title": "string",
+}
+`;
+
+exports[`API response shape contracts > NotebookEntryOut 1`] = `
+{
+  "content": "string",
+  "conversation_id": "string",
+  "created_at": "string",
+  "graduated_at": "object",
+  "id": "string",
+  "last_reviewed_at": "object",
+  "message_id": "string",
+  "source_type": "string",
+  "tags": [],
+  "title": "object",
+  "topic": "object",
+  "user_note": "object",
+}
+`;
+
+exports[`API response shape contracts > PathSummaryResponse 1`] = `
+{
+  "active_course_id": "string",
+  "active_course_title": "string",
+  "constellation": [
+    {
+      "badge": "string",
+      "label": "string",
+      "state": "string",
+      "sub": "string",
+    },
+  ],
+  "levels": [
+    {
+      "badge": "string",
+      "blurb": "string",
+      "lessons": [],
+      "progress_percentage": "number",
+      "state": "string",
+      "title": "string",
+      "unlock_course_id": "object",
+      "unlock_currency": "object",
+      "unlock_lab_count": "object",
+      "unlock_lesson_count": "object",
+      "unlock_price_cents": "object",
+    },
+  ],
+  "overall_progress": "number",
+  "proof_wall": [],
+}
+`;
+
+exports[`API response shape contracts > PromotionSummaryResponse 1`] = `
+{
+  "gate_status": "string",
+  "overall_progress": "number",
+  "promoted_at": "object",
+  "promoted_to_role": "object",
+  "role": {
+    "from_role": "string",
+    "to_role": "string",
+  },
+  "rungs": [],
+  "stats": {
+    "capstone_submissions": "number",
+    "completed_interviews": "number",
+    "completed_lessons": "number",
+    "due_card_count": "number",
+    "total_lessons": "number",
+  },
+  "user_first_name": "string",
+}
+`;
+
+exports[`API response shape contracts > SRSCard 1`] = `
+{
+  "answer": "string",
+  "concept_key": "string",
+  "ease_factor": "number",
+  "hint": "string",
+  "id": "string",
+  "interval_days": "number",
+  "last_reviewed_at": "object",
+  "next_due_at": "string",
+  "prompt": "string",
+  "repetitions": "number",
+}
+`;
+
+exports[`API response shape contracts > TodaySummaryResponse 1`] = `
+{
+  "capstone": {
+    "days_to_due": "number",
+    "draft_quality": "number",
+    "drafts_count": "number",
+    "exercise_id": "string",
+    "title": "string",
+  },
+  "cohort_events": [],
+  "consistency": {
+    "days_active": "number",
+    "window_days": "number",
+  },
+  "current_focus": {
+    "skill_blurb": "string",
+    "skill_name": "string",
+    "skill_slug": "string",
+  },
+  "due_card_count": "number",
+  "goal": {
+    "days_remaining": "number",
+    "motivation": "string",
+    "success_statement": "string",
+    "target_role": "string",
+  },
+  "intention": {
+    "text": "string",
+  },
+  "micro_wins": [],
+  "next_milestone": {
+    "days": "number",
+    "label": "string",
+  },
+  "peers_at_level": "number",
+  "progress": {
+    "active_course_id": "string",
+    "active_course_title": "string",
+    "lessons_completed_total": "number",
+    "lessons_total": "number",
+    "next_lesson_id": "string",
+    "next_lesson_title": "string",
+    "overall_percentage": "number",
+    "today_unlock_percentage": "number",
+  },
+  "promotions_today": "number",
+  "readiness": {
+    "current": "number",
+    "delta_week": "number",
+  },
+  "session": {
+    "id": "string",
+    "lesson_done_at": "object",
+    "ordinal": "number",
+    "reflect_done_at": "object",
+    "started_at": "string",
+    "warmup_done_at": "object",
+  },
+  "user": {
+    "first_name": "string",
+  },
+}
+`;
