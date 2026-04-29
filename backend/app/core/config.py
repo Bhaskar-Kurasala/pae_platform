@@ -1,6 +1,29 @@
 from functools import lru_cache
 
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# PR3/D2.2 — values that look like dev defaults and must NOT appear in
+# production. Any of these substrings (case-insensitive) in a critical
+# secret will refuse the boot when ENVIRONMENT=production.
+#
+# Kept tight — we want false negatives ("this looks like prod, OK") not
+# false positives ("strong random key flagged as dev"). Each substring
+# is one we ourselves shipped in code as a placeholder, so a prod secret
+# containing any of them is unambiguously a misconfiguration.
+_DEV_DEFAULT_FRAGMENTS: tuple[str, ...] = (
+    "changeme",
+    "test-secret",
+    "dev-secret",
+    "local-dev",
+    "sk-test-mock",
+    "postgres:postgres",  # the docker-compose dev DB credential
+    "masterkey123",
+)
+
+# Minimum length for the JWT secret_key. 32 bytes (256 bits) is the
+# documented HS256 minimum; anything shorter is a weakness.
+_MIN_SECRET_KEY_LEN = 32
 
 
 class Settings(BaseSettings):
@@ -96,8 +119,51 @@ class Settings(BaseSettings):
     # SendGrid
     sendgrid_from_email: str = "noreply@pae.dev"
 
-    # CORS
+    # CORS — PR3/D3.1 allowlist driven by `CORS_ORIGINS` env var.
+    #
+    # Env-var form: comma-separated list of origins, e.g.
+    #   CORS_ORIGINS=https://app.example.com,https://admin.example.com
+    #
+    # JSON-array form is ALSO accepted for compatibility with Pydantic's
+    # native list parser:
+    #   CORS_ORIGINS=["https://app.example.com","https://admin.example.com"]
+    #
+    # Wildcard (`*`) is allowed for dev only — in production, the
+    # `production_required` validator (D2.2) will fail the boot if you
+    # ship `*` because `allow_credentials=True` makes that a CORS spec
+    # violation that browsers will silently reject anyway.
     cors_origins: list[str] = ["http://localhost:3000"]
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _parse_cors_origins(cls, value: object) -> object:
+        """Accept either a JSON array OR a comma-separated string.
+
+        Fly secrets / .env files default to the latter —
+        `CORS_ORIGINS=https://a.com,https://b.com` is the natural way to
+        set this and Pydantic's native parser would reject it as
+        invalid JSON. We normalize both forms to a `list[str]` here so
+        downstream code never has to second-guess."""
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return []
+            if stripped.startswith("["):
+                # JSON-array form: parse it ourselves so this validator
+                # always returns a list (Pydantic's `mode='before'`
+                # then sees a list and skips its own list-parsing path).
+                import json
+
+                try:
+                    parsed = json.loads(stripped)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"CORS_ORIGINS looks like JSON but didn't parse: {exc}") from exc
+                if not isinstance(parsed, list):
+                    raise ValueError("CORS_ORIGINS JSON must decode to a list")
+                return [str(item) for item in parsed]
+            # Comma-separated form.
+            return [item.strip() for item in stripped.split(",") if item.strip()]
+        return value
 
     # Feature flags
     feature_tailored_resume_agent: bool = False
@@ -133,6 +199,99 @@ class Settings(BaseSettings):
             self.celery_broker_url = f"redis://{self.redis_host}:{self.redis_port}/1"
         if not self.celery_result_backend:
             self.celery_result_backend = f"redis://{self.redis_host}:{self.redis_port}/2"
+
+    # PR3/D2.2 — production_required validator.
+    #
+    # Refuses to boot when ENVIRONMENT=production and any of the four
+    # critical secrets (JWT secret_key, Anthropic key, Postgres URL,
+    # Redis URL) is missing or matches a known dev default. The error
+    # message names every offending field at once — a partial fix that
+    # surfaces a new "still wrong" error on the next boot is wasted
+    # wall-clock during a deploy.
+    #
+    # Why `model_validator(mode="after")` (not a `@field_validator`):
+    #   - We need to read `environment` AND the four secrets on the
+    #     same instance, so a per-field validator would fire before
+    #     `environment` is bound and short-circuit incorrectly.
+    #   - We need access to derived properties (`database_url`,
+    #     `redis_url`) which only exist after model construction.
+    @model_validator(mode="after")
+    def _production_required(self) -> "Settings":
+        if self.environment.lower() != "production":
+            return self
+
+        problems: list[str] = []
+
+        if not self._is_strong_secret(self.secret_key, _MIN_SECRET_KEY_LEN):
+            problems.append(
+                "secret_key is missing, too short, or matches a dev default "
+                f"(min length {_MIN_SECRET_KEY_LEN}, must not contain a dev fragment)"
+            )
+
+        if not self._is_strong_secret(self.anthropic_api_key, min_len=8):
+            problems.append(
+                "anthropic_api_key is missing or matches a dev default "
+                "(must be a real Anthropic key starting with `sk-ant-…`)"
+            )
+
+        # database_url is a property derived from postgres_* fields. We
+        # check the constructed URL so a sneaky `postgres:postgres` host
+        # password gets caught even if the user split it across fields.
+        if not self._is_strong_secret(self.database_url, min_len=8):
+            problems.append(
+                "database_url is missing or matches a dev default "
+                "(set POSTGRES_HOST / POSTGRES_USER / POSTGRES_PASSWORD / "
+                "POSTGRES_DB to non-default values, OR provide a managed-DB "
+                "connection string in production)"
+            )
+
+        if not self._is_strong_secret(self.redis_url, min_len=8):
+            problems.append(
+                "redis_url is missing or matches a dev default "
+                "(set REDIS_HOST / REDIS_PORT to a managed Redis endpoint)"
+            )
+
+        # PR3/D3.1 — CORS wildcard in production is a CORS-spec
+        # violation when paired with `allow_credentials=True` (which
+        # we use). Browsers silently reject it, but better to fail
+        # loud at boot than ship a quietly-broken app.
+        if "*" in self.cors_origins:
+            problems.append(
+                "cors_origins contains '*' which is invalid in production "
+                "(allow_credentials=True forbids the wildcard). Set "
+                "CORS_ORIGINS to an explicit comma-separated list of HTTPS "
+                "origins."
+            )
+
+        if problems:
+            joined = "\n  - ".join(problems)
+            raise ValueError(
+                "Refusing to boot: ENVIRONMENT=production but critical "
+                "secrets are missing or look like dev defaults:\n  - "
+                + joined
+                + "\n\nFix by setting strong values in your production "
+                "environment (see docs/runbooks/secret-rotation.md). "
+                "This check is intentional — booting with dev defaults "
+                "in production is a security incident."
+            )
+
+        return self
+
+    @staticmethod
+    def _is_strong_secret(value: str, min_len: int) -> bool:
+        """Return True iff `value` is non-empty, ≥ min_len, and does not
+        contain any known dev-default fragment.
+
+        Comparison is case-insensitive — a prod operator who pastes
+        `ChangeMe-In-Production` should fail just as loudly as the
+        lower-cased default."""
+        if not value or len(value) < min_len:
+            return False
+        lowered = value.lower()
+        for fragment in _DEV_DEFAULT_FRAGMENTS:
+            if fragment in lowered:
+                return False
+        return True
 
 
 @lru_cache
