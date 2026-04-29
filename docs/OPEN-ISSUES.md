@@ -43,6 +43,8 @@ When new issues surface in production, add them here **before** firing off a fix
 
 ### P1-A — Admin interaction audit (buttons, workflows, mutations)
 
+> **🔄 SUPERSEDED by [`RETENTION-ENGINE.md`](./RETENTION-ENGINE.md).** What started as a "do the buttons work" audit became a product-level rethink. Bhaskar (PM) reframed the question from "are admin tools functional?" to "is the system catching slipping students?" — and we discovered most of the broken buttons (Schedule call / Send DM / Add note) were *missing features*, not broken implementations. The 14-ticket retention-engine plan is the right answer; this entry stays for receipts.
+
 The MCP coverage audit (commit `83b1f74`) verified every admin screen *renders* with real data. It did NOT verify that interactive elements actually do what they claim. Before opening admin access to non-Bhaskar accounts, every click target across `/admin/*` needs a smoke check.
 
 **Specific call sites to verify:**
