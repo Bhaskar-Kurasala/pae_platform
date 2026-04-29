@@ -44,12 +44,29 @@ Production domain to be picked at PR 3 cut-over.
 | PR | Theme | Risk | Lines changed (est.) | Status |
 |---|---|---|---|---|
 | **PR 1** | Read-only audits — surface the bug list | None (no behavior change) | ~2200 (tooling + tests + doc) | ✅ Merged (`1786f65`) |
-| **PR 2** | Resilience + cleanup — fix the bugs PR 1 found | High (deletes dead code, changes error paths) | ~1500 | 🟡 In progress |
-| **PR 3** | Observability + production deploy | Medium (additive, but new infra) | ~1200 | 🔲 Not started |
+| **PR 2** | Resilience + cleanup — fix the bugs PR 1 found | High (deletes dead code, changes error paths) | ~1500 | ✅ Merged (`44b29c6`) |
+| **PR 3** | Observability + production deploy | Medium (additive, but new infra) | ~1200 | 🟡 In progress (3 parallel tracks) |
 
 **Sequencing rule:** No agent starts a task in PR N+1 until PR N is **merged and verified in production**. This prevents agents stomping on each other and ensures every PR ships a complete, testable slice.
 
 **Parallelism rule:** Within a single PR, multiple agents may work in parallel iff they touch *non-overlapping files*. The "Touches:" field on every task lists the file paths claimed. Before starting, an agent verifies no other in-flight task lists the same path.
+
+### PR 3 parallel-track lock board (2026-04-29)
+
+PR 3 is the first PR where parallelism actually pays off — most tasks have non-overlapping `Touches:`. Three concurrent tracks land roughly in 1.5x calendar time instead of 3x serial.
+
+| Track | Owner-agent | Tasks | Branch | Status |
+|---|---|---|---|---|
+| **O — Observability** | (claim) | C1, C2, C3, C4, C5, C7 | `prod/pr3-track-o` | 🔲 |
+| **H — Health & Ops** | (claim) | C6, C8, D6, D8 | `prod/pr3-track-h` | 🔲 |
+| **D — Deploy & Infra** | (claim) | **D1 (backups, do first)**, D2, D3, D4, D5, D7 | `prod/pr3-track-d` | 🔲 |
+
+**Coordination protocol for PR 3 tracks:**
+1. Each track works on its own branch off latest `main`. Daily rebase.
+2. Before starting a task, edit this tracker to add `claimed-by: track-X` to the task line. Push that commit immediately.
+3. If a task's `Touches:` overlap with another track's claimed task, post in the tracker and resolve before code lands.
+4. Each track lands its merge to `main` independently as soon as its tasks are green. No waiting for other tracks.
+5. **D1 (backups) is the highest-priority item in the entire PR plan** — Track D ships D1 *first*, before any other infra work.
 
 ---
 
