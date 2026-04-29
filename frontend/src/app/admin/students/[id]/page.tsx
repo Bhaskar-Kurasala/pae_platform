@@ -10,10 +10,17 @@ import {
   Clock,
   FileCode2,
   LogIn,
+  NotebookPen,
   Play,
   Sparkles,
 } from "lucide-react";
-import { useAdminStudents, useStudentTimeline, useTriggerAgent } from "@/lib/hooks/use-admin";
+import {
+  useAdminStudents,
+  useCreateStudentNote,
+  useStudentNotes,
+  useStudentTimeline,
+  useTriggerAgent,
+} from "@/lib/hooks/use-admin";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 
@@ -53,10 +60,25 @@ export default function StudentDrilldownPage() {
   );
 
   const { data: timeline = [], isLoading: timelineLoading } = useStudentTimeline(studentId);
+  const { data: notes = [], isLoading: notesLoading } = useStudentNotes(studentId);
+  const createNote = useCreateStudentNote(studentId);
   const trigger = useTriggerAgent();
 
   const [selectedAgent, setSelectedAgent] = useState<string>(TRIGGERABLE_AGENTS[0].name);
   const [triggerResult, setTriggerResult] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState<string>("");
+
+  async function handleAddNote() {
+    const trimmed = noteDraft.trim();
+    if (!trimmed || !studentId) return;
+    try {
+      await createNote.mutateAsync(trimmed);
+      setNoteDraft("");
+    } catch {
+      // The global mutation onError toast (PR2/B1.1) shows the failure;
+      // we just keep the draft in the textarea so the operator can retry.
+    }
+  }
 
   async function handleTrigger() {
     if (!studentId) return;
@@ -135,6 +157,79 @@ export default function StudentDrilldownPage() {
             <p className="text-xs text-muted-foreground self-center break-words max-w-xl">
               {triggerResult}
             </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* F2 — Admin notes per student.
+          Append-only, plain text. The first thing an operator types
+          here is usually "called Mon, said busy this week" — that
+          context survives across rotations and reminders.
+          The backend route (POST /admin/students/{id}/notes) was
+          already shipped in Phase 3; F2 wires the UI. */}
+      <Card>
+        <CardHeader className="pb-2">
+          <h2 className="font-semibold text-sm flex items-center gap-2">
+            <NotebookPen className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            Admin notes
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Private. Used to remember what was said to whom across rotations.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div>
+            <textarea
+              value={noteDraft}
+              onChange={(e) => setNoteDraft(e.target.value)}
+              placeholder="e.g. Called Mon — said busy this week, will follow up Fri."
+              maxLength={2000}
+              rows={3}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              aria-label="New admin note"
+              disabled={createNote.isPending}
+            />
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground">
+                {noteDraft.length}/2000
+              </span>
+              <button
+                type="button"
+                onClick={() => void handleAddNote()}
+                disabled={!noteDraft.trim() || createNote.isPending || !studentId}
+                className="rounded-lg bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+              >
+                {createNote.isPending ? "Saving…" : "Add note"}
+              </button>
+            </div>
+          </div>
+
+          {notesLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-12 animate-pulse rounded bg-muted" />
+              ))}
+            </div>
+          ) : notes.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              No notes yet. The first one is usually the most useful.
+            </p>
+          ) : (
+            <ol className="space-y-2">
+              {notes.map((n) => (
+                <li
+                  key={n.id}
+                  className="rounded-lg border border-border bg-background/50 px-3 py-2"
+                >
+                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
+                    {n.body_md}
+                  </pre>
+                  <p className="mt-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                    {new Date(n.created_at).toLocaleString()}
+                  </p>
+                </li>
+              ))}
+            </ol>
           )}
         </CardContent>
       </Card>

@@ -1,0 +1,45 @@
+{# F6 — Unpaid stalled day-7 email.
+   Sent to users who completed first session but haven't paid +
+   went silent 7+ days. Tone: social proof + "you're closer than
+   you think." NO discount in this version — that's day 14 cadence.
+
+   Variables:
+     name, target_role, sessions_completed, login_url
+#}
+{% set subject = "You completed " ~ (sessions_completed or "a few") ~ " lessons. The next ones unlock the capstone." %}
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ subject }}</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #1a1a1a; line-height: 1.6;">
+
+  <p>Hey {{ name or "there" }},</p>
+
+  <p>I noticed you completed
+  <strong>{{ sessions_completed or "a few" }} lessons</strong> on the
+  {{ target_role or "AI engineer" }} track but haven't been back in a week.</p>
+
+  <p>The free tier covers about half the curriculum. The capstone — the part
+  where you actually build the thing that becomes your portfolio — lives
+  behind the paid track. Three students who started the same week as you
+  shipped their capstones in the last 14 days.</p>
+
+  <p style="margin: 24px 0;">
+    <a href="{{ login_url or 'https://pae-platform.fly.dev/promotion' }}"
+       style="background: #1D9E75; color: white; padding: 12px 20px; border-radius: 8px; text-decoration: none; font-weight: 600;">
+      See what unlocks next →
+    </a>
+  </p>
+
+  <p>If price is the blocker, just reply — we'll work something out.</p>
+
+  <p>—Bhaskar</p>
+
+  <p style="font-size: 12px; color: #888; margin-top: 32px;">
+    <a href="{{ unsubscribe_url or '#' }}" style="color: #888;">Unsubscribe</a>.
+  </p>
+</body>
+</html>

@@ -1,0 +1,48 @@
+{# F6 — Cold-signup day-1 email.
+   Sent to users who registered but haven't started their first
+   session 24h+ later. Tone: warm, references their stated goal,
+   gives them ONE obvious thing to click.
+
+   Variables expected:
+     name           — the user's first name (or "there" fallback)
+     target_role    — their goal target_role; falls back to a generic phrase
+     login_url      — deep link to /today (with pre-fill if possible)
+#}
+{% set subject = "Your first " ~ (target_role or "career") ~ " lesson is waiting" %}
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ subject }}</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #1a1a1a; line-height: 1.6;">
+
+  <p>Hey {{ name or "there" }},</p>
+
+  <p>You signed up for PAE Platform yesterday with a goal of becoming a
+  <strong>{{ target_role or "production AI engineer" }}</strong>. The first
+  lesson takes about 15 minutes. You can do it on your phone during a
+  coffee break.</p>
+
+  <p>Here's the link straight back to where you left off:</p>
+
+  <p style="margin: 24px 0;">
+    <a href="{{ login_url or 'https://pae-platform.fly.dev/today' }}"
+       style="background: #1D9E75; color: white; padding: 12px 20px; border-radius: 8px; text-decoration: none; font-weight: 600;">
+      Start the first lesson →
+    </a>
+  </p>
+
+  <p>If something's blocking you — too busy, not sure where to start,
+  not the right fit anymore — just reply to this email. I read every one.</p>
+
+  <p>—Bhaskar</p>
+
+  <p style="font-size: 12px; color: #888; margin-top: 32px;">
+    You're getting this because you signed up at PAE Platform and haven't
+    started your first lesson yet.
+    <a href="{{ unsubscribe_url or '#' }}" style="color: #888;">Unsubscribe</a>.
+  </p>
+</body>
+</html>

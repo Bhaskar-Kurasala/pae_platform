@@ -41,7 +41,7 @@ These tickets are mutually independent at the file level (designed for parallel 
 
 ---
 
-### 🔲 F1 — `student_risk_service` + nightly scoring
+### ✅ F1 — `student_risk_service` + nightly scoring
 
 **Status:** Open
 **On:** _(not yet)_
@@ -81,7 +81,7 @@ Every other feature reads from this. F4 panels filter by `slip_type`. F5 outreac
 
 ---
 
-### 🔲 F2 — `student_notes` (admin's private notes per student)
+### ✅ F2 — `student_notes` (admin's private notes per student)
 
 **Status:** Open
 **On:** _(not yet)_
@@ -120,7 +120,7 @@ Within the first week of active students, the operator (you) will forget which s
 
 ---
 
-### 🔲 F3 — `outreach_log` table + service
+### ✅ F3 — `outreach_log` table + service
 
 **Status:** Open
 **On:** _(not yet)_
@@ -176,7 +176,7 @@ Without this, F5 (email) and F9 (automation) will spam students. Build the audit
 
 ---
 
-### 🔲 F4 — Real `/admin/console` panels (kill the mock data)
+### ✅ F4 — Real `/admin/console` panels (kill the mock data)
 
 **Status:** Open
 **On:** _(not yet)_
@@ -222,7 +222,7 @@ This is the difference between admin-as-toy and admin-as-tool. Right now `/admin
 
 ---
 
-### 🔲 F5 — Email outreach service (SendGrid wrapper)
+### ✅ F5 — Email outreach service (SendGrid wrapper)
 
 **Status:** Open
 **On:** _(not yet)_
@@ -262,7 +262,7 @@ Email is the only universal channel for inactive students. Build the chokepoint 
 
 ---
 
-### 🔲 F6 — Six email templates (one per slip type)
+### ✅ F6 — Six email templates (one per slip type)
 
 **Status:** Open
 **On:** _(not yet)_
@@ -468,4 +468,68 @@ Once you give the green light on all five, I execute as senior engineer: F0 firs
 
 ## Closed tickets
 
-*(none yet)*
+### Tier 1 (foundation) — 2026-04-30
+
+All 6 core tickets shipped in a single coordinated build. Total: ~2 days work, 27 backend pytests + 7 Playwright e2e specs all green, MCP-verified live against the running stack.
+
+**F0 — Cheap-now plumbing migrations**
+- 0049_student_risk_signals — created
+- 0051_outreach_log — created
+- 0050_student_notes (originally planned) — discovered table already existed from Phase 3 (`0014_student_notes.py`); reused existing schema rather than alter
+- closed-by: (in this commit)
+
+**F1 — student_risk_service + nightly scoring**
+- New `app/models/student_risk_signals.py`
+- New `app/services/student_risk_service.py` — 6 slip pattern classifier with priority order (paid_silent > capstone_stalled > streak_broken > promotion_avoidant > unpaid_stalled > cold_signup)
+- New `app/tasks/risk_scoring.py` — Celery Beat scheduled at 03:00 UTC daily
+- 14 unit tests covering all 6 slip patterns + priority conflicts + edge cases
+- **Live data: scored 101 users, found 97 cold_signups + 4 healthy** when invoked manually
+- closed-by: (in this commit)
+
+**F2 — student_notes admin UI**
+- Backend routes were already shipped in Phase 3 (`POST/GET /admin/students/{id}/notes`)
+- New hooks: `useStudentNotes`, `useCreateStudentNote`
+- Notes card added to `/admin/students/{id}` between Trigger agent and Activity timeline
+- MCP verified end-to-end: typed → 201 POSTed → rendered → textarea cleared
+- closed-by: (in this commit)
+
+**F3 — outreach_log table + OutreachService**
+- New `app/models/outreach_log.py`
+- New `app/services/outreach_service.py` with `record`, `was_sent_recently` (per-template throttle), `mark_delivered`, `mark_opened`, `list_for_user`
+- 7 unit tests covering throttle window, per-template separation, idempotent webhooks, failed-status doesn't block retry
+- closed-by: (in this commit)
+
+**F4 — Real `/admin` retention panels (kill mock data)**
+- New backend `GET /admin/risk-panels` returns 5 panels with top-N students per slip type
+- New `app/admin/_components/retention-panels.tsx` — 5-panel grid with priority ordering, empty states, "see all (N)" links
+- Drops above the legacy ACTION BAND on `/admin/page.tsx` (legacy mock-data section retained pending v2 rebuild)
+- MCP verified: all 5 panels render with correct totals matching API
+- closed-by: (in this commit)
+
+**F5 — Outreach email service (SendGrid wrapper)**
+- New `app/services/outreach_email_service.py` (distinct from legacy `email_service.py` which handles welcome/digest emails)
+- No-op safe: missing SENDGRID_API_KEY → status='mocked', dev/CI work normally
+- Audit-before-network: row written with status='pending' before SendGrid call, flipped to 'sent'/'failed' after
+- 6 unit tests: mocked path, throttled, no-recipient, render-failure, real-send (mocked SDK), SDK-exception swallowed
+- closed-by: (in this commit)
+
+**F6 — Six email templates (one per slip pattern)**
+- `cold_signup_day_1.html` — first-session reminder, refs target_role
+- `unpaid_stalled_day_7.html` — social proof, no-discount-yet
+- `streak_broken_day_5.html` — most recoverable; warm, low-friction return
+- `paid_silent_day_3.html` — refund risk; signed Bhaskar; reply-with-one-word CTA
+- `capstone_stalled_day_7.html` — confidence churn; specific unblock path
+- `promotion_avoidant_day_3.html` — celebrate; lower the perceived bar
+- All Jinja2-rendered, mobile-first single-column, frontmatter-style `{% set subject = ... %}`
+- closed-by: (in this commit)
+
+**E2E coverage (Playwright)**
+- New `frontend/e2e/retention-engine.spec.ts` — 7 tests covering F4 panel render, totals API contract, F2 add-note round-trip, zero console errors, admin-gate enforcement
+- Combined with admin-coverage + production-readiness specs: **30/31 green** (1 intentional skip)
+
+### Lessons learned
+
+- **Phase 3 already had a `student_notes` table.** Always grep for existing schema before writing migrations — `0014_student_notes.py` was already shipped. Saved a migration, reused existing model.
+- **Production Dockerfile doesn't include `tests/`.** To run pytest in the container, copy tests/ + conftest.py in via `docker cp` and run `cd /app && uv run python -m pytest`. Setting PYTHONPATH alone doesn't work — must `cd` first.
+- **Playwright strict mode catches text duplication.** When a sentinel string lives in BOTH the textarea (still typed) and the rendered note list, `getByText(sentinel)` fails strict-mode. Target `ol li pre` to scope to the rendered note specifically.
+- **F1 risk service has v1-quality payment detection.** Currently `paid_at = None` for all users (documented in code). F1.1 (follow-up) will wire payment data once the canonical "is paid" signal is settled.
