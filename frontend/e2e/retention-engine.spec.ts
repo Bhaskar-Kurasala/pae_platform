@@ -282,6 +282,69 @@ test.describe("F1 + F4 API contract", () => {
   });
 });
 
+// ── F11 — Refund offer flow ─────────────────────────────────────────────
+test.describe("F11 — Refund offer flow on /admin/students/[id]", () => {
+  test("refund-offer card surfaces for paid_silent + send round-trips", async ({
+    page,
+    request,
+  }) => {
+    await injectAdmin(page);
+
+    // Find a student currently in the paid_silent panel. If the panel
+    // is empty (clean prod state) the F11 UI is intentionally hidden,
+    // so we skip rather than fail.
+    const apiRes = await request.get(`${API}/admin/risk-panels`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(apiRes.status()).toBe(200);
+    const apiData = (await apiRes.json()) as Record<
+      string,
+      { students: Array<{ user_id: string }> }
+    >;
+    const candidate = apiData.paid_silent?.students?.[0];
+    if (!candidate) {
+      test.skip(true, "no paid_silent students in this env");
+      return;
+    }
+    const studentId = candidate.user_id;
+
+    await page.goto(`http://localhost:3002/admin/students/${studentId}`, {
+      waitUntil: "domcontentloaded",
+      timeout: 20_000,
+    });
+
+    // Card surfaces only for paid_silent — title is the contract.
+    await expect(
+      page.getByRole("heading", { name: /Refund offer/i }),
+    ).toBeVisible({ timeout: 10_000 });
+
+    const reasonField = page.getByRole("textbox", {
+      name: "Refund offer reason",
+    });
+    await reasonField.fill(
+      `e2e refund-offer probe ${Date.now()} — no engagement since day 7.`,
+    );
+
+    await page.getByRole("button", { name: /Send refund offer/i }).click();
+
+    // The status flash mounts after the mutation resolves. With no
+    // SENDGRID_API_KEY (default in the docker stack), the offer flips
+    // to 'sent' (mocked path inside outreach_email_service).
+    await expect(page.getByRole("status")).toBeVisible({ timeout: 10_000 });
+
+    // The prior-offers list now contains at least one entry — verify
+    // the round-trip persisted by hitting the GET endpoint directly.
+    const listRes = await request.get(
+      `${API}/admin/students/${studentId}/refund-offers`,
+      { headers: { Authorization: `Bearer ${adminToken}` } },
+    );
+    expect(listRes.status()).toBe(200);
+    const offers = (await listRes.json()) as Array<{ status: string }>;
+    expect(offers.length).toBeGreaterThan(0);
+    expect(["sent", "proposed"]).toContain(offers[0].status);
+  });
+});
+
 // ── F10 — Calendar mailto-shim ──────────────────────────────────────────
 test.describe("F10 — Schedule call mailto: link", () => {
   test("risk-card 'Schedule call' resolves to a pre-filled mailto: URL", async ({

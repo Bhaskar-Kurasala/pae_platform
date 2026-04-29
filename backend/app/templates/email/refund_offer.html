@@ -1,0 +1,57 @@
+{# F11 — Refund offer email.
+   Sent to a paid_silent student crossing day 14 with no engagement after
+   the day-3 + day-7 nudges have not landed. Tone: direct, signed by
+   Bhaskar, gives the refund as a clear option (not a guilt trip). The
+   day-3 email already offered "reply with one word" — by day 14 we owe
+   them the explicit refund path so they don't have to ask for it.
+
+   Variables:
+     name, target_role, days_since_last_session, admin_reason
+#}
+{% set subject = "About your " ~ (target_role or "PAE Platform") ~ " enrollment — a refund option" %}
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ subject }}</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #1a1a1a; line-height: 1.6;">
+
+  <p>Hey {{ name or "there" }},</p>
+
+  <p>I'm Bhaskar — I run PAE Platform, and this isn't an automated email.</p>
+
+  <p>You paid for the {{ target_role or "AI engineer" }} track and haven't
+  been back in
+  {% if days_since_last_session %}{{ days_since_last_session }} days{% else %}a while{% endif %}.
+  I tried a softer check-in already; if it didn't reach you, that's on me
+  for assuming the platform was the problem worth fixing.</p>
+
+  <p><strong>Here's the deal:</strong> if PAE isn't the right fit right
+  now, I'd rather refund you than have you feel stuck with something you
+  bought and aren't using. No questions, no fine print, no awkward
+  cancellation flow. Just reply with the word <strong>"refund"</strong>
+  and I'll process it within one business day.</p>
+
+  {% if admin_reason %}
+  <p style="font-size: 14px; color: #555;">
+    <em>(Quick note from our side: {{ admin_reason }})</em>
+  </p>
+  {% endif %}
+
+  <p>If something else is going on — life got busy, the platform broke
+  for you, the content didn't match what you expected — I'd rather hear
+  that and try to fix it. Reply with whatever you've got. One sentence
+  is plenty.</p>
+
+  <p>Either way, no pressure. The offer's just here.</p>
+
+  <p>—Bhaskar</p>
+  <p>(reply directly to this email)</p>
+
+  <p style="font-size: 12px; color: #888; margin-top: 32px;">
+    <a href="{{ unsubscribe_url or '#' }}" style="color: #888;">Unsubscribe</a>.
+  </p>
+</body>
+</html>

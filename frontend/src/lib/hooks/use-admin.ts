@@ -289,3 +289,45 @@ export function useRiskPanels() {
     staleTime: 60 * 60_000,
   });
 }
+
+// ── F11 — Refund offer flow ─────────────────────────────────────────
+// Surfaced on /admin/students/{id} when the student's risk panel
+// position is paid_silent. POST proposes + sends in one step.
+
+export interface RefundOffer {
+  id: string;
+  user_id: string;
+  proposed_by: string | null;
+  status: "proposed" | "sent" | "accepted" | "declined" | "expired" | string;
+  reason: string | null;
+  outreach_log_id: string | null;
+  proposed_at: string;
+  responded_at: string | null;
+}
+
+export function useRefundOffers(studentId: string | null) {
+  return useQuery<RefundOffer[]>({
+    queryKey: ["admin", "refund-offers", studentId],
+    enabled: !!studentId,
+    queryFn: () =>
+      api.get<RefundOffer[]>(
+        `/api/v1/admin/students/${studentId}/refund-offers`,
+      ),
+  });
+}
+
+export function useSendRefundOffer(studentId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation<RefundOffer, Error, { reason: string | null }>({
+    mutationFn: ({ reason }) =>
+      api.post<RefundOffer>(
+        `/api/v1/admin/students/${studentId}/refund-offer`,
+        { reason },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["admin", "refund-offers", studentId],
+      });
+    },
+  });
+}

@@ -4,8 +4,10 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
+  AlertTriangle,
   ArrowLeft,
   Bot,
+  CalendarPlus,
   CheckCircle2,
   Clock,
   FileCode2,
@@ -17,10 +19,14 @@ import {
 import {
   useAdminStudents,
   useCreateStudentNote,
+  useRefundOffers,
+  useRiskPanels,
+  useSendRefundOffer,
   useStudentNotes,
   useStudentTimeline,
   useTriggerAgent,
 } from "@/lib/hooks/use-admin";
+import { buildCallInviteMailto } from "@/lib/calendar-mailto";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 
@@ -64,9 +70,44 @@ export default function StudentDrilldownPage() {
   const createNote = useCreateStudentNote(studentId);
   const trigger = useTriggerAgent();
 
+  // F11 — Refund offer card surfaces only when the student is in
+  // the paid_silent risk panel (Slip 4). useRiskPanels hits the same
+  // endpoint as /admin so it'll usually be cached by the time we
+  // land here, making the conditional render free.
+  const { data: riskPanels } = useRiskPanels();
+  const paidSilentMatch = useMemo(() => {
+    if (!studentId || !riskPanels) return null;
+    return (
+      riskPanels.paid_silent.students.find((s) => s.user_id === studentId) ??
+      null
+    );
+  }, [riskPanels, studentId]);
+  const { data: refundOffers = [] } = useRefundOffers(studentId);
+  const sendRefundOffer = useSendRefundOffer(studentId);
+
   const [selectedAgent, setSelectedAgent] = useState<string>(TRIGGERABLE_AGENTS[0].name);
   const [triggerResult, setTriggerResult] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState<string>("");
+  const [refundReason, setRefundReason] = useState<string>("");
+  const [refundFlash, setRefundFlash] = useState<string | null>(null);
+
+  async function handleSendRefundOffer() {
+    if (!studentId) return;
+    setRefundFlash(null);
+    try {
+      const offer = await sendRefundOffer.mutateAsync({
+        reason: refundReason.trim() || null,
+      });
+      setRefundReason("");
+      setRefundFlash(
+        offer.status === "sent"
+          ? "Offer sent — outreach_log row written."
+          : `Offer status: ${offer.status}. Retry available if needed.`,
+      );
+    } catch (err) {
+      setRefundFlash(`Failed: ${(err as Error).message}`);
+    }
+  }
 
   async function handleAddNote() {
     const trimmed = noteDraft.trim();
@@ -158,8 +199,107 @@ export default function StudentDrilldownPage() {
               {triggerResult}
             </p>
           )}
+          {/* F10 — Schedule call mailto-shim. Active when we know the
+              student's email; falls back gracefully otherwise. */}
+          {student?.email && (
+            <a
+              href={buildCallInviteMailto({
+                studentEmail: student.email,
+                studentName: student.full_name,
+                slipType: paidSilentMatch ? "paid_silent" : null,
+                riskReason: paidSilentMatch?.risk_reason ?? null,
+              })}
+              className="inline-flex items-center gap-1.5 h-9 rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted/50"
+            >
+              <CalendarPlus className="h-3.5 w-3.5" aria-hidden="true" />
+              Schedule call
+            </a>
+          )}
         </CardContent>
       </Card>
+
+      {/* F11 — Refund offer card. Visible only when this student is
+          currently in the paid_silent risk panel (Slip 4). The card
+          gives the admin a one-click "send the refund offer email"
+          path with a short reason textarea + the audit trail of any
+          prior offers below. */}
+      {paidSilentMatch && (
+        <Card className="border-red-200 bg-red-50/40 dark:border-red-900/40 dark:bg-red-950/20">
+          <CardHeader className="pb-2">
+            <h2 className="font-semibold text-sm flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-red-600" aria-hidden="true" />
+              Refund offer · Slip 4 day 14
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Paid + silent crosses day 14 — refund risk territory. Sending the
+              offer now beats waiting for them to ask.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <textarea
+              value={refundReason}
+              onChange={(e) => setRefundReason(e.target.value)}
+              placeholder={
+                paidSilentMatch.risk_reason ??
+                "Quick context the operator can read on the email — e.g. 'no submissions in 14 days, day-3 nudge unread.'"
+              }
+              maxLength={500}
+              rows={3}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+              aria-label="Refund offer reason"
+              disabled={sendRefundOffer.isPending}
+            />
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground">
+                Optional. Echoes into the email body and the audit row.
+              </span>
+              <button
+                type="button"
+                onClick={() => void handleSendRefundOffer()}
+                disabled={sendRefundOffer.isPending || !studentId}
+                className="rounded-lg bg-red-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-red-700 disabled:opacity-50"
+              >
+                {sendRefundOffer.isPending ? "Sending…" : "Send refund offer"}
+              </button>
+            </div>
+            {refundFlash && (
+              <p className="text-xs text-muted-foreground" role="status">
+                {refundFlash}
+              </p>
+            )}
+
+            {refundOffers.length > 0 && (
+              <div className="pt-2">
+                <p className="mb-1 text-xs font-medium text-muted-foreground">
+                  Prior offers
+                </p>
+                <ol className="space-y-1.5">
+                  {refundOffers.map((o) => (
+                    <li
+                      key={o.id}
+                      className="rounded-md border border-border bg-background/60 px-3 py-2 text-xs"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium uppercase tracking-wide">
+                          {o.status}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {new Date(o.proposed_at).toLocaleString()}
+                        </span>
+                      </div>
+                      {o.reason && (
+                        <p className="mt-1 whitespace-pre-wrap text-muted-foreground">
+                          {o.reason}
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* F2 — Admin notes per student.
           Append-only, plain text. The first thing an operator types

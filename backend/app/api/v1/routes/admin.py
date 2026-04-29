@@ -13,6 +13,7 @@ from app.core.security import get_current_user
 from app.models.agent_action import AgentAction
 from app.models.user import User
 from app.schemas.student_note import StudentNoteCreate, StudentNoteResponse
+from app.services import refund_offer_service
 from app.services.at_risk_student_service import compute_at_risk_students
 from app.services.confusion_heatmap_service import compute_heatmap
 from app.services.student_note_service import add_note, list_notes
@@ -453,6 +454,93 @@ async def list_student_notes(
     await _require_student(db, student_id)
     notes = await list_notes(db, student_id=student_id, limit=limit)
     return [StudentNoteResponse.model_validate(n) for n in notes]
+
+
+# ── F11 — Refund offer routes ────────────────────────────────────────────────
+
+
+class RefundOfferCreate(PydanticModel):
+    """POST body for `/admin/students/{id}/refund-offer`."""
+
+    reason: str | None = None
+
+
+class RefundOfferResponse(PydanticModel):
+    """Wire shape for refund_offers rows surfaced to the admin UI."""
+
+    id: str
+    user_id: str
+    proposed_by: str | None
+    status: str
+    reason: str | None
+    outreach_log_id: str | None
+    proposed_at: datetime
+    responded_at: datetime | None
+
+
+def _refund_offer_to_response(offer: Any) -> RefundOfferResponse:
+    return RefundOfferResponse(
+        id=str(offer.id),
+        user_id=str(offer.user_id),
+        proposed_by=str(offer.proposed_by) if offer.proposed_by else None,
+        status=offer.status,
+        reason=offer.reason,
+        outreach_log_id=str(offer.outreach_log_id) if offer.outreach_log_id else None,
+        proposed_at=offer.proposed_at,
+        responded_at=offer.responded_at,
+    )
+
+
+@router.post(
+    "/students/{student_id}/refund-offer",
+    response_model=RefundOfferResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_and_send_refund_offer(
+    student_id: uuid.UUID,
+    payload: RefundOfferCreate,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(_require_admin),
+) -> RefundOfferResponse:
+    """F11 — propose + send a refund offer in one call.
+
+    Two operations stitched together so the operator's "Send offer" click
+    always lands a row + an email attempt. The send_refund_offer step is
+    soft-fail: if SendGrid is mocked or throttled the row stays at
+    status='sent' (mocked) or 'proposed' (throttled), so a retry button
+    in the UI works against the same offer rather than spawning duplicates.
+    """
+    await _require_student(db, student_id)
+    offer = await refund_offer_service.propose_refund(
+        db,
+        user_id=student_id,
+        proposed_by_admin_id=admin.id,
+        reason=payload.reason,
+    )
+    offer = await refund_offer_service.send_refund_offer(db, offer_id=offer.id)
+    log.info(
+        "admin.refund_offer.sent",
+        admin_id=str(admin.id),
+        student_id=str(student_id),
+        offer_id=str(offer.id),
+        status=offer.status,
+    )
+    return _refund_offer_to_response(offer)
+
+
+@router.get(
+    "/students/{student_id}/refund-offers",
+    response_model=list[RefundOfferResponse],
+)
+async def list_student_refund_offers(
+    student_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(_require_admin),
+) -> list[RefundOfferResponse]:
+    """Audit trail of every refund offer proposed for a student."""
+    await _require_student(db, student_id)
+    offers = await refund_offer_service.list_open_for_user(db, user_id=student_id)
+    return [_refund_offer_to_response(o) for o in offers]
 
 
 # ── #142: Audit log viewer ────────────────────────────────────────────────────
