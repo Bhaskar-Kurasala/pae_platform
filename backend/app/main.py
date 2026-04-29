@@ -66,8 +66,11 @@ def create_app() -> FastAPI:
                 retry_after_seconds = max(1, int(reset_epoch - _time.time()))
                 remaining = max(0, int(rem))
                 limit_amount = item.amount
-            except Exception:
-                pass
+            except Exception as exc:
+                # PR3/C2.1 — get_window_stats failure is non-fatal: we
+                # fall back to the canned defaults set above. Keep at
+                # debug because every 429 hit would emit otherwise.
+                log.debug("rate_limit.window_stats_failed", error=str(exc))
 
         headers = {
             "Retry-After": str(retry_after_seconds),

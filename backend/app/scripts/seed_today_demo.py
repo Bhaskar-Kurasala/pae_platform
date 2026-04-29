@@ -555,8 +555,15 @@ async def _ensure_notebook_entries(
                 answer=existing.user_note or existing.content,
                 hint="Recall the gist in your own words before reveal.",
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            # PR3/C2.1 — seeder script: best-effort SRS upsert per
+            # notebook entry. Don't bring the whole reseed down on a
+            # single duplicate / constraint blip.
+            log.debug(
+                "seed.notebook.srs_upsert_skipped",
+                concept_key=concept_key_for(existing),
+                error=str(exc),
+            )
     await db.commit()
     log.info("seed.notebook.entries", count=len(NOTEBOOK_SEED))
 
