@@ -14,8 +14,14 @@ from app.core.exception_handler import unhandled_exception_handler
 from app.core.logging import configure_logging
 from app.core.rate_limit import limiter
 from app.core.request_id import RequestIDMiddleware
+from app.core.sentry import init_sentry
 
 configure_logging(level="DEBUG" if settings.debug else "INFO")
+
+# PR3/C5.1 — initialize Sentry as early as possible (before lifespan,
+# before any imports that may raise) so a startup crash still gets
+# reported. No-op when SENTRY_DSN is unset.
+init_sentry()
 
 log = structlog.get_logger()
 

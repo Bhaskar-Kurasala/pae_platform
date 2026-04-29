@@ -359,10 +359,11 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
   - **Acceptance:** Throw in dev → see in Sentry; stack trace is readable (TS source, not minified).
   - **Done note:**
 
-- [ ] **C5.1** Backend Sentry. `sentry-sdk[fastapi]` with PII filtering. Tags: `route`, `user_id`, `agent_name`.
-  - **Touches:** `backend/app/main.py`, `backend/app/core/sentry.py`
+- [x] **C5.1** Backend Sentry. `sentry-sdk[fastapi]` with PII filtering. Tags: `route`, `user_id`, `agent_name`.
+  - **Touches:** `backend/app/core/sentry.py` (new), `backend/app/main.py`, `backend/app/core/security.py`, `backend/pyproject.toml`, `backend/uv.lock`, `backend/tests/test_core/test_sentry.py` (new)
   - **Acceptance:** Raise in dev → see in Sentry tagged with route + user.
-  - **Done note:**
+  - **claimed-by:** track-o
+  - **Done note:** Mirrored the design rules of C3.1 telemetry: no-op safe (when SENTRY_DSN unset OR sentry-sdk not installed), idempotent init, soft-fail every helper. Five public functions: `init_sentry()` (FastAPI + Starlette integrations, conservative 5% trace sample, 0% profile sample), `is_enabled()`, `set_user_context(user_id)`, `set_agent_context(agent_name)`, `capture_exception(exc)`. Wired `init_sentry()` into `main.py` *before* lifespan so a startup crash still ships. Wired `set_user_context` into the `get_current_user` + `get_current_user_optional` deps in `security.py` — every authenticated request now tags the Sentry scope with `user.id`. **Critical: PII filtering.** A `before_send` hook strips PII from every event before it leaves the process: (a) Authorization, Cookie, X-Refresh-Token, X-Csrf-Token, Set-Cookie headers → `[redacted]`; (b) request body dropped entirely (could contain student-pasted code with API keys); (c) email / username / full_name / ip_address fields on the user dict → `[redacted]` (we KEEP `id` because that's the whole purpose of `set_user_context`); (d) query-string values >32 chars → `[redacted]` (cheap heuristic for tokens). Handles both dict-form and list-form headers (older sentry-sdk used pairs). `set_default_pii=False` belt-and-braces with the manual filter. **11 unit tests pass** in `test_sentry.py` — covers no-DSN no-op, missing-SDK no-op, idempotent init, all four PII-strip code paths (header redaction, body drop, user PII strip, long-querystring redact), list-format header path, and the no-request edge case (Celery messages).
 
 ### C6 — Health checks
 
