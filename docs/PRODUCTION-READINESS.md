@@ -363,7 +363,7 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### C6 — Health checks
 
-- [ ] **C6.1** `GET /health/ready` — pings DB, Redis, returns 200 only when all green. Returns `{db: "ok", redis: "ok", anthropic: "skipped" | "ok"}`.
+- [~] **C6.1** `GET /health/ready` — pings DB, Redis, returns 200 only when all green. Returns `{db: "ok", redis: "ok", anthropic: "skipped" | "ok"}`. claimed-by: track-h
   - **Touches:** `backend/app/api/v1/routes/health.py`
   - **Acceptance:** Stop redis → endpoint returns 503 with `redis: "unreachable"`.
   - **Done note:**
