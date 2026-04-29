@@ -1,24 +1,30 @@
-import { cookies } from "next/headers";
+"use client";
+
+/**
+ * /admin/content-performance — per-lesson question + confusion stats.
+ *
+ * Was previously a server component reading an `access_token` cookie
+ * that doesn't exist in this codebase (auth pipeline stores tokens in
+ * localStorage; only an `auth_role` cookie is written for middleware
+ * routing). That meant the server-side fetch always 401'd silently
+ * and the page rendered "No lesson interaction data recorded yet."
+ * forever, even when the underlying table had data — a silent failure
+ * mode admins would never spot.
+ *
+ * Converted to a client component using the same useQuery + api.get
+ * pattern the other 7 admin screens use, so the JWT in localStorage
+ * (via api-client.ts) flows correctly.
+ */
+
+import { useQuery } from "@tanstack/react-query";
+
+import { api } from "@/lib/api-client";
 
 interface LessonPerformance {
   lesson_id: string;
   lesson_title: string;
   question_count: number;
   confusion_count: number;
-}
-
-async function getContentPerformance(): Promise<LessonPerformance[]> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get("access_token")?.value;
-  const resp = await fetch(
-    `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/v1/admin/content-performance`,
-    {
-      headers: { Authorization: `Bearer ${token ?? ""}` },
-      cache: "no-store",
-    },
-  );
-  if (!resp.ok) return [];
-  return resp.json() as Promise<LessonPerformance[]>;
 }
 
 function ConfusionBar({ rate }: { rate: number }) {
@@ -39,8 +45,14 @@ function ConfusionBar({ rate }: { rate: number }) {
   );
 }
 
-export default async function ContentPerformancePage() {
-  const lessons = await getContentPerformance();
+export default function ContentPerformancePage() {
+  const { data, isLoading, isError, error } = useQuery<LessonPerformance[]>({
+    queryKey: ["admin", "content-performance"],
+    queryFn: () => api.get<LessonPerformance[]>("/api/v1/admin/content-performance"),
+    staleTime: 60_000,
+  });
+
+  const lessons = data ?? [];
 
   return (
     <div className="p-6 md:p-8">
@@ -51,7 +63,13 @@ export default async function ContentPerformancePage() {
         </p>
       </div>
 
-      {lessons.length === 0 ? (
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : isError ? (
+        <p className="text-sm text-destructive">
+          Failed to load content performance: {(error as Error)?.message ?? "unknown error"}
+        </p>
+      ) : lessons.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No lesson interaction data recorded yet.
         </p>

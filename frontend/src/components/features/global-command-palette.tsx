@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
   AlertTriangle,
-  BarChart3,
   BookOpen,
   Code2,
   Dumbbell,
@@ -16,7 +15,6 @@ import {
   Microscope,
   Moon,
   ScrollText,
-  Settings,
   Sun,
   Target,
   TrendingUp,
@@ -175,14 +173,10 @@ export function GlobalCommandPalette() {
         icon: <AlertTriangle className="h-4 w-4" />,
         onSelect: go("/admin/at-risk"),
       },
-      {
-        id: "admin-courses",
-        group: "Admin",
-        label: "Courses admin",
-        keywords: ["courses", "catalog", "manage"],
-        icon: <BookOpen className="h-4 w-4" />,
-        onSelect: go("/admin/courses"),
-      },
+      // Removed admin-courses / admin-analytics / admin-settings —
+      // those routes don't have page.tsx files (see comment in
+      // admin-layout.tsx). Re-add the entry alongside the actual
+      // page when each is built.
       {
         id: "admin-agents",
         group: "Admin",
@@ -190,22 +184,6 @@ export function GlobalCommandPalette() {
         keywords: ["agents", "health", "errors"],
         icon: <Zap className="h-4 w-4" />,
         onSelect: go("/admin/agents"),
-      },
-      {
-        id: "admin-analytics",
-        group: "Admin",
-        label: "Analytics",
-        keywords: ["analytics", "metrics", "reports"],
-        icon: <BarChart3 className="h-4 w-4" />,
-        onSelect: go("/admin/analytics"),
-      },
-      {
-        id: "admin-settings",
-        group: "Admin",
-        label: "Settings",
-        keywords: ["settings", "config"],
-        icon: <Settings className="h-4 w-4" />,
-        onSelect: go("/admin/settings"),
       },
     ];
 
