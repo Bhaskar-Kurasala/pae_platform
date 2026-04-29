@@ -92,12 +92,12 @@ Production domain to be picked at PR 3 cut-over.
 
 ### A2 — Frontend dead-component scan
 
-- [ ] **A2.1** Add `knip` and `ts-prune` as dev deps; configure `knip.json` to scan `frontend/src/**`.
-  - **Touches:** `frontend/package.json`, `frontend/knip.json`
+- [x] **A2.1** Add `knip` as a dev dep; configure `knip.json` to scan `frontend/src/**` with the App Router entry points and dev/test files ignored.
+  - **Touches:** `frontend/package.json`, `frontend/knip.json`, `docs/audits/dead-frontend.md`
   - **Acceptance:**
     - `pnpm exec knip` runs in <30s and emits a categorized list (unused exports, unused files, unused deps).
     - Output committed to `docs/audits/dead-frontend.md` for triage.
-  - **Done note:**
+  - **Done note:** `pnpm add -D knip` plus a `knip.json` that lists the App Router entry points (page/layout/error/not-found/loading/route/middleware) so knip can correctly walk the dependency graph from there. Test files and Storybook stories are ignored. **Findings: 52 unused files · 23 unused exports · 2 unused exported types · 9 unused npm deps · 1 unused devDep.** The unused-file haul is dominated by the now-superseded `<StudioLayout>` family (entire `src/components/features/studio/` directory — the v8 PracticeScreen replaced it) and the v8 `studio-screen.tsx` file itself. Skipped `ts-prune` since `knip` already flags unused exports — no value in running both. PR2/A2.3 will delete after manual triage. Output: `docs/audits/dead-frontend.md`.
 
 ### A3 — Schema↔UI invariant tests
 
