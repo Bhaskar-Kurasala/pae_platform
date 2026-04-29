@@ -337,6 +337,86 @@ async def _require_student(db: AsyncSession, student_id: uuid.UUID) -> User:
     return user
 
 
+@router.get("/risk-panels")
+async def get_risk_panels(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(_require_admin),
+) -> dict[str, Any]:
+    """F4 — five real retention-engine panels keyed off student_risk_signals.
+
+    Returns the 5 slip-pattern panels in priority order. Each panel
+    has its top-N students (by risk_score DESC) plus a total count
+    so the UI can show "see all (N)" links.
+
+    Schema (each panel):
+      {
+        "students": [{"user_id", "name", "email", "risk_score",
+                      "risk_reason", "days_since_last_session",
+                      "max_streak_ever", "paid"}, ...],
+        "total": int
+      }
+
+    The 5 panels (ordered for triage):
+      paid_silent       — refund risk, top of admin's morning queue
+      capstone_stalled  — confidence churn, near-payoff
+      streak_broken     — most recoverable
+      promotion_avoidant — easy wins
+      cold_signup       — bigger volume, lower per-student value
+
+    Reads from student_risk_signals (computed by F1 nightly task).
+    Cheap query — single index scan per panel.
+    """
+    from app.models.student_risk_signals import StudentRiskSignals
+
+    PANELS = [
+        "paid_silent",
+        "capstone_stalled",
+        "streak_broken",
+        "promotion_avoidant",
+        "cold_signup",
+    ]
+    PANEL_LIMIT = 10  # show top 10 per panel; UI can load-more later
+
+    result: dict[str, Any] = {}
+    for slip_type in PANELS:
+        # Top-N rows for the panel, joined with users for display name.
+        rows_q = await db.execute(
+            select(StudentRiskSignals, User)
+            .join(User, StudentRiskSignals.user_id == User.id)
+            .where(StudentRiskSignals.slip_type == slip_type)
+            .order_by(StudentRiskSignals.risk_score.desc())
+            .limit(PANEL_LIMIT)
+        )
+        students = []
+        for signal, user in rows_q.all():
+            students.append(
+                {
+                    "user_id": str(user.id),
+                    "name": user.full_name,
+                    "email": user.email,
+                    "risk_score": signal.risk_score,
+                    "risk_reason": signal.risk_reason,
+                    "days_since_last_session": signal.days_since_last_session,
+                    "max_streak_ever": signal.max_streak_ever,
+                    "paid": signal.paid,
+                    "recommended_intervention": signal.recommended_intervention,
+                }
+            )
+
+        # Total count for "see all (N)" links — small extra query,
+        # acceptable cost vs. the alternative (fetching everything and
+        # measuring length on the frontend).
+        count_q = await db.execute(
+            select(func.count(StudentRiskSignals.id)).where(
+                StudentRiskSignals.slip_type == slip_type
+            )
+        )
+        total = count_q.scalar() or 0
+        result[slip_type] = {"students": students, "total": total}
+
+    return result
+
+
 @router.post(
     "/students/{student_id}/notes",
     response_model=StudentNoteResponse,

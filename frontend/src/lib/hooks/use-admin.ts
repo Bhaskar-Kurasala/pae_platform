@@ -207,3 +207,85 @@ export function useAdminPulse() {
     staleTime: 30_000,
   });
 }
+
+// ── F2 — Student notes (admin's private record per student) ────────
+// The backend routes already exist (POST + GET /admin/students/{id}/notes)
+// from Phase 3; F2 only adds the frontend wiring so admins can actually
+// see + write notes. Append-only by convention.
+
+export interface StudentNote {
+  id: string;
+  admin_id: string;
+  student_id: string;
+  body_md: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export function useStudentNotes(studentId: string | null | undefined) {
+  return useQuery<StudentNote[]>({
+    queryKey: ["admin", "student-notes", studentId],
+    queryFn: () =>
+      api.get<StudentNote[]>(
+        `/api/v1/admin/students/${studentId}/notes?limit=50`,
+      ),
+    enabled: !!studentId,
+    staleTime: 30_000,
+  });
+}
+
+export function useCreateStudentNote(studentId: string | null | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body_md: string) =>
+      api.post<StudentNote>(
+        `/api/v1/admin/students/${studentId}/notes`,
+        { body_md },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["admin", "student-notes", studentId],
+      });
+    },
+  });
+}
+
+// ── F4 — Retention engine panels ────────────────────────────────────
+// Reads from /admin/risk-panels which queries student_risk_signals
+// (populated nightly by F1's risk-scoring task). Each panel is one
+// slip pattern; the dashboard renders them in priority order.
+
+export interface RiskPanelStudent {
+  user_id: string;
+  name: string;
+  email: string;
+  risk_score: number;
+  risk_reason: string | null;
+  days_since_last_session: number | null;
+  max_streak_ever: number;
+  paid: boolean;
+  recommended_intervention: string | null;
+}
+
+export interface RiskPanel {
+  students: RiskPanelStudent[];
+  total: number;
+}
+
+export type RiskPanels = {
+  paid_silent: RiskPanel;
+  capstone_stalled: RiskPanel;
+  streak_broken: RiskPanel;
+  promotion_avoidant: RiskPanel;
+  cold_signup: RiskPanel;
+};
+
+export function useRiskPanels() {
+  return useQuery<RiskPanels>({
+    queryKey: ["admin", "risk-panels"],
+    queryFn: () => api.get<RiskPanels>("/api/v1/admin/risk-panels"),
+    // Panels recompute nightly via Celery; a 1-hour staleness is fine.
+    // Manual refresh on the page covers the "I just ran the task" case.
+    staleTime: 60 * 60_000,
+  });
+}

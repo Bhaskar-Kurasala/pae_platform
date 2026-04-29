@@ -49,6 +49,8 @@ from app.models.srs_card import SRSCard
 from app.models.student_misconception import StudentMisconception
 from app.models.student_note import StudentNote
 from app.models.student_progress import StudentProgress
+from app.models.student_risk_signals import StudentRiskSignals
+from app.models.outreach_log import OutreachLog
 from app.models.user import User
 from app.models.user_preferences import UserPreferences
 from app.models.saved_skill_path import SavedSkillPath
@@ -117,6 +119,8 @@ __all__ = [
     "SRSCard",
     "StudentMisconception",
     "StudentNote",
+    "StudentRiskSignals",
+    "OutreachLog",
     "UserPreferences",
     "UserSkillState",
     "SavedSkillPath",

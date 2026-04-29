@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
+import { RetentionPanels } from "./_components/retention-panels";
 import styles from "./console.module.css";
 
 // The admin console is the canonical /admin entry — single production-quality
@@ -285,6 +286,17 @@ export default function AdminConsoleV1Page() {
       ) : !data ? null : (
         <div className={styles.layout}>
           <main>
+            {/* F4 — Retention engine: real, query-driven slip-pattern panels.
+                Sits above the legacy ACTION BAND (which still renders mock
+                "call list" data from admin_console_profiles). The legacy
+                section will be removed once admins are using the
+                retention engine for triage; until then both are visible
+                so the cohort behavior data still shows up while we
+                accumulate real signals. */}
+            <section style={{ marginBottom: 32 }}>
+              <RetentionPanels />
+            </section>
+
             {/* ACTION BAND */}
             <section className={styles.actionBand}>
               <div className={styles.abTop}>

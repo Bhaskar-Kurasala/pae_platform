@@ -13,6 +13,7 @@ celery_app = Celery(
         "app.tasks.weekly_letters",
         "app.tasks.weekly_review",
         "app.tasks.inactivity_sweep",
+        "app.tasks.risk_scoring",
     ],
 )
 
@@ -45,6 +46,14 @@ celery_app.conf.update(
             "task": "app.tasks.inactivity_sweep.sweep_inactive_students",
             # Monday 09:00 UTC — start of week (P3 3B #152).
             "schedule": crontab(minute=0, hour=9, day_of_week=1),
+        },
+        # F1 — nightly student risk scoring. 03:00 UTC = off-peak for
+        # Neon (Asia is asleep, US is mid-evening), and 6 hours before
+        # the inactivity sweep so admin's morning queue has fresh
+        # signals.
+        "risk-scoring-nightly": {
+            "task": "app.tasks.risk_scoring.score_all_users",
+            "schedule": crontab(minute=0, hour=3),
         },
     },
 )
