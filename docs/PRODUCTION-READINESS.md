@@ -321,8 +321,9 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
   2. Stores it on a contextvar so `structlog.get_logger()` calls auto-include it.
   3. Sets `X-Request-ID` on the response.
   4. Frontend `api-client.ts` reads `X-Request-ID` from every response and stashes it on a `lastRequestId` ref so error toasts can show it.
-  - **Touches:** `backend/app/core/middleware.py`, `frontend/src/lib/api-client.ts`
+  - **Touches:** `backend/app/core/request_id.py` (already exists from PR2/B4.1), `frontend/src/lib/api-client.ts` (new — capture + expose lastRequestId)
   - **Acceptance:** Every log line for a request has the same `request_id`. UI errors show "Reference: abc123de" so support can search by it.
+  - **claimed-by:** track-o
   - **Done note:**
 
 - [ ] **C2.1** Audit every `except` block. Every one logs with structured fields: `event=...`, `user_id=...`, `request_id=...`, plus relevant context. No bare `except: pass`. No `print`.
