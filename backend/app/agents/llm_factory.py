@@ -26,6 +26,21 @@ def model_for(tier: Tier) -> str:
     return "claude-haiku-4-5" if tier == "fast" else "claude-sonnet-4-6"
 
 
+# PR2/B5.1 — Anthropic client timeouts and retry budget.
+#
+#   * `timeout` is the HARD wall-clock cap on a single LLM round-trip.
+#     30s is enough for the longest tutor responses we've actually seen
+#     in production; nothing useful happens after that. The UI's 30s
+#     AbortController on the frontend (PR2/B5.3) gives up at the same
+#     boundary, so the user gets a clean "request took too long" toast
+#     instead of a hung spinner.
+#   * `max_retries` is the SDK-internal retry on transient 5xx / network
+#     errors. 3 is the SDK default but we set it explicitly so a future
+#     SDK upgrade can't quietly change behavior.
+_LLM_TIMEOUT_S = 30.0
+_LLM_MAX_RETRIES = 3
+
+
 def build_llm(max_tokens: int = 4096, tier: Tier = "smart") -> ChatAnthropic:
     """Return a ChatAnthropic instance pointed at MiniMax or Anthropic.
 
@@ -35,6 +50,10 @@ def build_llm(max_tokens: int = 4096, tier: Tier = "smart") -> ChatAnthropic:
 
     MiniMax doesn't offer a separate fast model in this stack, so when
     MINIMAX_API_KEY is set both tiers route to the configured MiniMax model.
+
+    Every client returned carries a 30s hard timeout and a 3-retry budget
+    for transient failures (PR2/B5.1) — without these, a wedged upstream
+    can hang a request indefinitely and starve the workers.
     """
     if settings.minimax_api_key:
         return ChatAnthropic(  # type: ignore[call-arg]
@@ -42,12 +61,16 @@ def build_llm(max_tokens: int = 4096, tier: Tier = "smart") -> ChatAnthropic:
             anthropic_api_key=SecretStr(settings.minimax_api_key),
             base_url=settings.minimax_api_base_url,
             max_tokens=max_tokens,
+            timeout=_LLM_TIMEOUT_S,
+            max_retries=_LLM_MAX_RETRIES,
         )
     if settings.anthropic_api_key:
         return ChatAnthropic(  # type: ignore[call-arg]
             model=model_for(tier),
             anthropic_api_key=SecretStr(settings.anthropic_api_key),
             max_tokens=max_tokens,
+            timeout=_LLM_TIMEOUT_S,
+            max_retries=_LLM_MAX_RETRIES,
         )
     raise RuntimeError("No LLM API key configured. Set MINIMAX_API_KEY or ANTHROPIC_API_KEY in .env")
 

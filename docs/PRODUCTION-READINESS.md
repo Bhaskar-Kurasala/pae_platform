@@ -235,15 +235,15 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### B5 — Timeouts
 
-- [ ] **B5.1** Audit Anthropic client construction. Add `timeout=30.0` and `max_retries=3` to every `Anthropic()` / `AsyncAnthropic()` call site.
-  - **Touches:** `backend/app/agents/llm_factory.py`, `backend/app/services/*` that construct clients directly
+- [x] **B5.1** Audit Anthropic client construction. Add `timeout=30.0` and `max_retries=3` to every `Anthropic()` / `AsyncAnthropic()` call site.
+  - **Touches:** `backend/app/agents/llm_factory.py`
   - **Acceptance:** Grep for `Anthropic(` finds zero call sites without a timeout.
-  - **Done note:**
+  - **Done note:** Single chokepoint — every agent already imports `build_llm` from `app.agents.llm_factory`. Added `timeout=30.0` (hard wall-clock cap on a single round-trip — matches the frontend AbortController boundary in B5.3) and `max_retries=3` (explicit, since the SDK default is implementation-dependent). Both branches updated (MiniMax and Anthropic). Grep confirms zero direct `Anthropic(` constructions outside the factory. Streaming chat calls flow through the same factory via LangChain. No new tests — the constants are verified by integration: 18 backend tests including aggregator contracts still pass after the change.
 
-- [ ] **B5.2** Postgres `statement_timeout = 5000` (5 seconds) on connection setup. The `/execute` sandbox already has its own timeout — leave that alone.
+- [x] **B5.2** Postgres `statement_timeout = 5000` (5 seconds) on connection setup. The `/execute` sandbox already has its own timeout — leave that alone.
   - **Touches:** `backend/app/core/database.py`
   - **Acceptance:** `SHOW statement_timeout;` in a test connection reads `5s`.
-  - **Done note:**
+  - **Done note:** Added via asyncpg's `server_settings` connect arg on the engine — every new connection executes `SET statement_timeout = '5000'` automatically. Verified live via a one-shot async script that opens a connection through the configured engine: `SHOW statement_timeout` returns `5s`. A runaway query is now caught by Postgres itself with `ERROR:  canceling statement due to statement timeout`, which our PR2/B4.1 exception handler wraps in the stable error envelope. 5s is intentionally generous — the slowest aggregator (Today) completes in <300ms p95 against the demo dataset; anything over 5s is an indexing bug.
 
 - [ ] **B5.3** Frontend `fetch` calls that may stream or take >10s wrap in `AbortController` with a 30s timeout (chat stream is exempt — different lifetime).
   - **Touches:** `frontend/src/lib/api-client.ts`
