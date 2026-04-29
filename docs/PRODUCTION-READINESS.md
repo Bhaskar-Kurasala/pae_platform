@@ -334,10 +334,11 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### C3 — PostHog telemetry
 
-- [ ] **C3.1** Add `posthog-node` (backend) and `posthog-js` (frontend). Init from env vars; no-op when key absent (dev / CI).
-  - **Touches:** `frontend/src/lib/telemetry.ts`, `backend/app/core/telemetry.py`
+- [x] **C3.1** Add `posthog-node` (backend) and `posthog-js` (frontend). Init from env vars; no-op when key absent (dev / CI).
+  - **Touches:** `frontend/src/lib/telemetry.ts` (new), `backend/app/core/telemetry.py` (new), `backend/pyproject.toml`, `backend/uv.lock`, `frontend/package.json`, `backend/tests/test_core/test_telemetry.py` (new), `frontend/src/lib/__tests__/telemetry.test.ts` (new)
   - **Acceptance:** Without `NEXT_PUBLIC_POSTHOG_KEY`, no events fire and no errors thrown.
-  - **Done note:**
+  - **claimed-by:** track-o
+  - **Done note:** Two thin chokepoint modules — backend `app/core/telemetry.py` and frontend `lib/telemetry.ts` — each exposing the same surface (`capture`, `identify`/no-op, `flush`/`reset`). Five design rules locked in: (1) **No-op safe** — when `POSTHOG_KEY` (backend) or `NEXT_PUBLIC_POSTHOG_KEY` (frontend) is unset, every public function silently does nothing. Dev, CI, and self-hosted deploys without telemetry must work identically — they just stop emitting. (2) **Lazy init** — backend uses module-level `_initialized` guard; frontend dynamic-imports `posthog-js` on first use so the dev bundle isn't bloated for engineers who never run with telemetry on. (3) **Single init** — guard against Next HMR re-evaluation re-initing the SDK. (4) **No typed event catalog at this layer** — call sites in C3.2 own the catalog so a screen-level refactor can rename events without touching the shim. (5) **Soft-fail everything** — SDK exceptions during capture/flush are swallowed with a `log.warning` (backend) or silently dropped (frontend); telemetry can never propagate into a request handler or onClick. Hit one structlog gotcha (also seen in PR2/B4.1): `log.warning(..., event=event_name)` collides with the positional first arg `event`, so the kwarg in the failure path is `event_name` instead. Tests: **5 backend + 4 frontend**, covering missing key (no-op), missing SDK install (no-op), forwarded SDK call, swallowed SDK exceptions, and init-failure-disables-telemetry (the `_initialized` flag prevents re-trying constructor on every event). Backend `posthog>=7.13.1` and frontend `posthog-js` both pinned to lockfiles.
 
 - [ ] **C3.2** Emit the standard event set:
   - `auth.signed_up`, `auth.signed_in`, `auth.token_refreshed`
