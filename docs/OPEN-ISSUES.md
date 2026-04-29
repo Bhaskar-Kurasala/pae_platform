@@ -41,9 +41,17 @@ When new issues surface in production, add them here **before** firing off a fix
 
 ## 🔲 Open
 
-### P1-A — Admin interaction audit (buttons, workflows, mutations)
+### ✅ P1-A — Admin interaction audit (buttons, workflows, mutations)
 
-> **🔄 SUPERSEDED by [`RETENTION-ENGINE.md`](./RETENTION-ENGINE.md).** What started as a "do the buttons work" audit became a product-level rethink. Bhaskar (PM) reframed the question from "are admin tools functional?" to "is the system catching slipping students?" — and we discovered most of the broken buttons (Schedule call / Send DM / Add note) were *missing features*, not broken implementations. The 14-ticket retention-engine plan is the right answer; this entry stays for receipts.
+**Closed by:** `82e6246` (Retention Engine Tier 1 — F0-F6 merge).
+
+**Resolution:** Reframed from "do the buttons work" to "is the system catching slipping students" — and built the retention engine answer instead of patching stub buttons. Tier 1 (F0-F6) shipped: nightly risk scoring (F1), real /admin panels keyed off slip patterns (F4), admin notes UI (F2), outreach log + email service + 6 templates (F3+F5+F6). 27 new backend tests + 7 new Playwright e2e specs. Stub buttons that turned out to be missing-feature placeholders (Send DM, Schedule call) remain hidden pending Tier 2 (deliberately deferred).
+
+The original audit's full findings are preserved in [`RETENTION-ENGINE.md`](./RETENTION-ENGINE.md) which is now the canonical retention-engine tracker.
+
+---
+
+### P1-A (original notes — kept for receipts)
 
 The MCP coverage audit (commit `83b1f74`) verified every admin screen *renders* with real data. It did NOT verify that interactive elements actually do what they claim. Before opening admin access to non-Bhaskar accounts, every click target across `/admin/*` needs a smoke check.
 

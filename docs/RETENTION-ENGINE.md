@@ -476,7 +476,7 @@ All 6 core tickets shipped in a single coordinated build. Total: ~2 days work, 2
 - 0049_student_risk_signals — created
 - 0051_outreach_log — created
 - 0050_student_notes (originally planned) — discovered table already existed from Phase 3 (`0014_student_notes.py`); reused existing schema rather than alter
-- closed-by: (in this commit)
+- closed-by: `3197dec` (merged via `82e6246`)
 
 **F1 — student_risk_service + nightly scoring**
 - New `app/models/student_risk_signals.py`
@@ -484,34 +484,34 @@ All 6 core tickets shipped in a single coordinated build. Total: ~2 days work, 2
 - New `app/tasks/risk_scoring.py` — Celery Beat scheduled at 03:00 UTC daily
 - 14 unit tests covering all 6 slip patterns + priority conflicts + edge cases
 - **Live data: scored 101 users, found 97 cold_signups + 4 healthy** when invoked manually
-- closed-by: (in this commit)
+- closed-by: `3197dec` (merged via `82e6246`)
 
 **F2 — student_notes admin UI**
 - Backend routes were already shipped in Phase 3 (`POST/GET /admin/students/{id}/notes`)
 - New hooks: `useStudentNotes`, `useCreateStudentNote`
 - Notes card added to `/admin/students/{id}` between Trigger agent and Activity timeline
 - MCP verified end-to-end: typed → 201 POSTed → rendered → textarea cleared
-- closed-by: (in this commit)
+- closed-by: `3197dec` (merged via `82e6246`)
 
 **F3 — outreach_log table + OutreachService**
 - New `app/models/outreach_log.py`
 - New `app/services/outreach_service.py` with `record`, `was_sent_recently` (per-template throttle), `mark_delivered`, `mark_opened`, `list_for_user`
 - 7 unit tests covering throttle window, per-template separation, idempotent webhooks, failed-status doesn't block retry
-- closed-by: (in this commit)
+- closed-by: `3197dec` (merged via `82e6246`)
 
 **F4 — Real `/admin` retention panels (kill mock data)**
 - New backend `GET /admin/risk-panels` returns 5 panels with top-N students per slip type
 - New `app/admin/_components/retention-panels.tsx` — 5-panel grid with priority ordering, empty states, "see all (N)" links
 - Drops above the legacy ACTION BAND on `/admin/page.tsx` (legacy mock-data section retained pending v2 rebuild)
 - MCP verified: all 5 panels render with correct totals matching API
-- closed-by: (in this commit)
+- closed-by: `3197dec` (merged via `82e6246`)
 
 **F5 — Outreach email service (SendGrid wrapper)**
 - New `app/services/outreach_email_service.py` (distinct from legacy `email_service.py` which handles welcome/digest emails)
 - No-op safe: missing SENDGRID_API_KEY → status='mocked', dev/CI work normally
 - Audit-before-network: row written with status='pending' before SendGrid call, flipped to 'sent'/'failed' after
 - 6 unit tests: mocked path, throttled, no-recipient, render-failure, real-send (mocked SDK), SDK-exception swallowed
-- closed-by: (in this commit)
+- closed-by: `3197dec` (merged via `82e6246`)
 
 **F6 — Six email templates (one per slip pattern)**
 - `cold_signup_day_1.html` — first-session reminder, refs target_role
@@ -521,7 +521,7 @@ All 6 core tickets shipped in a single coordinated build. Total: ~2 days work, 2
 - `capstone_stalled_day_7.html` — confidence churn; specific unblock path
 - `promotion_avoidant_day_3.html` — celebrate; lower the perceived bar
 - All Jinja2-rendered, mobile-first single-column, frontmatter-style `{% set subject = ... %}`
-- closed-by: (in this commit)
+- closed-by: `3197dec` (merged via `82e6246`)
 
 **E2E coverage (Playwright)**
 - New `frontend/e2e/retention-engine.spec.ts` — 7 tests covering F4 panel render, totals API contract, F2 add-note round-trip, zero console errors, admin-gate enforcement
