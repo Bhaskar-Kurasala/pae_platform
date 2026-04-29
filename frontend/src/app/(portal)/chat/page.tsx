@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AlertTriangle, Archive, ArchiveRestore, ArrowDown, ArrowUp, AtSign, Bookmark, BookmarkCheck, BookOpen, Bot, BriefcaseBusiness, Check, ChevronLeft, ChevronRight, Clock, Code2, Copy, Download, FileCode, FileText, GraduationCap, ImageIcon, ListChecks, Lock, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Puzzle, RefreshCw, RotateCw, Search, Sparkles, Square, Timer, Trash2, User, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { stripMarkdownToText, truncateAtWord } from "@/lib/markdown-text";
 import { MarkdownRenderer } from "@/components/features/markdown-renderer";
 import {
   useStream,
@@ -3090,7 +3091,13 @@ function ChatArea({
         (initialMessages?.length ?? 0) === 0 &&
         messages.length === 1
       ) {
-        onFirstMessage(last.content.slice(0, 60), mode.agentName ?? undefined);
+        // PR1/A5.1 — sanitize raw markdown before it becomes a sidebar
+        // title. Without this, a question like `**why does \`asyncio.gather\`
+        // ...**` ships its `**` and backticks into the conversation list.
+        onFirstMessage(
+          truncateAtWord(stripMarkdownToText(last.content), 60),
+          mode.agentName ?? undefined,
+        );
       }
       lastReportedLength.current = messages.length;
     }

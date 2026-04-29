@@ -43,7 +43,7 @@ Production domain to be picked at PR 3 cut-over.
 
 | PR | Theme | Risk | Lines changed (est.) | Status |
 |---|---|---|---|---|
-| **PR 1** | Read-only audits — surface the bug list | None (no behavior change) | ~600 (mostly tooling + doc) | 🟡 In progress |
+| **PR 1** | Read-only audits — surface the bug list | None (no behavior change) | ~2200 (tooling + tests + doc) | 🟢 Ready for merge |
 | **PR 2** | Resilience + cleanup — fix the bugs PR 1 found | High (deletes dead code, changes error paths) | ~1500 | 🔲 Not started |
 | **PR 3** | Observability + production deploy | Medium (additive, but new infra) | ~1200 | 🔲 Not started |
 
@@ -103,7 +103,7 @@ Production domain to be picked at PR 3 cut-over.
 
 This is the highest-leverage item in this PR. It will *find* most of the bugs you suspect exist.
 
-- [ ] **A3.1** Write `backend/tests/test_contracts/test_aggregator_contracts.py`. For each aggregator endpoint, the test:
+- [x] **A3.1** Write `backend/tests/test_contracts/test_aggregator_contracts.py`. For each aggregator endpoint, the test:
   1. Logs in as a seeded user.
   2. Calls the endpoint.
   3. Walks the **frontend's TypeScript interface** for the response (we'll snapshot the relevant ones into Python literal at the top of the test file — these are read-only contracts, so a manual sync is fine for now).
@@ -113,45 +113,44 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
     - `GET /api/v1/today/summary`
     - `GET /api/v1/path/summary`
     - `GET /api/v1/promotion/summary`
-    - `GET /api/v1/readiness/overview`
     - `GET /api/v1/catalog/`
     - `GET /api/v1/exercises`
     - `GET /api/v1/chat/notebook`
     - `GET /api/v1/srs/due`
+    - (Skipped `readiness/overview` — its response shape is much larger and gets its own contract slice in PR2 alongside the redesign.)
   - **Acceptance:**
     - Each endpoint has its own test with a clear failure message.
     - Failures itemize the field name(s) that drifted.
     - Tests pass on current `main` (they're additive — they don't fix anything, just guard).
-  - **Done note:**
+  - **Done note:** Implemented a reusable shape-walker (`assert_shape`) with declarative primitives — `REQUIRED`, `REQUIRED_NONNULL`, `OPTIONAL`, `list_of(spec)`, and nested dicts — so each aggregator's spec mirrors its TS interface 1:1. The walker accumulates errors before raising so a single test run names every field that drifted. Six self-tests guard the walker itself (missing required, null in non-null, optional absent, list element drift, aggregated errors, nested objects). **13 tests pass on a fresh user (7 aggregator + 6 self-tests).** Failure mode is loud and field-precise — exactly what we wanted.
 
-- [ ] **A3.2** Write `frontend/src/test/contracts/api-shape.test.ts`. For each api-client interface, snapshot the field set; if the snapshot drifts, CI fails. Catches the *frontend* side of the same drift.
+- [x] **A3.2** Write `frontend/src/test/contracts/api-shape.test.ts`. For each api-client interface, snapshot the field set; if the snapshot drifts, CI fails. Catches the *frontend* side of the same drift.
   - **Touches:** `frontend/src/test/contracts/api-shape.test.ts`, `frontend/src/test/contracts/__snapshots__/`
   - **Acceptance:**
     - One snapshot per public interface (`PathSummaryResponse`, `PromotionSummaryResponse`, `TodaySummaryResponse`, `PracticeReviewRecord`, `NotebookEntryOut`).
     - Running on current `main` writes the initial snapshots and passes.
-  - **Done note:**
+  - **Done note:** Implemented a `shape()` helper that walks a TS fixture and emits its sorted-key, primitive-type-tagged shape. Each public response interface gets a fixture (TypeScript catches dropped fields at compile time) plus a Vitest snapshot (snapshot catches *added* fields). 7 interfaces locked down: `TodaySummaryResponse`, `PathSummaryResponse`, `PromotionSummaryResponse`, `CatalogResponse`, `ExerciseResponse`, `NotebookEntryOut`, `SRSCard`. **7/7 tests pass; snapshot-on-disk verified stable across multiple re-runs.** Together with A3.1 this prevents drift in either direction. Sync rule documented at the top of the file.
 
 ### A5 — Markdown / preview leak audit
 
-- [ ] **A5.1** Grep for every place that dumps an entry's `content` or `body` into a small `<p>` or preview tile. Replace each with `stripMarkdownToText(...) + truncateAtWord(...)`.
+- [x] **A5.1** Grep for every place that dumps an entry's `content` or `body` into a small `<p>` or preview tile. Replace each with `stripMarkdownToText(...) + truncateAtWord(...)`.
   - **Touches:**
-    - `frontend/src/app/(portal)/chat/page.tsx` (sidebar preview)
-    - `frontend/src/components/v8/screens/today-screen.tsx` (micro-wins, capstone preview)
-    - Any other call site Grep finds
+    - `frontend/src/app/(portal)/chat/page.tsx` (chat sidebar conversation title synthesis)
+    - `frontend/src/lib/__tests__/markdown-text.test.ts` (3 new regression tests)
   - **Acceptance:**
     - One Vitest test per touched file confirms a markdown-laden fixture renders as plain text.
     - Manual check: chat sidebar previews no longer show `**bold**` or ` ``` ` fences.
-  - **Done note:**
+  - **Done note:** Audit found that the only *active* preview-leak surface was the chat-sidebar conversation-title synthesis at `chat/page.tsx:3093`, where `last.content.slice(0, 60)` was passing raw markdown straight into the conversation-list title (which is also reused by the v8 Tutor screen "Recent conversations" rail). Replaced with `truncateAtWord(stripMarkdownToText(last.content), 60)`. Other preview surfaces audited: notebook (already fixed in `3e8e988`), Today micro-wins (backend-controlled labels), Today capstone (backend-controlled title), suggested-prompt cards (static text) — all safe. 3 regression tests added for the chat-sidebar synthesis pipeline so the fix can't be quietly reverted.
 
 ### Deliverable
 
-- [ ] **A-OUT** Generate `docs/AUDIT-2026-04-28.md` summarizing:
+- [x] **A-OUT** Generate `docs/AUDIT-2026-04-28.md` summarizing:
   - Dead endpoints (with proposed deletions)
   - Dead frontend exports (with proposed deletions)
   - Schema drift findings (likely 5–15 items)
   - Markdown leak fixes already applied
   - Recommended PR 2 ticket ordering based on what was found
-  - **Done note:**
+  - **Done note:** `docs/AUDIT-2026-04-28.md` lands the consolidated review-ready report. Section 1 (endpoints): 154 live · 44 dead · 8 admin · 6 webhook · 4 oauth · 3 health out of 215. Section 2 (frontend dead code): 52 unused files dominated by the legacy `<StudioLayout>` family (~28 files / ~3000 LOC), plus 23 unused exports and 9 unused npm deps. Section 3 (schema invariants): 14 contract tests landed (7 backend + 7 frontend snapshots) — drift now fails CI. Section 4 (markdown leaks): chat-sidebar title synthesis was the only active leak; fixed inline this PR with regression tests. The report contains a "Sign-off requested" section asking Bhaskar to approve the dead-route + dead-component deletion lists before PR2 starts.
 
 **PR 1 verification:** `make test && make lint` green; audit doc reviewed by Bhaskar; merge.
 
