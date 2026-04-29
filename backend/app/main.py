@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
+from app.api._deprecated import DeprecationHeaderMiddleware
 from app.core.config import settings
 from app.core.exception_handler import unhandled_exception_handler
 from app.core.logging import configure_logging
@@ -36,6 +37,12 @@ def create_app() -> FastAPI:
 
     # Request ID — must be outermost so every log line gets the correlation ID
     app.add_middleware(RequestIDMiddleware)
+
+    # PR2/A4.1 — Deprecation/Sunset headers on routes marked with
+    # `@deprecated`. Runs after the route is matched so it can read the
+    # endpoint's metadata; sits inside RequestIDMiddleware so the request
+    # id is already present when we log the warning.
+    app.add_middleware(DeprecationHeaderMiddleware)
 
     # Rate limiting
     app.state.limiter = limiter

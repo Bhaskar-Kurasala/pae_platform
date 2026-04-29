@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api._deprecated import deprecated
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user
@@ -254,6 +255,7 @@ async def get_order_route(
 
 
 @router.get("/orders/{order_id}/receipt.pdf")
+@deprecated(sunset="2026-07-01", reason="PDF receipt not yet wired in v8")
 async def get_order_receipt_pdf(
     order_id: uuid.UUID,
     current_user: User = Depends(get_current_user),

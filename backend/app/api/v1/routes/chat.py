@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api._deprecated import deprecated
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
@@ -53,6 +54,7 @@ def _service(db: AsyncSession = Depends(get_db)) -> ChatService:
     response_model=ConversationRead,
     status_code=status.HTTP_201_CREATED,
 )
+@deprecated(sunset="2026-07-01", reason="frontend creates conversations implicitly via /chat")
 async def create_conversation(
     payload: ConversationCreate,
     service: ChatService = Depends(_service),
@@ -292,6 +294,7 @@ async def get_conversation(
     "/conversations/{conversation_id}/messages",
     response_model=list[ChatMessageRead],
 )
+@deprecated(sunset="2026-07-01", reason="frontend uses /conversations/{id} (returns messages)")
 async def list_messages(
     conversation_id: uuid.UUID,
     limit: int = Query(default=50, ge=1, le=200),
@@ -602,6 +605,7 @@ async def upload_attachment(
     "/context-suggestions",
     response_model=ContextSuggestionsResponse,
 )
+@deprecated(sunset="2026-07-01", reason="no live UI caller -- re-evaluate when context UX returns")
 async def context_suggestions(
     lesson_id: uuid.UUID | None = Query(
         default=None,

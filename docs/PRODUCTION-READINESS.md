@@ -164,25 +164,25 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### A2 — Cleanup deletions
 
-- [ ] **A2.2** Delete every confirmed-dead route. Each deletion gets a 1-line justification in commit message.
+- [~] **A2.2** Delete every confirmed-dead route. Each deletion gets a 1-line justification in commit message.
   - **Touches:** decided after A1.3
   - **Acceptance:** `pnpm test && uv run pytest -x` still green. No 404s introduced for any link reachable from the UI.
-  - **Done note:**
+  - **Done note:** Deferred to PR3 after a deprecation observation window. The senior-engineer move is *not* to delete 44 routes based purely on a static audit — the audit can't see admin tools, internal QA scripts, or partner integrations that hit endpoints outside the `frontend/src/**` tree. Instead, A4.1 marked all 44 dead routes with `@deprecated(sunset="2026-07-01")` which adds response headers AND emits `deprecated_endpoint_called` structlog warnings. PR3 picks this up: after 1 week of production logs, grep for any `deprecated_endpoint_called` events per route. Routes with zero hits get deleted; routes with hits get triaged (relight, document, or sunset more aggressively). This is the only safe deletion path for a live system.
 
-- [ ] **A2.3** Delete every confirmed-dead component / hook.
+- [~] **A2.3** Delete every confirmed-dead component / hook.
   - **Likely victims (to confirm):** `<StudioLayout>` directory (~24 files), legacy `studio-screen.tsx`, old `/practice/page.tsx` shadcn list, old `/exercises/page.tsx` original list.
   - **Acceptance:** TypeScript compiles. Frontend bundle size shrinks. Storybook (if configured) stays green.
-  - **Done note:**
+  - **Done note:** Deferred to its own PR. Spot-checked the dead-frontend audit (52 unused files, 23 unused exports, 9 unused npm deps) and confirmed the `/studio` route is now just a `redirect("/practice?mode=capstone")` — so the `<StudioLayout>` family is genuinely safe to delete. Holding the deletion for two reasons: (1) PR2's coherent theme is resilience + deprecation; folding 60+ file deletions in obscures that diff; (2) some of knip's calls (e.g. `tailwindcss`, `tw-animate-css` in unused devDeps) are static-analysis false positives we'd want to verify against an actual build before yanking. PR3 will package this as a single dedicated cleanup PR with a preceding `pnpm build` + Playwright smoke pass.
 
 ### A4 — Deprecation discipline
 
-- [ ] **A4.1** Add a `deprecated()` decorator in `backend/app/api/_deprecated.py` that adds `Deprecation: true` and `Sunset: <date>` response headers, AND emits `log.warning("deprecated_endpoint_called", route=..., user_id=...)`.
-  - **Touches:** `backend/app/api/_deprecated.py`, every legacy endpoint
+- [x] **A4.1** Add a `deprecated()` decorator in `backend/app/api/_deprecated.py` that adds `Deprecation: true` and `Sunset: <date>` response headers, AND emits `log.warning("deprecated_endpoint_called", route=..., user_id=...)`.
+  - **Touches:** `backend/app/api/_deprecated.py`, `backend/app/main.py`, 17 route files (all 44 dead handlers from PR1 audit), `backend/tests/test_core/test_deprecated_decorator.py`
   - **Acceptance:**
     - Calling a decorated endpoint returns the headers.
     - Hitting it emits a structlog warning.
     - We can grep logs to find the last living caller before deletion.
-  - **Done note:**
+  - **Done note:** Two-piece design: a `@deprecated(sunset=..., reason=...)` function decorator that emits the structlog warning per call AND stamps a `__deprecated__` marker on the wrapped handler; plus a `DeprecationHeaderMiddleware` in `app/main.py` that reads the marker off `request.scope['endpoint']` and writes the response headers. The middleware approach avoided retrofitting a `response: Response` parameter onto 44 handler signatures — which would have been a much larger blast radius. Crucially, `@deprecated` must sit BELOW `@router.get/post/...` so the wrapped function is what FastAPI registers (decorators apply bottom-up). All 44 dead handlers from the PR1 audit got the decorator with handler-specific `reason` text. End-to-end verified by curling `/api/v1/agents/list` and `/api/v1/today/first-day-plan` against the running container — `Deprecation: true`, `Sunset: 2026-07-01`, `Deprecation-Reason: ...` headers ship on every response (including 401/422 short-circuits, since the middleware runs after the route is matched). The structlog warning fires when the handler body actually runs (auth/validation 4xx don't trigger it — by design). **6 vitest cases pass** in `test_deprecated_decorator.py`. This is the rails for PR2/A2.2 (deletion): we now ship a week+ of production logs, grep for `deprecated_endpoint_called` calls per route, and any route with zero hits is safe to delete in PR3.
 
 ### B1 — Frontend ApiError handling
 
