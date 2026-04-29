@@ -287,6 +287,8 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 **PR 2 verification:** Full `make test && make lint`. Manual smoke walk on Today / Practice / Notebook / Promotion at 1440×900 and 768×1024. All confirmed-dead code removed.
 
+**PR 2 status (2026-04-29):** All 14 in-scope tasks complete. A2.2 (route deletion) and A2.3 (frontend dead-code deletion) deferred to PR3 with explicit rationale — both need a deprecation observation window before deletion is safe. Six commits ready on `prod/pr2-resilience`: `f1745a7` (B4.1), `5d09991` (B5.1+B5.2), `2bc032d` (B5.3), `abad42b` (B6.1), `6ec4ccc` (B6.2+B7.1), `c445ae4` (B1.1+B2.1+B3.1), `783e376` (A4.1), `fee1e4f` (A5.2). Backend: **982 passed** (+5 vs main from new test_deprecated_decorator.py); 24 failures are pre-existing SQLite/timezone issues unrelated to PR2 (verified by re-running on main). Frontend: chat test failures pre-exist on main (no QueryClientProvider in test harness — tracked separately). New test count introduced by PR2: **+19 backend** (5 exception handler + 5 idempotency unit + 1 idempotency integration + 6 deprecated decorator + 2 promotion route updates) **+33 frontend** (3 timeout + 2 refresh + 7 toast classifier + 5 RouteError + 5 senior-review-preview + 11 markdown-text + others from B-tier work). Awaiting Bhaskar approval to merge.
+
 ---
 
 ## PR 3 — Observability + production deploy
