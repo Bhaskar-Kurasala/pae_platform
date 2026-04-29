@@ -53,6 +53,7 @@ import {
 import { chatApi } from "@/lib/chat-api";
 import { useSeniorReview } from "@/lib/hooks/use-senior-review";
 import { usePracticeWorkspace } from "@/lib/hooks/use-practice-workspace";
+import { stripMarkdownToText, truncateAtWord } from "@/lib/markdown-text";
 import { useAuthStore } from "@/stores/auth-store";
 import { cn } from "@/lib/utils";
 
@@ -101,6 +102,16 @@ function pluralLabs(n: number): string {
   return n === 1 ? "lab" : "labs";
 }
 
+// PR2/A5.2 — senior-review payloads come from the LLM and routinely
+// contain `**bold**`, backticks, and the occasional code fence. Renders
+// of `.body` land inside a small <span> with line-clamp styling, so raw
+// markdown leaks through as literal asterisks. Strip + truncate at the
+// boundary so the preview tile shows clean prose, full markdown only
+// renders on the message detail surfaces.
+const REVIEW_BODY_MAX = 200;
+export const cleanReviewBody = (raw: string): string =>
+  truncateAtWord(stripMarkdownToText(raw), REVIEW_BODY_MAX);
+
 function reviewItemsFrom(
   data: ReturnType<typeof useSeniorReview>["data"],
 ): Array<{ variant: "good" | "warn" | "todo"; heading: string; body: string }> {
@@ -122,7 +133,7 @@ function reviewItemsFrom(
     items.push({
       variant: "good",
       heading: "What is working",
-      body: data.strengths[0],
+      body: cleanReviewBody(data.strengths[0]),
     });
   }
   const concern = data.comments.find(
@@ -132,14 +143,14 @@ function reviewItemsFrom(
     items.push({
       variant: "warn",
       heading: `Close this gap (line ${concern.line})`,
-      body: concern.message,
+      body: cleanReviewBody(concern.message),
     });
   }
   if (data.next_step) {
     items.push({
       variant: "todo",
       heading: "Before submission",
-      body: data.next_step,
+      body: cleanReviewBody(data.next_step),
     });
   }
   if (items.length === 0) {

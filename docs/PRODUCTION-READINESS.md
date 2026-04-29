@@ -280,10 +280,10 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### A5 — leftover preview-leak fixes
 
-- [ ] **A5.2** Apply remaining markdown-strip fixes from PR 1's audit.
-  - **Touches:** decided after A5.1
+- [x] **A5.2** Apply remaining markdown-strip fixes from PR 1's audit.
+  - **Touches:** `frontend/src/components/v8/screens/practice-screen.tsx`, `frontend/src/components/v8/screens/__tests__/senior-review-preview.test.ts`
   - **Acceptance:** No remaining surface dumps raw markdown into a small preview.
-  - **Done note:**
+  - **Done note:** Re-grep'd every `{*.content}`, `{*.body}`, `{*.description}` JSX usage and triaged each: most are static fixtures (signal/agent labels), structured backend fields (course/lesson description), or markdown-rendered surfaces (LetterBody, MarkdownRenderer). The one *active* leak surface that was missed in A5.1 was `practice-screen.tsx::reviewItemsFrom` — it dumped LLM-generated `data.strengths[0]` / `concern.message` / `data.next_step` into a small `<span>` inside `.review-item` (line-clamped). LLM senior-review output routinely contains `**bold**` and backticks, which leaked through as literal asterisks. Added a `cleanReviewBody = truncateAtWord(stripMarkdownToText(...), 200)` helper at the module boundary and routed all three body fields through it. Helper is intentionally exported (with `_test`-style tests treating it as a public function) so a future "let's just dump the LLM body in" doesn't quietly resurrect the leak. **5 vitest cases pass** in `senior-review-preview.test.ts` covering bold, backticks, fenced blocks (dropped intentionally — students drill into full review for code), truncation, and short-text passthrough. Existing `practice-screen.test.tsx` (7 tests) still green.
 
 **PR 2 verification:** Full `make test && make lint`. Manual smoke walk on Today / Practice / Notebook / Promotion at 1440×900 and 768×1024. All confirmed-dead code removed.
 
