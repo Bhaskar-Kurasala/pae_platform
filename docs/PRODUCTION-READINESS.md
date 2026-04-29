@@ -363,15 +363,15 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### C6 — Health checks
 
-- [~] **C6.1** `GET /health/ready` — pings DB, Redis, returns 200 only when all green. Returns `{db: "ok", redis: "ok", anthropic: "skipped" | "ok"}`. claimed-by: track-h
-  - **Touches:** `backend/app/api/v1/routes/health.py`
+- [x] **C6.1** `GET /health/ready` — pings DB, Redis, returns 200 only when all green. Returns `{db: "ok", redis: "ok", anthropic: "skipped" | "ok"}`. claimed-by: track-h
+  - **Touches:** `backend/app/api/v1/routes/health.py`, `backend/tests/test_routes/test_health_deep.py`
   - **Acceptance:** Stop redis → endpoint returns 503 with `redis: "unreachable"`.
-  - **Done note:**
+  - **Done note:** PR2/B5.2 already shipped a `/health/ready` that probed DB + Redis and returned 503 on degradation. PR3/C6.1 hardens the contract on three fronts. (1) Added an `anthropic` check that reports key *presence* — `"skipped"` when no key is configured (dev / CI), `"ok"` when one is. Crucially, `_check_anthropic` does NOT make a live HTTP call: the project's rate-limit budget is too precious to burn on a probe that fires every 10s under K8s/Fly, and a third-party uptime is not ours to gate readiness on. (2) Promoted the per-dep verdict to a typed `status: Literal["ok", "unreachable", "skipped"]` so the JSON body reads like the spec calls for (`{"db": {"status": "ok"}, "redis": {"status": "unreachable", "error": "..."}, "anthropic": {"status": "skipped"}}`). (3) Made readiness gate only on `db` + `redis` — anthropic is informational. A dev environment without an Anthropic key still returns 200 and `anthropic.status="skipped"`, but a real Redis/DB outage trips 503 with structured detail naming the failed deps. The 503 path also enriches the structlog warning with `errors={dep: error_str}` so on-call gets the actual failure reason in one log line. **9 unit tests pass** in `test_health_deep.py` (3 pre-existing + 6 new) plus the 4 client-level tests in `test_core/test_health.py` and `test_api/test_health.py`. Surprise: the existing `_check_redis` returned `ok=bool(pong)` without flagging the falsy-pong case as unreachable — now it does, with `error="ping returned falsy"`.
 
-- [ ] **C6.2** `GET /health/version` — returns `{commit_sha, build_time, env}`. Set during Docker build.
-  - **Touches:** `backend/app/api/v1/routes/health.py`, `backend/Dockerfile`
+- [x] **C6.2** `GET /health/version` — returns `{commit_sha, build_time, env}`. Set during Docker build. claimed-by: track-h
+  - **Touches:** `backend/app/api/v1/routes/health.py`, `backend/Dockerfile`, `backend/tests/test_core/test_health.py`, `backend/tests/test_routes/test_health_deep.py`
   - **Acceptance:** Calling on dev returns the local commit SHA; calling on Fly returns the deployed SHA.
-  - **Done note:**
+  - **Done note:** New `GET /health/version` endpoint reads `BUILD_COMMIT_SHA` and `BUILD_TIME` from the process environment — both stamped into the image at Docker build time via `ARG` + `ENV` in `backend/Dockerfile`. The recommended invocation is `docker build --build-arg BUILD_COMMIT_SHA=$(git rev-parse HEAD) --build-arg BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) ...`. Without the args, both fall back to runtime sentinels: `commit_sha="dev"` and `build_time` becomes the current ISO timestamp — so on-call can spot a non-CI build at a glance ("`dev`" in the SHA = something built locally). `env` reflects the *runtime* `Settings.environment`, not build env, because the same image can legitimately run in staging or prod with only env-var differences. Two unit tests cover the "build args present" + "build args missing" paths via `unittest.mock.patch.dict(os.environ, ...)`; one client-level test in `test_health.py` confirms the HTTP shape. Track D will pass these args from `fly.toml` / Fly's image build pipeline; that's their territory and intentionally out of this commit.
 
 - [ ] **C6.3** Switch docker-compose healthcheck and Fly healthcheck to `/health/ready`.
   - **Touches:** `docker-compose.yml`, `fly.toml`
