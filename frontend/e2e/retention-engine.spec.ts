@@ -281,3 +281,34 @@ test.describe("F1 + F4 API contract", () => {
     expect(res.status()).toBe(403);
   });
 });
+
+// ── F10 — Calendar mailto-shim ──────────────────────────────────────────
+test.describe("F10 — Schedule call mailto: link", () => {
+  test("risk-card 'Schedule call' resolves to a pre-filled mailto: URL", async ({
+    page,
+  }) => {
+    await injectAdmin(page);
+    await page.goto("http://localhost:3002/admin", {
+      waitUntil: "domcontentloaded",
+      timeout: 20_000,
+    });
+
+    // Find any "Schedule call" link rendered by the risk-card grid.
+    // Older builds rendered a disabled <button> instead — F10 swaps
+    // that for an <a href="mailto:...">.
+    const link = page.getByRole("link", { name: "Schedule call" }).first();
+    if ((await link.count()) === 0) {
+      test.skip(true, "no risk cards rendered (clean retention state)");
+      return;
+    }
+    const href = await link.getAttribute("href");
+    expect(href, "Schedule call should be a mailto: link").toMatch(
+      /^mailto:[^?]+\?/,
+    );
+    expect(href).toContain("subject=");
+    expect(href).toContain("body=");
+    // The body greets the student by name — we don't know the name,
+    // but we know the body URL-encodes to start with "Hey ".
+    expect(href).toMatch(/body=Hey%20/);
+  });
+});

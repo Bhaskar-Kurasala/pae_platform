@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
+import { buildCallInviteMailto } from "@/lib/calendar-mailto";
 import { RetentionPanels } from "./_components/retention-panels";
 import styles from "./console.module.css";
 
@@ -366,12 +367,26 @@ export default function AdminConsoleV1Page() {
                       >
                         Open profile
                       </button>
-                      <button
+                      <a
                         className={`${styles.rcBtn} ${styles.ghost}`}
+                        // F10 — opens the operator's mail client with
+                        // a pre-filled invite. Stops propagation so
+                        // clicking the link doesn't also open the
+                        // student profile modal underneath.
+                        href={
+                          s.email
+                            ? buildCallInviteMailto({
+                                studentEmail: s.email,
+                                studentName: s.name,
+                                riskReason: s.risk_reason,
+                              })
+                            : undefined
+                        }
+                        aria-disabled={!s.email}
                         onClick={(e) => e.stopPropagation()}
                       >
                         Schedule call
-                      </button>
+                      </a>
                     </div>
                   </div>
                 ))}
@@ -1208,7 +1223,22 @@ function StudentModal({
         <div className={styles.modalFoot}>
           <button className={`${styles.btn} ${styles.ghost}`}>Send DM</button>
           <button className={`${styles.btn} ${styles.ghost}`}>Add note</button>
-          <button className={`${styles.btn} ${styles.primary}`}>Schedule call</button>
+          {/* F10 — pre-filled mailto invite. Real Cal.com flow lands later (F10 v2). */}
+          <a
+            className={`${styles.btn} ${styles.primary}`}
+            href={
+              student.email
+                ? buildCallInviteMailto({
+                    studentEmail: student.email,
+                    studentName: student.name,
+                    riskReason: student.risk_reason,
+                  })
+                : undefined
+            }
+            aria-disabled={!student.email}
+          >
+            Schedule call
+          </a>
         </div>
       </div>
     </div>
