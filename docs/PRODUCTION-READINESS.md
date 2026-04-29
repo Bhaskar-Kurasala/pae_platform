@@ -6,6 +6,8 @@
 
 This document is the **single source of truth** for the production-readiness pass. Every working agent — current or future — reads this first, picks the next `[ ]` task in the active PR, executes it under the standards in [`AGENT-OPERATING-SPEC.md`](./AGENT-OPERATING-SPEC.md), then flips the checkbox to `[x]` with a one-paragraph completion note.
 
+> **🔖 Looking for what's still open after PR1+PR2+PR3?** See [`OPEN-ISSUES.md`](./OPEN-ISSUES.md). It tracks the post-merge tail (admin interaction audit, scale testing, first-deploy verification, accessibility, Lighthouse perf, pre-existing test debt) so nothing slips between merge and launch.
+
 ---
 
 ## Why this exists
