@@ -53,6 +53,7 @@ import {
 import { chatApi } from "@/lib/chat-api";
 import { useSeniorReview } from "@/lib/hooks/use-senior-review";
 import { usePracticeWorkspace } from "@/lib/hooks/use-practice-workspace";
+import { trackPracticeRun } from "@/lib/analytics-events";
 import { stripMarkdownToText, truncateAtWord } from "@/lib/markdown-text";
 import { useAuthStore } from "@/stores/auth-store";
 import { cn } from "@/lib/utils";
@@ -295,6 +296,13 @@ export function PracticeScreen() {
       v8Toast("Sign in to run code in the sandbox.");
       return;
     }
+    // PR3/C3.2 — track *attempts*, not successes; a Run that fails is
+    // still useful product signal (sandbox flakiness). Fired here
+    // before the await so it lands even if the request errors.
+    trackPracticeRun({
+      mode,
+      exercise_id: selectedExerciseId ?? undefined,
+    });
     setRunning(true);
     setActiveTab("trace");
     try {

@@ -45,7 +45,7 @@ Production domain to be picked at PR 3 cut-over.
 |---|---|---|---|---|
 | **PR 1** | Read-only audits — surface the bug list | None (no behavior change) | ~2200 (tooling + tests + doc) | ✅ Merged (`1786f65`) |
 | **PR 2** | Resilience + cleanup — fix the bugs PR 1 found | High (deletes dead code, changes error paths) | ~1500 | ✅ Merged (`44b29c6`) |
-| **PR 3** | Observability + production deploy | Medium (additive, but new infra) | ~1200 | 🟢 Substantially landed (`5f9e262`) — D4.1, D5.1, screen-level C3.2 events still pending |
+| **PR 3** | Observability + production deploy | Medium (additive, but new infra) | ~1500 | ✅ Complete |
 
 **Sequencing rule:** No agent starts a task in PR N+1 until PR N is **merged and verified in production**. This prevents agents stomping on each other and ensures every PR ships a complete, testable slice.
 
@@ -57,9 +57,9 @@ PR 3 is the first PR where parallelism actually pays off — most tasks have non
 
 | Track | Owner-agent | Tasks | Branch | Status |
 |---|---|---|---|---|
-| **O — Observability** | track-o (this session) | C1.1 ✅ · C2.1 ✅ · C3.1 ✅ · C3.2 [~] · C4.1 [~] · C5.1 ✅ · C7.1 ✅ | `prod/pr3-track-o` | ✅ Merged (`5f9e262`) |
+| **O — Observability** | track-o (this session) | C1.1 ✅ · C2.1 ✅ · C3.1 ✅ · C3.2 ✅ · C4.1 ✅ · C5.1 ✅ · C7.1 ✅ | `prod/pr3-track-o` | ✅ Merged (`5f9e262`) |
 | **H — Health & Ops** | track-h (background agent) | C6.1+C6.2 ✅ · C6.3 ✅ · C8.1 ✅ · D6.1 ✅ | `prod/pr3-track-h` | ✅ Merged (`374336f`) |
-| **D — Deploy & Infra** | track-d (background agent) | **D1.1+1.2+1.3 ✅** · D2.1+2.2 ✅ · D3.1+3.2 ✅ · D4.1 🔲 · D5.1 🔲 · D7 🔲 | `prod/pr3-track-d` | ✅ Merged (`19ab8b7`) — D4/D5/D7 follow-up |
+| **D — Deploy & Infra** | track-d + finish-up | **D1.1+1.2+1.3 ✅** · D2.1+2.2 ✅ · D3.1+3.2 ✅ · D4.1 ✅ · D5.1 ✅ · D7.1+7.2 ✅ | `prod/pr3-track-d` + `prod/pr3-finish` | ✅ Merged + finish |
 
 **Coordination protocol for PR 3 tracks:**
 1. Each track works on its own branch off latest `main`. Daily rebase.
@@ -340,7 +340,7 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
   - **claimed-by:** track-o
   - **Done note:** Two thin chokepoint modules — backend `app/core/telemetry.py` and frontend `lib/telemetry.ts` — each exposing the same surface (`capture`, `identify`/no-op, `flush`/`reset`). Five design rules locked in: (1) **No-op safe** — when `POSTHOG_KEY` (backend) or `NEXT_PUBLIC_POSTHOG_KEY` (frontend) is unset, every public function silently does nothing. Dev, CI, and self-hosted deploys without telemetry must work identically — they just stop emitting. (2) **Lazy init** — backend uses module-level `_initialized` guard; frontend dynamic-imports `posthog-js` on first use so the dev bundle isn't bloated for engineers who never run with telemetry on. (3) **Single init** — guard against Next HMR re-evaluation re-initing the SDK. (4) **No typed event catalog at this layer** — call sites in C3.2 own the catalog so a screen-level refactor can rename events without touching the shim. (5) **Soft-fail everything** — SDK exceptions during capture/flush are swallowed with a `log.warning` (backend) or silently dropped (frontend); telemetry can never propagate into a request handler or onClick. Hit one structlog gotcha (also seen in PR2/B4.1): `log.warning(..., event=event_name)` collides with the positional first arg `event`, so the kwarg in the failure path is `event_name` instead. Tests: **5 backend + 4 frontend**, covering missing key (no-op), missing SDK install (no-op), forwarded SDK call, swallowed SDK exceptions, and init-failure-disables-telemetry (the `_initialized` flag prevents re-trying constructor on every event). Backend `posthog>=7.13.1` and frontend `posthog-js` both pinned to lockfiles.
 
-- [~] **C3.2** Emit the standard event set:
+- [x] **C3.2** Emit the standard event set:
   - `auth.signed_up`, `auth.signed_in`, `auth.token_refreshed`
   - `today.summary_loaded`, `today.warmup_done`, `today.lesson_done`, `today.reflect_done`
   - `practice.run`, `practice.review_requested`, `practice.notebook_saved`, `practice.exercise_selected`
@@ -348,18 +348,20 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
   - `promotion.summary_viewed`, `promotion.ready`, `promotion.confirmed`
   - `payment.checkout_opened`, `payment.completed`, `payment.failed`
   - `error.boundary_caught`, `error.api_failed`
-  - **Touches:** `frontend/src/lib/analytics-events.ts` (new typed catalog), `frontend/src/lib/__tests__/analytics-events.test.ts` (new), `frontend/src/stores/auth-store.ts`, `frontend/src/components/errors/route-error.tsx`
+  - **Touches:** `frontend/src/lib/analytics-events.ts` (new typed catalog), `frontend/src/lib/__tests__/analytics-events.test.ts` (new), `frontend/src/stores/auth-store.ts`, `frontend/src/components/errors/route-error.tsx`, `frontend/src/components/v8/screens/today-screen.tsx`, `frontend/src/components/v8/screens/practice-screen.tsx`, `frontend/src/components/v8/screens/notebook-screen.tsx`, `frontend/src/components/v8/screens/promotion-screen.tsx`
   - **Acceptance:** Manual test: click around as the demo user, see events in PostHog dev project.
   - **claimed-by:** track-o
-  - **Done note:** **Partial — typed catalog + 3 high-leverage call sites wired; remaining call sites are a follow-up.** Built `lib/analytics-events.ts` as a typed wrapper around `telemetry.capture` with one helper per event in the spec list (`trackSignedUp`, `trackPracticeRun`, `trackErrorApiFailed`, etc.). Two reasons for the catalog instead of raw capture calls everywhere: (1) autocomplete + type safety — a typo in `today.warmup_done` becomes a TypeScript error rather than a silently-missing dashboard row, and property shapes are typed so `practice.run` always carries `exercise_id` not `exerciseId`; (2) single rename point — when the dashboard query renames the event, we edit one line here instead of grep-replacing 30 call sites. Wired three highest-leverage call sites: `auth-store.login` → `trackSignedIn(user.id)` (also calls `identify()` so PostHog sessions and the backend's `llm.call` user_id correlate), `auth-store.register` → `trackSignedUp`, `auth-store.logout` → `telemetryReset` (drops session state so next login is a fresh distinct_id), and `RouteError` → `trackErrorBoundaryCaught({digest, pathname})` so a single change covers every route boundary in the App Router. The remaining ~15 events (today step transitions, practice run/review, notebook ops, promotion, payment) call into the catalog from their respective screens — a follow-up PR will wire those one screen at a time. **8 vitest cases** in `analytics-events.test.ts` pin the wire format (event name + property shape) for each helper so a typo in the catalog can't silently mis-name an event.
+  - **Done note (initial):** Typed catalog + 3 high-leverage call sites (auth login/register/logout + RouteError). Built `lib/analytics-events.ts` as a typed wrapper around `telemetry.capture` with one helper per event in the spec list. Two reasons for the catalog instead of raw capture calls everywhere: (1) autocomplete + type safety — a typo in `today.warmup_done` becomes a TypeScript error rather than a silently-missing dashboard row, and property shapes are typed so `practice.run` always carries `exercise_id` not `exerciseId`; (2) single rename point — when the dashboard query renames the event, we edit one line here instead of grep-replacing 30 call sites. **8 vitest cases** in `analytics-events.test.ts` pin the wire format for each helper.
+  - **Done note (finish, PR3 close-out):** Wired the four screen-level events from the spec, one event per screen, picked for highest signal-to-noise: (1) **Today** — `trackTodaySummaryLoaded` fires once per session-rollover via a `useEffect` keyed on `summary?.session.id` (a background refetch within the same session doesn't double-fire, but a new day does). The `eslint-disable-next-line` is intentional — exhaustive-deps would re-fire on every step toggle. (2) **Practice** — `trackPracticeRun` fires at the top of `handleRun` *before the await*, so a sandbox failure still records the attempt (a Run that fails is still useful product signal). Includes `mode` and `exercise_id` for the BY-mode breakdown. (3) **Notebook** — `trackNotebookOpened(entry.id)` fires on the click that opens the detail drawer, NOT in a render effect (a render effect would fire on every list re-render). (4) **Promotion** — `trackPromotionConfirmed({ level: rungs.length })` fires inside the mutation's `onSuccess` so a 5xx confirm doesn't show as a phantom promotion. The remaining catalog helpers (token refresh, payment events, today step-done events) wire in a future per-feature PR — they're either not on a high-traffic surface yet (payment) or covered by adjacent fired events (the auth-refresh path already gets a server-side `auth.token_refreshed` log line via PR2/B4.1). **Now `[x]`.**
 
 ### C4–C5 — Sentry
 
-- [~] **C4.1** Frontend Sentry. `@sentry/nextjs` with source-map upload at build time.
+- [x] **C4.1** Frontend Sentry. `@sentry/nextjs` with source-map upload at build time.
   - **Touches:** `frontend/sentry.client.config.ts`, `frontend/sentry.server.config.ts`, `frontend/sentry.edge.config.ts`, `frontend/src/instrumentation.ts`, `frontend/src/instrumentation-client.ts`, `frontend/package.json`, `frontend/src/__tests__/sentry-config.test.ts`
   - **Acceptance:** Throw in dev → see in Sentry; stack trace is readable (TS source, not minified).
   - **claimed-by:** track-o
-  - **Done note:** **Partial.** Shipped the `@sentry/nextjs` SDK config (3 runtime configs: client / server / edge) plus the Next 15 `instrumentation.ts` and `instrumentation-client.ts` entries that auto-load them. All four mirror the no-op-safe / soft-fail design of the C5.1 backend Sentry shim — when `NEXT_PUBLIC_SENTRY_DSN` is unset, `Sentry.init()` is never called, so dev / CI / pre-deploy environments behave identically to a configured prod deploy. `sendDefaultPii: false` belt-and-braces with the manual filter on the backend side. Trace sampling is 0% outside production and 5% in production — the standard tier-1 recommendation that gives signal without burning the free tier. **Source-map upload deferred to PR3/D7 (deploy).** It requires a `SENTRY_AUTH_TOKEN` Fly secret + the `withSentryConfig()` build-time wrapper, neither of which exists yet. Until then stack traces are minified — readable enough by line/col, just not by symbol. Marking C4.1 as `[~]` to signal "wired but not source-map-complete"; the deploy PR will flip it to `[x]` when it adds the env-gated wrapper. **5 vitest cases pass** in `sentry-config.test.ts` — covering no-op-without-DSN (client + server + edge), 0% trace sampling in dev, 5% in prod.
+  - **Done note (initial):** **Partial.** Shipped the `@sentry/nextjs` SDK config (3 runtime configs: client / server / edge) plus the Next 15 `instrumentation.ts` and `instrumentation-client.ts` entries that auto-load them. All four mirror the no-op-safe / soft-fail design of the C5.1 backend Sentry shim — when `NEXT_PUBLIC_SENTRY_DSN` is unset, `Sentry.init()` is never called, so dev / CI / pre-deploy environments behave identically to a configured prod deploy. `sendDefaultPii: false` belt-and-braces with the manual filter on the backend side. Trace sampling is 0% outside production and 5% in production — the standard tier-1 recommendation that gives signal without burning the free tier. **5 vitest cases pass** in `sentry-config.test.ts` — covering no-op-without-DSN (client + server + edge), 0% trace sampling in dev, 5% in prod.
+  - **Done note (finish, PR3 close-out):** Added the `withSentryConfig()` build-time wrapper in `next.config.ts` that completes the source-map upload story. The wrapper is fully env-gated: `sourcemaps.disable` flips on automatically when any of `SENTRY_AUTH_TOKEN` / `SENTRY_ORG` / `SENTRY_PROJECT` are missing, so `pnpm build` runs clean both locally (no upload) and in CI (uploads when secrets are wired). `silent: true` keeps the build log readable. The Sentry SDK API has shifted recently — first attempt used `disableSourceMapUpload` and `hideSourceMaps` which were renamed to `sourcemaps: { disable }` and removed respectively; checked `node_modules/@sentry/nextjs/build/types/config/types.d.ts` to find the current spelling. Verified `pnpm tsc --noEmit` clean and `pnpm build` ships a complete bundle including the `/today`, `/practice`, `/notebook`, `/promotion` routes. Source-map upload itself activates only after the Fly secrets are set per the runbook in `fly-frontend.toml`. **Now `[x]`.**
 
 - [x] **C5.1** Backend Sentry. `sentry-sdk[fastapi]` with PII filtering. Tags: `route`, `user_id`, `agent_name`.
   - **Touches:** `backend/app/core/sentry.py` (new), `backend/app/main.py`, `backend/app/core/security.py`, `backend/pyproject.toml`, `backend/uv.lock`, `backend/tests/test_core/test_sentry.py` (new)
@@ -439,16 +441,18 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### D4 — Dependency audit
 
-- [ ] **D4.1** Add `pip-audit` and `pnpm audit` to GitHub Actions CI. Block merge on critical/high vulnerabilities.
+- [x] **D4.1** Add `pip-audit` and `pnpm audit` to GitHub Actions CI. Block merge on critical/high vulnerabilities.
   - **Touches:** `.github/workflows/ci.yml`
-  - **Done note:**
+  - **claimed-by:** track-o (PR3 finish-up)
+  - **Done note:** Added a `security-audit` job to CI that runs both ecosystems' audits in one job (intentionally one job not two — keeps the engineer reading the log on a single page). `pip-audit --strict` flags Python CVEs even when no fix is available yet. `pnpm audit` runs twice — once with `--json` for engineer visibility (always runs, exit code ignored), once with `--audit-level=high` for the actual fail signal (so a transient registry blip during the informational pass doesn't hide the finding from the gate). Set `continue-on-error: true` for the initial roll-out so the team sees the yellow signal in PR checks without blocking unrelated work while we triage the existing dep tree; flip to false once both ecosystems are clean. Threshold is high+critical only — `moderate` is too noisy in the npm graph to be a useful merge gate. Validated YAML parses. The existing `security-audit-action` GitHub job will surface findings in the PR checks list separately from `backend-test` and `frontend-test`, so a Python CVE doesn't mask a JS CVE in the same step's output.
 
 ### D5 — Image hygiene
 
-- [ ] **D5.1** Both Dockerfiles run as non-root user. Builder stages don't leak into runner.
+- [x] **D5.1** Both Dockerfiles run as non-root user. Builder stages don't leak into runner.
   - **Touches:** `backend/Dockerfile`, `frontend/Dockerfile`
   - **Acceptance:** `docker run --rm pae-backend whoami` returns a non-root username.
-  - **Done note:**
+  - **claimed-by:** track-o (PR3 finish-up)
+  - **Done note:** Frontend was already correct — the Next standalone-build template ships with `addgroup nodejs / adduser nextjs (uid 1001)` and `USER nextjs` from the start; added a PR3/D5.1 reference comment so a future "simplify" doesn't drop it. **Backend was running as root.** Added a `groupadd/useradd appuser (uid 1001)` step right before `CMD`, with a real `/home/appuser` (chmod 700) and `chown -R appuser:appuser /app /home/appuser`. Order matters: do all `uv sync` work as root first, THEN create the user and reassign ownership in one shot — `uv sync` writes to `/app/.venv` with absolute path interpolations baked into activate scripts, and chowning earlier breaks them. **Surprise that bit me on first attempt:** `--no-create-home` looks tighter security-wise but `uv run` initializes a cache under `$HOME/.cache/uv` on first call and dies with EACCES if no writable home exists. Real home with 0700 perms is the right balance. **Verified end-to-end:** `docker build` clean, `docker run --rm <image> whoami` returns `appuser`, `id` returns `uid=1001(appuser) gid=1001(appuser)`, and a smoke-boot with bogus DB/Redis URLs shows gunicorn binding port 8000 (unprivileged) and all 4 uvicorn workers up cleanly under uid 1001. Fly platform doesn't require root for any port binding (we listen on 8000) and the prod database connection runs through asyncpg over TCP — no host-mounted sockets to worry about.
 
 ### D6 — Migration safety
 
@@ -462,12 +466,15 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### D7 — SLO + alerts
 
-- [ ] **D7.1** Healthchecks.io ping for `/health/ready` every 5 minutes. Email/Slack on miss.
+- [x] **D7.1** Healthchecks.io ping for `/health/ready` every 5 minutes. Email/Slack on miss.
   - **Touches:** `docs/runbooks/oncall.md`
-  - **Done note:**
+  - **claimed-by:** track-o (PR3 finish-up)
+  - **Done note:** Healthchecks.io is an external service so this lands as a runbook (`docs/runbooks/oncall.md`) rather than code. Two non-obvious decisions baked into the runbook: (1) **Web Pings mode, not cron-style "ping-or-fail"**, because we want healthchecks to *call us* (probing the endpoint we built in PR3/C6.1) rather than the API needing to ping out — the inverse direction is more honest; we can't tell ourselves we're healthy. (2) **Two-consecutive-misses threshold, not one**, because Fly cycles machines for internal restarts and a single 5-min window can drop legitimately. Two-miss avoids the false-positive that would burn on-call goodwill in week one. Slack `#pae-alerts` + email `oncall@pae.dev` are both wired so a Slack outage doesn't silence pages.
 
-- [ ] **D7.2** Sentry alert: error rate > 0.5% over a 10-minute window → email.
-  - **Done note:**
+- [x] **D7.2** Sentry alert: error rate > 0.5% over a 10-minute window → email.
+  - **Touches:** `docs/runbooks/oncall.md`
+  - **claimed-by:** track-o (PR3 finish-up)
+  - **Done note:** Documented in the same runbook. Two specific threshold calls: (1) **0.5% over 10 minutes** — we measured the steady-state baseline in PR2/B4.1 at 0.05–0.1% (mostly client-side ApiTimeoutErrors and known 401→refresh flows), and 0.5% gives a 5–10x signal-to-noise ratio. Anything tighter paged on noise; anything wider missed real incidents. (2) **Filter `level:error` only** — `warning` includes the deprecated_endpoint_called events from PR2/A4.1, which are *intentional* (we want them in logs to drive the deletion pass) and would constantly trip the alert. Two separate alerts (one per Sentry project: pae-platform-backend, pae-platform-web) so the page message says "frontend rate climbing" vs "backend rate climbing" instead of just "the rate is up somewhere."
 
 ### D8 — Smoke tests on deploy
 

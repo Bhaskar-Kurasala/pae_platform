@@ -26,6 +26,7 @@ import {
   usePromotionSummary,
 } from "@/lib/hooks/use-promotion-summary";
 import type { PromotionRung } from "@/lib/api-client";
+import { trackPromotionConfirmed } from "@/lib/analytics-events";
 
 const CONFETTI_COLORS = ["#d6a54d", "#4e9470", "#9a4b3b", "#356d50", "#b8862d"] as const;
 const CONFETTI_COUNT = 60;
@@ -147,11 +148,19 @@ export function PromotionScreen() {
     closeTakeover();
     playUiSound("promote");
     confirmPromotion.mutate(undefined, {
+      onSuccess: () => {
+        // PR3/C3.2 — track on success only; a confirm that 500s
+        // shouldn't show as a promotion in PostHog. The `level` is
+        // the count of rungs climbed in this promotion event
+        // (currently always 4, but tracked numerically so a future
+        // partial-rung schema doesn't lose data).
+        trackPromotionConfirmed({ level: rungs.length });
+      },
       onSettled: () => {
         router.push("/today");
       },
     });
-  }, [closeTakeover, confirmPromotion, router]);
+  }, [closeTakeover, confirmPromotion, router, rungs.length]);
 
   const handleViewInterviewPrep = useCallback(() => {
     router.push("/readiness");

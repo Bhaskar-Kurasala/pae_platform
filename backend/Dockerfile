@@ -28,6 +28,28 @@ ARG BUILD_TIME=unknown
 ENV BUILD_COMMIT_SHA=${BUILD_COMMIT_SHA}
 ENV BUILD_TIME=${BUILD_TIME}
 
+# PR3/D5.1 — drop to a non-root user before CMD. We can't chown the
+# entire /app earlier because `uv sync` writes to /app/.venv with
+# absolute path interpolations baked into the activate scripts; the
+# safe sequence is: do all the install work as root, THEN create the
+# user and reassign ownership in one shot. The Fly platform doesn't
+# require root for any port binding (we listen on 8000 which is
+# unprivileged), and the production database connection runs through
+# asyncpg over TCP — no host-mounted sockets to worry about. Verify
+# with: `docker run --rm <image> whoami` → "appuser".
+#
+# Why a real /home/appuser instead of --no-create-home: `uv run`
+# initializes a cache under $HOME/.cache/uv on first invocation; with
+# no writable home it dies with EACCES at boot time. Giving the user
+# a 0700 home keeps the attack surface tight (no other process can
+# poke at the cache) while letting uv do its thing.
+RUN groupadd --system --gid 1001 appuser \
+ && useradd  --system --uid 1001 --gid 1001 -m -d /home/appuser --shell /sbin/nologin appuser \
+ && chown -R appuser:appuser /app /home/appuser \
+ && chmod 700 /home/appuser
+
+USER appuser
+
 # Run with gunicorn + uvicorn workers
 CMD ["uv", "run", "gunicorn", "app.main:app", \
      "--workers", "4", \

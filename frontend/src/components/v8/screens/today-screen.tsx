@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSetV8Topbar } from "@/components/v8/v8-topbar-context";
 import { v8Toast } from "@/components/v8/v8-toast";
+import { trackTodaySummaryLoaded } from "@/lib/analytics-events";
 import { useDueCards, useReviewCard } from "@/lib/hooks/use-srs";
 import {
   useMarkSessionStep,
@@ -90,6 +91,20 @@ export function TodayScreen() {
   const intentionQ = useMyIntention();
   const setIntention = useSetIntention();
   const markStep = useMarkSessionStep();
+
+  // PR3/C3.2 — fire `today.summary_loaded` once per visit when the
+  // payload first arrives. We key on `summary?.session.id` so a
+  // background refetch (same session) doesn't double-fire, but a
+  // session rollover (new day) does. No-op when telemetry is off.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: re-fire only on session rollover, not on every step toggle.
+  useEffect(() => {
+    if (!summary) return;
+    trackTodaySummaryLoaded({
+      warmup_done: !!summary.session.warmup_done_at,
+      lesson_done: !!summary.session.lesson_done_at,
+      reflect_done: !!summary.session.reflect_done_at,
+    });
+  }, [summary?.session.id]);
 
   const dueCount = summary?.due_card_count ?? dueCards?.length ?? 0;
   const daysActive = summary?.consistency.days_active ?? 0;

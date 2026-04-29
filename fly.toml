@@ -1,0 +1,108 @@
+# PR3/D7 — Fly.io deploy config for the main pae-platform app.
+#
+# This is the FIRST Fly app — the API + worker container. The frontend
+# Next.js app is its own separate Fly app (`fly-frontend.toml`) so the
+# two scale independently and a frontend-only redeploy doesn't recycle
+# active API connections.
+#
+# Setup (one-time, by the human deploying):
+#   1. fly apps create pae-platform
+#   2. Provision the cloud resources documented in
+#      docs/runbooks/secret-rotation.md (Neon DB, Redis, R2, etc.)
+#      and the values land in Fly secrets via:
+#
+#        fly secrets set --app pae-platform \
+#          DATABASE_URL=postgres://...  \
+#          REDIS_URL=redis://...         \
+#          SECRET_KEY=$(openssl rand -hex 32) \
+#          ANTHROPIC_API_KEY=...         \
+#          SENTRY_DSN=https://...@sentry.io/...  \
+#          POSTHOG_KEY=phc_...           \
+#          POSTHOG_HOST=https://...      \
+#          # Optional — if unset, Sentry source-map upload is skipped
+#          # at build time and stack traces stay minified:
+#          SENTRY_AUTH_TOKEN=...
+#
+#   3. fly deploy --config fly.toml --dockerfile backend/Dockerfile
+#
+# The `production_required` validator in app/core/config.py (PR3/D2.2)
+# will refuse to boot if any of DATABASE_URL / REDIS_URL / SECRET_KEY /
+# ANTHROPIC_API_KEY are missing or look like dev defaults — so a fresh
+# deploy fails loud before a single request lands.
+
+app = "pae-platform"
+
+# us-east — same region as Neon's default so DB latency is single-digit
+# milliseconds. Backup app shares this region for the same reason.
+primary_region = "iad"
+
+# 30s gives gunicorn enough time to drain in-flight requests before the
+# new revision takes over. Fly's default is 5s which can interrupt a
+# slow LLM round-trip.
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "backend/Dockerfile"
+
+# PR3/D2.2 — production-required env. Anything missing here AND not in
+# Fly secrets will trip the boot-time validator. The ones below are
+# non-secret (no rotation drama) — every secret goes through
+# `fly secrets set` instead, so they don't get committed by accident.
+[env]
+  ENVIRONMENT = "production"
+  PORT = "8000"
+  # PR3/C1.1 — frontend reads X-Request-ID off this prefix. Keep
+  # "/api/v1" stable; flipping it is a breaking change for the frontend.
+
+# ─── HTTP service ───────────────────────────────────────────────────
+# Single concurrent service on port 8000 (matches Dockerfile's
+# gunicorn bind). Fly's edge handles TLS termination + Anycast routing.
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"     # shut idle machines (per-second billing).
+  auto_start_machines = true      # cold-start when a request comes in.
+  min_machines_running = 1        # always 1 warm — keeps p99 latency tight.
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    # Conservative for a single 4-worker gunicorn — plenty of headroom
+    # before Fly forks an extra machine. Adjust after watching
+    # /metrics under real load.
+    soft_limit = 200
+    hard_limit = 250
+
+# ─── Health check (PR3/C6.1+C6.2) ──────────────────────────────────
+# /health/ready pings DB + Redis + (informational) Anthropic key
+# presence. Returns 503 if any required dep is unreachable, so Fly
+# pulls the machine out of rotation while it recovers instead of
+# routing traffic to a half-dead container.
+[[http_service.checks]]
+  grace_period = "20s"            # uvicorn cold-start budget.
+  interval = "15s"
+  method = "get"
+  path = "/health/ready"
+  protocol = "http"
+  timeout = "5s"
+  type = "http"
+
+# ─── VM sizing ──────────────────────────────────────────────────────
+# `shared-cpu-1x` w/ 512MB matches our PR2 measurements: gunicorn + 4
+# uvicorn workers + the langgraph state graph fit comfortably under
+# 400MB at idle, peaks ~480MB under chat load. Bump memory before CPU
+# — this is an I/O-bound workload (LLM HTTP, DB, Redis), not compute.
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512
+
+# ─── Process definitions ────────────────────────────────────────────
+# Single "app" process inherits the Dockerfile CMD (gunicorn). The
+# Celery worker + beat run as separate Fly apps so a runaway Celery
+# task can't starve the API. (Apps: pae-platform-worker, pae-platform-beat —
+# their fly.toml configs land in a follow-up infra-PR; until then the
+# Celery side runs from docker-compose locally.)
+[processes]
+  app = ""    # empty = use Dockerfile CMD

@@ -7,6 +7,7 @@ import { useNotebookEntries, useNotebookSummary } from "@/lib/hooks/use-notebook
 import { useDueCards } from "@/lib/hooks/use-srs";
 import { useAuthStore } from "@/stores/auth-store";
 import { NoteDetailModal } from "@/components/features/notebook/note-detail-modal";
+import { trackNotebookOpened } from "@/lib/analytics-events";
 import { stripMarkdownToText, truncateAtWord } from "@/lib/markdown-text";
 import type {
   NotebookEntryOut,
@@ -230,7 +231,12 @@ export function NotebookScreen() {
             <button
               key={`${note.entry.id}-${idx}`}
               type="button"
-              onClick={() => setSelectedEntry(note.entry)}
+              onClick={() => {
+                setSelectedEntry(note.entry);
+                // PR3/C3.2 — fired on the click that opens the
+                // detail drawer (not on every render of the card).
+                trackNotebookOpened(note.entry.id);
+              }}
               className={`note note-clickable reveal${delayClass(idx)}`}
               style={{
                 textAlign: "left",
