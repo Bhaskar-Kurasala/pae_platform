@@ -9,6 +9,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.core.config import settings
+from app.core.exception_handler import unhandled_exception_handler
 from app.core.logging import configure_logging
 from app.core.rate_limit import limiter
 from app.core.request_id import RequestIDMiddleware
@@ -79,6 +80,14 @@ def create_app() -> FastAPI:
 
     app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)  # type: ignore[arg-type]
     app.add_middleware(SlowAPIMiddleware)
+
+    # PR2/B4.1 — global handler. Catches anything that escaped the route
+    # and turns it into a stable {"error": {...}} JSON shape with the
+    # request_id surfaced. Registered AFTER slowapi so RateLimitExceeded
+    # keeps its dedicated handler, and registered against the bare
+    # `Exception` type so HTTPException keeps FastAPI's machinery upstream
+    # (we only catch what FastAPI didn't).
+    app.add_exception_handler(Exception, unhandled_exception_handler)
 
     # CORS — only allow configured origins.
     # P2-7 — expose rate-limit headers so the browser JS can read them

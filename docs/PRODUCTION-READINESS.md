@@ -222,16 +222,16 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### B4 — Backend exception middleware
 
-- [ ] **B4.1** Add `@app.exception_handler(Exception)` in `backend/app/main.py` that:
+- [x] **B4.1** Add `@app.exception_handler(Exception)` in `backend/app/main.py` that:
   1. Generates / propagates the request_id.
   2. Logs `event="unhandled_exception"` with full context.
   3. Returns `{"error": {"type": "internal_error", "message": "...", "request_id": "..."}}` with a stable JSON shape.
   4. Never leaks a Python traceback.
-  - **Touches:** `backend/app/main.py`, `backend/app/core/middleware.py`
+  - **Touches:** `backend/app/core/exception_handler.py`, `backend/app/main.py`, `backend/tests/test_core/test_exception_handler.py`
   - **Acceptance:**
     - A test that raises inside a route returns the expected JSON shape with the right shape and a 500 status.
     - The traceback IS in the log, NOT in the response body.
-  - **Done note:**
+  - **Done note:** Built `unhandled_exception_handler` in `backend/app/core/exception_handler.py`. Logs structured fields (`exception_type`, `path`, `method`, `request_id`, full traceback via `exc_info=`) on every uncaught exception, then responds with `{"error": {"type": "internal_error", "message": "...includes request_id...", "request_id": "..."}}` + the `X-Request-ID` response header. Registered against the bare `Exception` type AFTER slowapi's handler so RateLimitExceeded keeps its existing 429 shape (regression-tested). 5 tests cover: stable envelope, no traceback leak, request-id end-to-end, HTTPException pass-through (FastAPI's own handler still owns 4xx detail JSONs), happy path unaffected. Existing `RequestIDMiddleware` already provided the request_id contextvar — leveraged it. No new deps.
 
 ### B5 — Timeouts
 
