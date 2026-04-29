@@ -43,8 +43,8 @@ Production domain to be picked at PR 3 cut-over.
 
 | PR | Theme | Risk | Lines changed (est.) | Status |
 |---|---|---|---|---|
-| **PR 1** | Read-only audits — surface the bug list | None (no behavior change) | ~2200 (tooling + tests + doc) | 🟢 Ready for merge |
-| **PR 2** | Resilience + cleanup — fix the bugs PR 1 found | High (deletes dead code, changes error paths) | ~1500 | 🔲 Not started |
+| **PR 1** | Read-only audits — surface the bug list | None (no behavior change) | ~2200 (tooling + tests + doc) | ✅ Merged (`1786f65`) |
+| **PR 2** | Resilience + cleanup — fix the bugs PR 1 found | High (deletes dead code, changes error paths) | ~1500 | 🟡 In progress |
 | **PR 3** | Observability + production deploy | Medium (additive, but new infra) | ~1200 | 🔲 Not started |
 
 **Sequencing rule:** No agent starts a task in PR N+1 until PR N is **merged and verified in production**. This prevents agents stomping on each other and ensures every PR ships a complete, testable slice.
