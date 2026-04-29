@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * PR2/B3.1 — branded route-level error boundary.
+ * PR2/B3.1 + PR3/C3.2 — branded route-level error boundary.
  *
  * Drop-in for Next.js App Router `error.tsx` files. Replaces the
  * default white-screen-with-stack-trace with:
@@ -11,6 +11,9 @@
  *     boundary protocol) and a "Go to Today" escape hatch.
  *   - A subtle dev-only `<details>` block carrying the stack trace
  *     so engineers debugging locally still get the info.
+ *   - PR3/C3.2: fires an `error.boundary_caught` event so PostHog
+ *     can surface a "users hitting the boundary" panel and the
+ *     on-call dashboard can correlate with backend Sentry events.
  *
  * The component is intentionally framework-agnostic — it doesn't pull
  * in v8 design tokens directly; it leans on the same Tailwind classes
@@ -19,7 +22,10 @@
  */
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect } from "react";
+
+import { trackErrorBoundaryCaught } from "@/lib/analytics-events";
 
 interface RouteErrorProps {
   error: Error & { digest?: string };
@@ -35,14 +41,25 @@ export function RouteError({
   homeHref = "/today",
   homeLabel = "Back to Today",
 }: RouteErrorProps) {
+  const pathname = usePathname();
+
   useEffect(() => {
-    // Best-effort error reporting hook. Sentry will replace the no-op
-    // in PR3/C4. Until then we just dump to console.error in dev so
-    // the engineer staring at the screen sees the underlying cause.
+    // PR3/C4: Sentry now auto-captures uncaught errors via the SDK
+    // when configured (no-op without DSN). Keeping the dev-mode
+    // console.error so engineers debugging locally still see the
+    // cause without staring at PostHog.
     if (typeof window !== "undefined") {
       console.error("[route-error]", error);
     }
-  }, [error]);
+    // PR3/C3.2 — emit a structured event so PostHog can surface a
+    // "users hitting the boundary" panel. Fire once per render of
+    // this boundary; React effects + a stable error object keep the
+    // dependency list clean.
+    trackErrorBoundaryCaught({
+      digest: error.digest,
+      pathname: pathname ?? "unknown",
+    });
+  }, [error, pathname]);
 
   // Next.js attaches a `digest` to server-rendered errors that pairs
   // with the structured log line — surface it like a request ID so
