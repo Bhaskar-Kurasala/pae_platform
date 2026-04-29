@@ -354,11 +354,11 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### C4–C5 — Sentry
 
-- [ ] **C4.1** Frontend Sentry. `@sentry/nextjs` with source-map upload at build time.
-  - **Touches:** `frontend/sentry.client.config.ts`, `frontend/sentry.server.config.ts`, `frontend/next.config.js`
+- [~] **C4.1** Frontend Sentry. `@sentry/nextjs` with source-map upload at build time.
+  - **Touches:** `frontend/sentry.client.config.ts`, `frontend/sentry.server.config.ts`, `frontend/sentry.edge.config.ts`, `frontend/src/instrumentation.ts`, `frontend/src/instrumentation-client.ts`, `frontend/package.json`, `frontend/src/__tests__/sentry-config.test.ts`
   - **Acceptance:** Throw in dev → see in Sentry; stack trace is readable (TS source, not minified).
   - **claimed-by:** track-o
-  - **Done note:**
+  - **Done note:** **Partial.** Shipped the `@sentry/nextjs` SDK config (3 runtime configs: client / server / edge) plus the Next 15 `instrumentation.ts` and `instrumentation-client.ts` entries that auto-load them. All four mirror the no-op-safe / soft-fail design of the C5.1 backend Sentry shim — when `NEXT_PUBLIC_SENTRY_DSN` is unset, `Sentry.init()` is never called, so dev / CI / pre-deploy environments behave identically to a configured prod deploy. `sendDefaultPii: false` belt-and-braces with the manual filter on the backend side. Trace sampling is 0% outside production and 5% in production — the standard tier-1 recommendation that gives signal without burning the free tier. **Source-map upload deferred to PR3/D7 (deploy).** It requires a `SENTRY_AUTH_TOKEN` Fly secret + the `withSentryConfig()` build-time wrapper, neither of which exists yet. Until then stack traces are minified — readable enough by line/col, just not by symbol. Marking C4.1 as `[~]` to signal "wired but not source-map-complete"; the deploy PR will flip it to `[x]` when it adds the env-gated wrapper. **5 vitest cases pass** in `sentry-config.test.ts` — covering no-op-without-DSN (client + server + edge), 0% trace sampling in dev, 5% in prod.
 
 - [x] **C5.1** Backend Sentry. `sentry-sdk[fastapi]` with PII filtering. Tags: `route`, `user_id`, `agent_name`.
   - **Touches:** `backend/app/core/sentry.py` (new), `backend/app/main.py`, `backend/app/core/security.py`, `backend/pyproject.toml`, `backend/uv.lock`, `backend/tests/test_core/test_sentry.py` (new)
