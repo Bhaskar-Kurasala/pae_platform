@@ -37,7 +37,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-from alembic import op
+from alembic import context, op
 
 revision: str = "0040_agent_invocation_log"
 down_revision: str | None = "0039_admin_console_v1"
@@ -195,7 +195,18 @@ def upgrade() -> None:
     # mock_cost_log already stored per-sub-agent rows so its backfill is
     # faithful. Status is 'succeeded' for all legacy mock rows because the
     # old code only persisted a row on a successful LLM call.
+    #
+    # PR3/D6.1 — guard the backfill against alembic's offline (`--sql`)
+    # mode, where `op.get_bind()` returns `None`. Offline mode renders
+    # SQL without executing — there's no DB to read from, so a SELECT
+    # over `generation_logs` is unreachable. We render a SQL comment
+    # instead so a human reading the offline output knows a data step
+    # was skipped, then return early.
     # ------------------------------------------------------------------
+    if context.is_offline_mode():
+        op.execute("-- D6.1: skipping legacy data backfill in offline (--sql) mode")
+        return
+
     bind = op.get_bind()
 
     gen_rows = bind.execute(
