@@ -77,7 +77,14 @@ async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
-    return await _resolve_user(token, db)
+    user = await _resolve_user(token, db)
+    # PR3/C5.1 — tag the Sentry scope with the user id so any
+    # exception raised downstream of this dep is attributed.
+    # set_user_context is a no-op when Sentry is disabled.
+    from app.core.sentry import set_user_context
+
+    set_user_context(str(user.id))
+    return user
 
 
 async def get_current_user_optional(
@@ -86,4 +93,8 @@ async def get_current_user_optional(
 ) -> Any:
     if not token:
         return None
-    return await _resolve_user(token, db)
+    user = await _resolve_user(token, db)
+    from app.core.sentry import set_user_context
+
+    set_user_context(str(user.id))
+    return user

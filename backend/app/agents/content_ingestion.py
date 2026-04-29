@@ -115,8 +115,16 @@ class ContentIngestionAgent(BaseAgent):
                     try:
                         readme = repo.get_readme()
                         raw_content_parts.append(f"README:\n{readme.decoded_content.decode('utf-8', errors='replace')[:2000]}")
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        # PR3/C2.1 — best-effort sub-fetch; the outer
+                        # block records the larger failure. Keep this
+                        # at debug so we can still grep when a repo is
+                        # mysteriously missing context.
+                        self._log.debug(
+                            "content_ingestion.readme_unavailable",
+                            repo=repo_name,
+                            error=str(exc),
+                        )
 
                     # Fetch first 3 Python files from root
                     py_count = 0
@@ -132,8 +140,15 @@ class ContentIngestionAgent(BaseAgent):
                                     code = file_content.decoded_content.decode("utf-8", errors="replace")
                                     raw_content_parts.append(f"File: {file_content.name}\n{code[:1000]}")
                                     py_count += 1
-                                except Exception:
-                                    pass
+                                except Exception as exc:
+                                    # PR3/C2.1 — best-effort per-file
+                                    # decode; outer block already
+                                    # records the bigger fetch failure.
+                                    self._log.debug(
+                                        "content_ingestion.file_decode_failed",
+                                        file=file_content.name,
+                                        error=str(exc),
+                                    )
                     except Exception as exc:
                         self._log.warning("content_ingestion.github_files_failed", error=str(exc))
             except Exception as exc:

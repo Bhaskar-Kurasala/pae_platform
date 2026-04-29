@@ -784,6 +784,11 @@ def _extract_partial_json_objects(text: str) -> list[dict]:
                             if isinstance(obj, dict):
                                 objects.append(obj)
                         except json.JSONDecodeError:
+                            # PR3/C2.1 — intentional silent skip:
+                            # this brace match wasn't valid JSON, so
+                            # we move on to the next candidate. No log
+                            # because we'd emit one per false-positive
+                            # brace and drown signal in noise.
                             pass
                         i = j + 1
                         break

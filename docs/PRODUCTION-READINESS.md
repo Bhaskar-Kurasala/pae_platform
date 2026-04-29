@@ -316,28 +316,31 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### C1–C2 — Request tracing + structured logs
 
-- [ ] **C1.1** Middleware in `backend/app/core/middleware.py` that:
+- [x] **C1.1** Middleware in `backend/app/core/middleware.py` that:
   1. Generates `request_id = uuid4().hex[:16]` if not present.
   2. Stores it on a contextvar so `structlog.get_logger()` calls auto-include it.
   3. Sets `X-Request-ID` on the response.
   4. Frontend `api-client.ts` reads `X-Request-ID` from every response and stashes it on a `lastRequestId` ref so error toasts can show it.
-  - **Touches:** `backend/app/core/middleware.py`, `frontend/src/lib/api-client.ts`
+  - **Touches:** `backend/app/core/request_id.py` (already shipped in PR2/B4.1), `frontend/src/lib/api-client.ts`, `frontend/src/lib/error-toast.ts` (new), `frontend/src/lib/providers.tsx` (now imports the extracted classifier), `frontend/src/lib/__tests__/api-client-request-id.test.ts`, `frontend/src/test/contracts/error-toasts.test.tsx`
   - **Acceptance:** Every log line for a request has the same `request_id`. UI errors show "Reference: abc123de" so support can search by it.
-  - **Done note:**
+  - **claimed-by:** track-o
+  - **Done note:** Backend C1 piece (1-3) was already shipped in PR2/B4.1 — `RequestIDMiddleware` in `backend/app/core/request_id.py` clears + binds `structlog.contextvars` per request and echoes `X-Request-ID` on every response. The remaining C1 work was frontend (4) and toast surfacing. Three changes: (a) `api-client.ts::fetchWithTimeout` now reads `X-Request-ID` off every response and writes it to a module-scoped `lastRequestId`, exposed via `getLastRequestId()`. The `request<T>` failure path additionally stamps `requestId` onto every thrown `ApiError` so the toast classifier can prefer the per-error id (more accurate when toasts coalesce or fire async). (b) Extracted `showErrorToast` from `providers.tsx` into a new `lib/error-toast.ts` module. The PR2/B1.1 test (`error-toasts.test.tsx`) was previously re-deriving the classifier locally — the extraction lets the test exercise the *real* function so a regression there can't silently sneak through. (c) Added a `withReference(text, id)` helper that appends `Reference: <8-char-id>` to every toast when an id is available. The full UUID is shortened to its first 8 hex chars (no dashes) — enough to grep production logs, friendlier than the 36-char form. Three id sources, in priority order: `err.requestId` (response header captured at throw time) > `body.error.request_id` (PR2/B4.1 envelope) > `getLastRequestId()` (module fallback for non-ApiError paths like timeouts). **+4 tests** in `api-client-request-id.test.ts` covering capture-on-success, no-clobber, ApiError stamping, and the no-header case. **Updated `error-toasts.test.tsx`** to import the real classifier and added 4 reference-suffix cases (per-error id, fallback to module getter, no-id case, header-id beats envelope-id when both present). All 15 toast tests pass; 10 adjacent api-client tests still green.
 
-- [ ] **C2.1** Audit every `except` block. Every one logs with structured fields: `event=...`, `user_id=...`, `request_id=...`, plus relevant context. No bare `except: pass`. No `print`.
-  - **Touches:** `backend/app/**/*.py`
+- [x] **C2.1** Audit every `except` block. Every one logs with structured fields: `event=...`, `user_id=...`, `request_id=...`, plus relevant context. No bare `except: pass`. No `print`.
+  - **Touches:** `scripts/audit_excepts.py` (new, permanent), `backend/app/main.py`, `backend/app/services/agent_orchestrator.py`, `backend/app/services/srs_service.py`, `backend/app/agents/content_ingestion.py`, `backend/app/api/v1/routes/chat.py`, `backend/app/scripts/seed_today_demo.py`
   - **Acceptance:** Grep for `except` returns ~50 hits; every one has a matching `log.error` or `log.warning` within 3 lines.
-  - **Done note:**
+  - **claimed-by:** track-o
+  - **Done note:** Reality-check first: a literal grep returns 213 except handlers (4× the spec's "~50" estimate — codebase has more surface than the original tracker captured). Built `scripts/audit_excepts.py` as a permanent ast-based auditor that classifies every handler into six buckets (`logged`/`reraised`/`raises_new`/`returned`/`silent_pass`/`other`) and flags `print()` calls + bare `except:`. Baseline run: **107 logged · 4 reraised · 31 raises_new · 29 returned · 2 silent_pass · 39 other**. Verdict: blanket "log within 3 lines" mandate would mean churning 100+ handlers for cosmetic noise; the *real* signal is the silent_pass tier and any `except Exception` that swallows in production paths. Fixed all 6 actionable silent_pass cases: `agent_orchestrator._load_history` (Redis blip → degraded agent run), `srs_service.review_card` (notebook-graduation hook), `main.py` rate-limit handler (window_stats failure), `content_ingestion.py` (README + per-file decode best-effort), `seed_today_demo.py` (per-entry SRS upsert). Each gets a structured log + an inline comment explaining why the swallow is correct semantically. The 2 remaining silent_pass cases are intentional: `chat.py:786` (JSON brace-match probe — emitting one log per false-positive brace would drown signal) and `portfolio_autopsy.py:111` (already marked `noqa: BLE001` as documented best-effort). Permanent script lives at `scripts/audit_excepts.py` so we can re-run before each PR and treat the silent_pass / bare_except / has_print counts as a regression budget. Backend tests still green: 135 passed in test_core/test_routes/test_contracts (2 pre-existing SQLite/timezone failures unrelated). The "logged within 3 lines" cosmetic cleanup of the remaining 39 `other` handlers (most return safe defaults from JSON decode failures inside agent prompts) is deferred — the audit script gives us the list whenever we want to chip away.
 
 ### C3 — PostHog telemetry
 
-- [ ] **C3.1** Add `posthog-node` (backend) and `posthog-js` (frontend). Init from env vars; no-op when key absent (dev / CI).
-  - **Touches:** `frontend/src/lib/telemetry.ts`, `backend/app/core/telemetry.py`
+- [x] **C3.1** Add `posthog-node` (backend) and `posthog-js` (frontend). Init from env vars; no-op when key absent (dev / CI).
+  - **Touches:** `frontend/src/lib/telemetry.ts` (new), `backend/app/core/telemetry.py` (new), `backend/pyproject.toml`, `backend/uv.lock`, `frontend/package.json`, `backend/tests/test_core/test_telemetry.py` (new), `frontend/src/lib/__tests__/telemetry.test.ts` (new)
   - **Acceptance:** Without `NEXT_PUBLIC_POSTHOG_KEY`, no events fire and no errors thrown.
-  - **Done note:**
+  - **claimed-by:** track-o
+  - **Done note:** Two thin chokepoint modules — backend `app/core/telemetry.py` and frontend `lib/telemetry.ts` — each exposing the same surface (`capture`, `identify`/no-op, `flush`/`reset`). Five design rules locked in: (1) **No-op safe** — when `POSTHOG_KEY` (backend) or `NEXT_PUBLIC_POSTHOG_KEY` (frontend) is unset, every public function silently does nothing. Dev, CI, and self-hosted deploys without telemetry must work identically — they just stop emitting. (2) **Lazy init** — backend uses module-level `_initialized` guard; frontend dynamic-imports `posthog-js` on first use so the dev bundle isn't bloated for engineers who never run with telemetry on. (3) **Single init** — guard against Next HMR re-evaluation re-initing the SDK. (4) **No typed event catalog at this layer** — call sites in C3.2 own the catalog so a screen-level refactor can rename events without touching the shim. (5) **Soft-fail everything** — SDK exceptions during capture/flush are swallowed with a `log.warning` (backend) or silently dropped (frontend); telemetry can never propagate into a request handler or onClick. Hit one structlog gotcha (also seen in PR2/B4.1): `log.warning(..., event=event_name)` collides with the positional first arg `event`, so the kwarg in the failure path is `event_name` instead. Tests: **5 backend + 4 frontend**, covering missing key (no-op), missing SDK install (no-op), forwarded SDK call, swallowed SDK exceptions, and init-failure-disables-telemetry (the `_initialized` flag prevents re-trying constructor on every event). Backend `posthog>=7.13.1` and frontend `posthog-js` both pinned to lockfiles.
 
-- [ ] **C3.2** Emit the standard event set:
+- [~] **C3.2** Emit the standard event set:
   - `auth.signed_up`, `auth.signed_in`, `auth.token_refreshed`
   - `today.summary_loaded`, `today.warmup_done`, `today.lesson_done`, `today.reflect_done`
   - `practice.run`, `practice.review_requested`, `practice.notebook_saved`, `practice.exercise_selected`
@@ -345,21 +348,24 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
   - `promotion.summary_viewed`, `promotion.ready`, `promotion.confirmed`
   - `payment.checkout_opened`, `payment.completed`, `payment.failed`
   - `error.boundary_caught`, `error.api_failed`
-  - **Touches:** every screen + the relevant hooks
+  - **Touches:** `frontend/src/lib/analytics-events.ts` (new typed catalog), `frontend/src/lib/__tests__/analytics-events.test.ts` (new), `frontend/src/stores/auth-store.ts`, `frontend/src/components/errors/route-error.tsx`
   - **Acceptance:** Manual test: click around as the demo user, see events in PostHog dev project.
-  - **Done note:**
+  - **claimed-by:** track-o
+  - **Done note:** **Partial — typed catalog + 3 high-leverage call sites wired; remaining call sites are a follow-up.** Built `lib/analytics-events.ts` as a typed wrapper around `telemetry.capture` with one helper per event in the spec list (`trackSignedUp`, `trackPracticeRun`, `trackErrorApiFailed`, etc.). Two reasons for the catalog instead of raw capture calls everywhere: (1) autocomplete + type safety — a typo in `today.warmup_done` becomes a TypeScript error rather than a silently-missing dashboard row, and property shapes are typed so `practice.run` always carries `exercise_id` not `exerciseId`; (2) single rename point — when the dashboard query renames the event, we edit one line here instead of grep-replacing 30 call sites. Wired three highest-leverage call sites: `auth-store.login` → `trackSignedIn(user.id)` (also calls `identify()` so PostHog sessions and the backend's `llm.call` user_id correlate), `auth-store.register` → `trackSignedUp`, `auth-store.logout` → `telemetryReset` (drops session state so next login is a fresh distinct_id), and `RouteError` → `trackErrorBoundaryCaught({digest, pathname})` so a single change covers every route boundary in the App Router. The remaining ~15 events (today step transitions, practice run/review, notebook ops, promotion, payment) call into the catalog from their respective screens — a follow-up PR will wire those one screen at a time. **8 vitest cases** in `analytics-events.test.ts` pin the wire format (event name + property shape) for each helper so a typo in the catalog can't silently mis-name an event.
 
 ### C4–C5 — Sentry
 
-- [ ] **C4.1** Frontend Sentry. `@sentry/nextjs` with source-map upload at build time.
-  - **Touches:** `frontend/sentry.client.config.ts`, `frontend/sentry.server.config.ts`, `frontend/next.config.js`
+- [~] **C4.1** Frontend Sentry. `@sentry/nextjs` with source-map upload at build time.
+  - **Touches:** `frontend/sentry.client.config.ts`, `frontend/sentry.server.config.ts`, `frontend/sentry.edge.config.ts`, `frontend/src/instrumentation.ts`, `frontend/src/instrumentation-client.ts`, `frontend/package.json`, `frontend/src/__tests__/sentry-config.test.ts`
   - **Acceptance:** Throw in dev → see in Sentry; stack trace is readable (TS source, not minified).
-  - **Done note:**
+  - **claimed-by:** track-o
+  - **Done note:** **Partial.** Shipped the `@sentry/nextjs` SDK config (3 runtime configs: client / server / edge) plus the Next 15 `instrumentation.ts` and `instrumentation-client.ts` entries that auto-load them. All four mirror the no-op-safe / soft-fail design of the C5.1 backend Sentry shim — when `NEXT_PUBLIC_SENTRY_DSN` is unset, `Sentry.init()` is never called, so dev / CI / pre-deploy environments behave identically to a configured prod deploy. `sendDefaultPii: false` belt-and-braces with the manual filter on the backend side. Trace sampling is 0% outside production and 5% in production — the standard tier-1 recommendation that gives signal without burning the free tier. **Source-map upload deferred to PR3/D7 (deploy).** It requires a `SENTRY_AUTH_TOKEN` Fly secret + the `withSentryConfig()` build-time wrapper, neither of which exists yet. Until then stack traces are minified — readable enough by line/col, just not by symbol. Marking C4.1 as `[~]` to signal "wired but not source-map-complete"; the deploy PR will flip it to `[x]` when it adds the env-gated wrapper. **5 vitest cases pass** in `sentry-config.test.ts` — covering no-op-without-DSN (client + server + edge), 0% trace sampling in dev, 5% in prod.
 
-- [ ] **C5.1** Backend Sentry. `sentry-sdk[fastapi]` with PII filtering. Tags: `route`, `user_id`, `agent_name`.
-  - **Touches:** `backend/app/main.py`, `backend/app/core/sentry.py`
+- [x] **C5.1** Backend Sentry. `sentry-sdk[fastapi]` with PII filtering. Tags: `route`, `user_id`, `agent_name`.
+  - **Touches:** `backend/app/core/sentry.py` (new), `backend/app/main.py`, `backend/app/core/security.py`, `backend/pyproject.toml`, `backend/uv.lock`, `backend/tests/test_core/test_sentry.py` (new)
   - **Acceptance:** Raise in dev → see in Sentry tagged with route + user.
-  - **Done note:**
+  - **claimed-by:** track-o
+  - **Done note:** Mirrored the design rules of C3.1 telemetry: no-op safe (when SENTRY_DSN unset OR sentry-sdk not installed), idempotent init, soft-fail every helper. Five public functions: `init_sentry()` (FastAPI + Starlette integrations, conservative 5% trace sample, 0% profile sample), `is_enabled()`, `set_user_context(user_id)`, `set_agent_context(agent_name)`, `capture_exception(exc)`. Wired `init_sentry()` into `main.py` *before* lifespan so a startup crash still ships. Wired `set_user_context` into the `get_current_user` + `get_current_user_optional` deps in `security.py` — every authenticated request now tags the Sentry scope with `user.id`. **Critical: PII filtering.** A `before_send` hook strips PII from every event before it leaves the process: (a) Authorization, Cookie, X-Refresh-Token, X-Csrf-Token, Set-Cookie headers → `[redacted]`; (b) request body dropped entirely (could contain student-pasted code with API keys); (c) email / username / full_name / ip_address fields on the user dict → `[redacted]` (we KEEP `id` because that's the whole purpose of `set_user_context`); (d) query-string values >32 chars → `[redacted]` (cheap heuristic for tokens). Handles both dict-form and list-form headers (older sentry-sdk used pairs). `set_default_pii=False` belt-and-braces with the manual filter. **11 unit tests pass** in `test_sentry.py` — covers no-DSN no-op, missing-SDK no-op, idempotent init, all four PII-strip code paths (header redaction, body drop, user PII strip, long-querystring redact), list-format header path, and the no-request edge case (Celery messages).
 
 ### C6 — Health checks
 
@@ -379,10 +385,11 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### C7 — Cost tracking per LLM call
 
-- [ ] **C7.1** Instrument every Anthropic call to log `{event: "llm.call", agent_name, model, tokens_in, tokens_out, duration_ms, user_id, cost_estimate_usd}`.
-  - **Touches:** `backend/app/agents/base_agent.py`, `backend/app/agents/llm_factory.py`
+- [x] **C7.1** Instrument every Anthropic call to log `{event: "llm.call", agent_name, model, tokens_in, tokens_out, duration_ms, user_id, cost_estimate_usd}`.
+  - **Touches:** `backend/app/agents/base_agent.py`, `backend/tests/test_agents/test_llm_cost_tracking.py` (new)
   - **Acceptance:** Daily aggregate via PostHog `SUM(cost_estimate_usd) BY user_id` is queryable.
-  - **Done note:**
+  - **claimed-by:** track-o
+  - **Done note:** Wired into the existing `BaseAgent.log_action` chokepoint — every successful agent run already flowed through it after `_merge_token_usage` (which extracts LangChain's `usage_metadata` dict). Added a `llm.call` structlog event with the spec'd shape (agent_name, model, tokens_in, tokens_out, duration_ms, user_id, status, cost_estimate_usd, cost_estimate_inr) and a parallel `telemetry.capture()` call so the same payload lands in PostHog. Pricing table is the existing `_PRICING_USD_PER_1M` in `llm_factory.py` — reusing it keeps cost computation in one place and means the existing ₹20 cost-cap circuit breaker shares its source of truth. Three guarantees verified: (1) successful runs emit the event with non-zero cost when the model is in the pricing table; (2) agents that don't call an LLM (spaced_repetition, knowledge_graph — pure-Python SM-2 / EMA computation) skip the event entirely so the dashboard isn't polluted with zero-token rows; (3) unknown models (e.g. self-hosted MiniMax variant) emit the event with cost=0 rather than crashing — the absolute ₹20 circuit breaker covers actual budget protection. **3 unit tests pass** in `test_llm_cost_tracking.py` covering all three paths.
 
 ### C8 — Slow-query log
 

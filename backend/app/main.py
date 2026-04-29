@@ -14,8 +14,14 @@ from app.core.exception_handler import unhandled_exception_handler
 from app.core.logging import configure_logging
 from app.core.rate_limit import limiter
 from app.core.request_id import RequestIDMiddleware
+from app.core.sentry import init_sentry
 
 configure_logging(level="DEBUG" if settings.debug else "INFO")
+
+# PR3/C5.1 — initialize Sentry as early as possible (before lifespan,
+# before any imports that may raise) so a startup crash still gets
+# reported. No-op when SENTRY_DSN is unset.
+init_sentry()
 
 log = structlog.get_logger()
 
@@ -66,8 +72,11 @@ def create_app() -> FastAPI:
                 retry_after_seconds = max(1, int(reset_epoch - _time.time()))
                 remaining = max(0, int(rem))
                 limit_amount = item.amount
-            except Exception:
-                pass
+            except Exception as exc:
+                # PR3/C2.1 — get_window_stats failure is non-fatal: we
+                # fall back to the canned defaults set above. Keep at
+                # debug because every 429 hit would emit otherwise.
+                log.debug("rate_limit.window_stats_failed", error=str(exc))
 
         headers = {
             "Retry-After": str(retry_after_seconds),

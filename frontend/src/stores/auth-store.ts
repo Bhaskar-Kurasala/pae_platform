@@ -3,6 +3,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { authApi, type UserResponse } from "@/lib/api-client";
+import { trackSignedIn, trackSignedUp } from "@/lib/analytics-events";
+import { reset as telemetryReset } from "@/lib/telemetry";
 
 export interface User {
   id: string;
@@ -90,6 +92,11 @@ export const useAuthStore = create<AuthState>()(
           const user = toUser(userResp);
           set({ user });
           setRoleCookie(user.role);
+          // PR3/C3.2 — identify the PostHog session with the user
+          // id so server-side llm.call events (PR3/C7.1) and client
+          // events share a distinct_id. No-op when posthog isn't
+          // configured.
+          trackSignedIn(user.id);
         } catch (err) {
           // If /me fails we have a zombie-auth state — roll back so guards
           // don't hang on an infinite spinner (DISC-52).
@@ -117,6 +124,9 @@ export const useAuthStore = create<AuthState>()(
           const user = toUser(userResp);
           set({ user });
           setRoleCookie(user.role);
+          // PR3/C3.2 — track signup (method = email since OAuth
+          // signup goes through a different code path).
+          trackSignedUp(user.id, "email");
         } catch (err) {
           set({
             user: null,
@@ -137,6 +147,9 @@ export const useAuthStore = create<AuthState>()(
           isAuthenticated: false,
         });
         setRoleCookie(null);
+        // PR3/C3.2 — drop PostHog session state so the next login is
+        // a fresh distinct_id. No-op when telemetry is disabled.
+        telemetryReset();
       },
 
       refreshMe: async () => {

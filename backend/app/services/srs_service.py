@@ -18,10 +18,13 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.srs_card import SRSCard
+
+log = structlog.get_logger()
 
 MIN_EASE = 1.3
 MAX_EASE = 3.0
@@ -214,7 +217,14 @@ class SRSService:
             from app.services.notebook_service import maybe_graduate_card
 
             await maybe_graduate_card(self.db, card=card, now=reviewed_at)
-        except Exception:
-            pass
+        except Exception as exc:
+            # PR3/C2.1 — keep at warning so a graduation regression
+            # surfaces in logs, but DO NOT re-raise (per the comment
+            # above: SM-2 update has higher priority than graduation).
+            log.warning(
+                "srs.notebook_graduation_hook_failed",
+                card_id=str(card.id),
+                error=str(exc),
+            )
 
         return card
