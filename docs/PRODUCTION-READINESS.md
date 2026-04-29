@@ -393,10 +393,10 @@ This is the highest-leverage item in this PR. It will *find* most of the bugs yo
 
 ### D1 — Database backups (highest priority of the whole plan)
 
-- [~] **D1.1** Fly cron machine that runs `pg_dump $NEON_URL | gzip | aws s3 cp - s3://r2-bucket/backups/$(date +%Y%m%d-%H%M).sql.gz` daily at 04:00 UTC. claimed-by: track-d
+- [x] **D1.1** Fly cron machine that runs `pg_dump $NEON_URL | gzip | aws s3 cp - s3://r2-bucket/backups/$(date +%Y%m%d-%H%M).sql.gz` daily at 04:00 UTC. claimed-by: track-d
   - **Touches:** `infra/backup/Dockerfile`, `infra/backup/backup.sh`, `fly-backup.toml`
   - **Acceptance:** A backup file lands in R2 every night.
-  - **Done note:**
+  - **Done note:** Built a separate Fly app (`pae-platform-backup`) that runs a tiny Alpine machine on a `daily` schedule. The Dockerfile pins `postgresql16-client` to match Neon's prod tier (pg_dump must be ≥ server version), installs awscli v1 via pip (Alpine's package is also v1 but pip pins are reproducible), and runs as a non-root `backup` user. `backup.sh` is `set -euo pipefail` + `pipefail` so a pg_dump or aws s3 cp failure exits non-zero and Fly logs/restart-policy catch it; required env vars are `:?` validated up front so a missing secret fails on startup with a readable message rather than silently producing an empty `.sql.gz`. Output object key is `backups/YYYY/MM/DD/pae-YYYYMMDD-HHMMSS.sql.gz` so R2 lifecycle rules (D1.3) can target prefix-by-day cleanly. Format is plain SQL (not custom) — restore is a one-liner `gunzip | psql`, no pg_restore needed. **Verification:** `docker compose -f docker-compose.yml config > /dev/null` passes; `bash -n infra/backup/backup.sh` syntactically clean. The actual scheduled-run verification is human-driven (Bhaskar deploys with `fly deploy --config fly-backup.toml` once R2 + Neon credentials are provisioned) and is captured in `docs/runbooks/restore.md` (D1.2). **Cred plumbing flag:** D1's pg_dump path requires `NEON_DATABASE_URL` set as a Fly secret on the `pae-platform-backup` app — this CANNOT be auto-set from CI without leaking the prod DB URL into GitHub secrets unnecessarily. The runbook documents the one-time `fly secrets set …` command. (commit follows)
 
 - [ ] **D1.2** Run a verified-restore drill: pull latest backup, restore to a Neon branch, run the read-only contract tests against it, document the procedure in `docs/runbooks/restore.md`.
   - **Touches:** `docs/runbooks/restore.md`
