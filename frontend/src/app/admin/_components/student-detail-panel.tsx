@@ -54,6 +54,13 @@ import {
 import { buildCallInviteMailto } from "@/lib/calendar-mailto";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const TRIGGERABLE_AGENTS = [
   { name: "disrupt_prevention", label: "Re-engage (disrupt_prevention)" },
@@ -286,18 +293,28 @@ export function StudentDetailPanel({
           </p>
         </CardHeader>
         <CardContent className="flex flex-col md:flex-row gap-3">
-          <select
-            aria-label="Agent to trigger"
+          {/* shadcn Select (base-ui combobox) — fully styled, portal-rendered.
+              Replaces the native <select> which had a white-flash on
+              open in dark mode (OS popup briefly painted in default
+              scheme before color-scheme: dark could apply). */}
+          <Select
             value={selectedAgent}
-            onChange={(e) => setSelectedAgent(e.target.value)}
-            className="h-9 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/50"
+            onValueChange={(v) => v !== null && setSelectedAgent(v)}
           >
-            {TRIGGERABLE_AGENTS.map((a) => (
-              <option key={a.name} value={a.name}>
-                {a.label}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger
+              aria-label="Agent to trigger"
+              className="h-9 min-w-[260px] rounded-lg"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TRIGGERABLE_AGENTS.map((a) => (
+                <SelectItem key={a.name} value={a.name}>
+                  {a.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <button
             type="button"
             onClick={() => void handleTrigger()}

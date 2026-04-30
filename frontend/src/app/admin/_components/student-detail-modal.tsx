@@ -65,6 +65,23 @@ export function StudentDetailModal({
 
   const isDark = pageTheme === "dark";
 
+  // While the modal is open in dark mode, mirror the page-island
+  // theme onto <html class="dark"> so portal-rendered popovers
+  // (shadcn Select content, tooltips) inherit dark tokens too.
+  // Without this, the Select's ChevronDown popup renders with
+  // light-mode bg-popover even though the modal around it is dark.
+  // We restore the prior value on close so the rest of the app
+  // (which uses media-query-based dark mode) is unaffected.
+  useEffect(() => {
+    if (!open || !isDark) return;
+    const html = document.documentElement;
+    const had = html.classList.contains("dark");
+    html.classList.add("dark");
+    return () => {
+      if (!had) html.classList.remove("dark");
+    };
+  }, [open, isDark]);
+
   // Surface tokens — handpicked to match the CareerForge palette
   // (console.module.css). Light mode uses the warm parchment from
   // --bg-2 / ink; dark mode uses the deep forest from --panel / ink.
