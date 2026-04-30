@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Activity,
-  AlertTriangle,
   ClipboardList,
   Flame,
   LayoutDashboard,
@@ -26,12 +25,20 @@ import { SkipToContent } from "@/components/layouts/skip-to-content";
 // pending the actual screens being built. The `/admin/courses/[id]/edit`
 // route still exists for editing a single course (linked from the
 // console's row actions), it just doesn't have a list page yet.
+// "At-risk" was retired in favour of the F4 retention engine —
+// the /admin Overview now hosts the canonical retention panels
+// (paid_silent, capstone_stalled, streak_broken, ready-but-stalled,
+// never-returned), each with a "See all N →" link that lands on
+// the modernized roster filtered by slip pattern. The legacy
+// /admin/at-risk page used an older multi-signal scoring system
+// that detected a different cohort, so showing both in the
+// sidebar created two competing "at-risk" views. The legacy URL
+// still exists and redirects to /admin.
 const adminNavItems = [
   { href: "/admin", label: "Overview", icon: LayoutDashboard },
   { href: "/admin/pulse", label: "Pulse", icon: Activity },
   { href: "/admin/students", label: "Students", icon: Users },
   { href: "/admin/confusion", label: "Confusion", icon: Flame },
-  { href: "/admin/at-risk", label: "At-risk", icon: AlertTriangle },
   { href: "/admin/feedback", label: "Feedback", icon: MessageSquare },
   { href: "/admin/agents", label: "Agents", icon: Zap },
   { href: "/admin/audit-log", label: "Audit Log", icon: ClipboardList },
