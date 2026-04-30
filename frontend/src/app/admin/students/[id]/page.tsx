@@ -12,6 +12,7 @@ import {
   Clock,
   FileCode2,
   LogIn,
+  MessageSquare,
   NotebookPen,
   Play,
   Sparkles,
@@ -26,6 +27,10 @@ import {
   useStudentTimeline,
   useTriggerAgent,
 } from "@/lib/hooks/use-admin";
+import {
+  useAdminMessagesForStudent,
+  useSendAdminMessage,
+} from "@/lib/hooks/use-messages";
 import { buildCallInviteMailto } from "@/lib/calendar-mailto";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -85,11 +90,18 @@ export default function StudentDrilldownPage() {
   const { data: refundOffers = [] } = useRefundOffers(studentId);
   const sendRefundOffer = useSendRefundOffer(studentId);
 
+  // F8 — admin↔student in-app DM thread.
+  const { data: dmMessages = [], isLoading: dmLoading } =
+    useAdminMessagesForStudent(studentId);
+  const sendDm = useSendAdminMessage(studentId);
+  const dmThreadId = dmMessages[0]?.thread_id;
+
   const [selectedAgent, setSelectedAgent] = useState<string>(TRIGGERABLE_AGENTS[0].name);
   const [triggerResult, setTriggerResult] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState<string>("");
   const [refundReason, setRefundReason] = useState<string>("");
   const [refundFlash, setRefundFlash] = useState<string | null>(null);
+  const [dmDraft, setDmDraft] = useState<string>("");
 
   async function handleSendRefundOffer() {
     if (!studentId) return;
@@ -118,6 +130,17 @@ export default function StudentDrilldownPage() {
     } catch {
       // The global mutation onError toast (PR2/B1.1) shows the failure;
       // we just keep the draft in the textarea so the operator can retry.
+    }
+  }
+
+  async function handleSendDm() {
+    const trimmed = dmDraft.trim();
+    if (!trimmed || !studentId) return;
+    try {
+      await sendDm.mutateAsync({ body: trimmed, thread_id: dmThreadId });
+      setDmDraft("");
+    } catch {
+      // global toast handles failure surface
     }
   }
 
@@ -367,6 +390,86 @@ export default function StudentDrilldownPage() {
                   <p className="mt-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
                     {new Date(n.created_at).toLocaleString()}
                   </p>
+                </li>
+              ))}
+            </ol>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* F8 — admin↔student in-app DM. Distinct from F2 notes (which
+          are private). DM messages are visible to the student in their
+          inbox banner and double-write to outreach_log so engagement
+          attribution stays consistent. */}
+      <Card>
+        <CardHeader className="pb-2">
+          <h2 className="font-semibold text-sm flex items-center gap-2">
+            <MessageSquare className="h-4 w-4 text-primary" aria-hidden="true" />
+            Direct message
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Visible to the student in their inbox. Replies flip the most recent outreach to “responded.”
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div>
+            <textarea
+              value={dmDraft}
+              onChange={(e) => setDmDraft(e.target.value)}
+              placeholder="e.g. Hey — saw you haven't been on this week. Anything blocking? Reply here anytime."
+              maxLength={5000}
+              rows={3}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              aria-label="New direct message to student"
+              disabled={sendDm.isPending}
+            />
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground">
+                {dmDraft.length}/5000
+              </span>
+              <button
+                type="button"
+                onClick={() => void handleSendDm()}
+                disabled={!dmDraft.trim() || sendDm.isPending || !studentId}
+                className="rounded-lg bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+              >
+                {sendDm.isPending ? "Sending…" : "Send message"}
+              </button>
+            </div>
+          </div>
+
+          {dmLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 2 }).map((_, i) => (
+                <div key={i} className="h-12 animate-pulse rounded bg-muted" />
+              ))}
+            </div>
+          ) : dmMessages.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              No messages yet. The first one usually opens the door.
+            </p>
+          ) : (
+            <ol className="space-y-2">
+              {dmMessages.map((m) => (
+                <li
+                  key={m.id}
+                  className={
+                    m.sender_role === "admin"
+                      ? "rounded-lg border border-primary/30 bg-primary/5 px-3 py-2"
+                      : "rounded-lg border border-border bg-background/50 px-3 py-2"
+                  }
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                      {m.sender_role === "admin" ? "You" : "Student"}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {new Date(m.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
+                    {m.body}
+                  </pre>
                 </li>
               ))}
             </ol>

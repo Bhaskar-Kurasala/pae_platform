@@ -7,6 +7,7 @@ Importing this package registers all task modules with the Celery app so that
 from app.tasks import (  # noqa: F401
     growth_snapshots,
     inactivity_sweep,
+    outreach_automation,
     risk_scoring,
     weekly_letters,
     weekly_review,

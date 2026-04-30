@@ -14,6 +14,7 @@ celery_app = Celery(
         "app.tasks.weekly_review",
         "app.tasks.inactivity_sweep",
         "app.tasks.risk_scoring",
+        "app.tasks.outreach_automation",
     ],
 )
 
@@ -54,6 +55,16 @@ celery_app.conf.update(
         "risk-scoring-nightly": {
             "task": "app.tasks.risk_scoring.score_all_users",
             "schedule": crontab(minute=0, hour=3),
+        },
+        # F9 — nightly outreach automation. 09:00 UTC = 6 hours after
+        # F1's risk scoring at 03:00 UTC. The window gives the operator
+        # time to sanity-check the morning queue on /admin before
+        # automated emails fly out. Default is dry-run; real sends
+        # require ENV=production AND OUTREACH_AUTO_SEND=1 (gated in
+        # the service to avoid accidental fan-out).
+        "outreach-automation-nightly": {
+            "task": "app.tasks.outreach_automation.run_nightly_outreach",
+            "schedule": crontab(minute=0, hour=9),
         },
     },
 )
