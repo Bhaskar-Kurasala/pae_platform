@@ -1173,6 +1173,186 @@ async def _daily_buckets(
     return out
 
 
+async def _compute_live_calls(
+    db: AsyncSession,
+    now: datetime,
+) -> list[AdminConsoleCallItem]:
+    """LD-5: today's call list. We don't have a dedicated
+    `scheduled_call` outreach kind yet, so for now we surface the
+    students that the operator has reached out to manually today
+    via outreach_log (triggered_by='admin_manual'). The future
+    F-extension introduces a proper scheduled_at column.
+    """
+    from app.models.outreach_log import OutreachLog
+
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    rows = (
+        await db.execute(
+            select(OutreachLog, User)
+            .join(User, User.id == OutreachLog.user_id)
+            .where(
+                OutreachLog.triggered_by == "admin_manual",
+                OutreachLog.sent_at >= today_start,
+            )
+            .order_by(OutreachLog.sent_at.asc())
+            .limit(20)
+        )
+    ).all()
+
+    out: list[AdminConsoleCallItem] = []
+    for log_row, user in rows:
+        out.append(
+            AdminConsoleCallItem(
+                student_id=str(user.id),
+                time=log_row.sent_at.strftime("%H:%M"),
+                reason=log_row.body_preview[:60] if log_row.body_preview else "Manual outreach",
+            )
+        )
+    return out
+
+
+async def _compute_live_events(
+    db: AsyncSession,
+    now: datetime,
+) -> list[AdminConsoleEventItem]:
+    """LD-5: live event feed from cohort_events.
+
+    cohort_events is populated by various agents on lifecycle
+    moments (promotion, capstone shipped, streak started, milestone).
+    Already uses masked actor_handle so first-name + last-initial
+    privacy is preserved.
+    """
+    from app.models.cohort_event import CohortEvent
+
+    rows = (
+        await db.execute(
+            select(CohortEvent)
+            .order_by(CohortEvent.occurred_at.desc())
+            .limit(20)
+        )
+    ).scalars().all()
+
+    # Map cohort_event.kind to the UI's CSS color class. The UI
+    # already styles 5 known kinds: promo, capstone, purchase,
+    # review, signup. Map the cohort_event vocabulary onto those.
+    KIND_MAP = {
+        "level_up": "promo",
+        "promotion_earned": "promo",
+        "capstone_shipped": "capstone",
+        "purchase": "purchase",
+        "purchase_made": "purchase",
+        "review_requested": "review",
+        "signup": "signup",
+        "streak_started": "signup",
+        "milestone": "promo",
+    }
+
+    out: list[AdminConsoleEventItem] = []
+    for ev in rows:
+        ui_kind = KIND_MAP.get(ev.kind, ev.kind)
+        out.append(
+            AdminConsoleEventItem(
+                student_id=str(ev.actor_id) if ev.actor_id else None,
+                kind=ui_kind,
+                text=ev.label,
+                time_label=_format_event_time(ev.occurred_at),
+            )
+        )
+    return out
+
+
+async def _compute_live_revenue(
+    db: AsyncSession,
+    now: datetime,
+    pulse: list[AdminConsolePulseCard],
+) -> AdminConsoleRevenue:
+    """LD-5: revenue card from payments + refunds tables.
+
+    Surfaces month-to-date total, count + total of new purchases this
+    month, count + total of renewals this month (proxied as repeat
+    payments from same user), and refunds this month. Spark reuses
+    the MRR pulse card's spark for cohesion.
+    """
+    from app.models.payment import Payment
+    from app.models.refund import Refund
+
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    # Month total ($)
+    month_total_cents = (
+        await db.execute(
+            select(func.coalesce(func.sum(Payment.amount_cents), 0)).where(
+                Payment.created_at >= month_start,
+                Payment.status == "succeeded",
+            )
+        )
+    ).scalar() or 0
+    month_total_dollars = float(month_total_cents) / 100.0
+
+    # All succeeded payments this month — used to split into "new"
+    # vs "renewal" (a user's first-ever payment is new; subsequent
+    # are renewals).
+    pay_rows = (
+        await db.execute(
+            select(Payment.user_id, Payment.amount_cents, Payment.created_at).where(
+                Payment.status == "succeeded",
+                Payment.created_at >= month_start,
+            )
+        )
+    ).all()
+
+    # Per user: was this month their first-ever payment?
+    first_pay_cache: dict[uuid.UUID, datetime] = {}
+    if pay_rows:
+        user_ids = {row[0] for row in pay_rows}
+        first_rows = (
+            await db.execute(
+                select(Payment.user_id, func.min(Payment.created_at))
+                .where(
+                    Payment.status == "succeeded",
+                    Payment.user_id.in_(user_ids),
+                )
+                .group_by(Payment.user_id)
+            )
+        ).all()
+        first_pay_cache = {uid: ts for uid, ts in first_rows}
+
+    new_count = 0
+    new_cents = 0
+    renew_count = 0
+    renew_cents = 0
+    for user_id, cents, created in pay_rows:
+        first = first_pay_cache.get(user_id)
+        if first is not None and first >= month_start:
+            new_count += 1
+            new_cents += cents
+        else:
+            renew_count += 1
+            renew_cents += cents
+
+    # Refunds this month — count rows.
+    refund_count = (
+        await db.execute(
+            select(func.count(Refund.id)).where(Refund.created_at >= month_start)
+        )
+    ).scalar() or 0
+
+    def _money(d: float) -> str:
+        if d >= 1000:
+            return f"${d / 1000:.1f}k"
+        return f"${int(d)}"
+
+    mrr_pulse = next((p for p in pulse if p.metric_key == "mrr"), None)
+    return AdminConsoleRevenue(
+        month_total=_money(month_total_dollars),
+        new_purchases=f"{new_count} · {_money(new_cents / 100.0)}",
+        renewals=f"{renew_count} · {_money(renew_cents / 100.0)}",
+        refunds=str(int(refund_count)),
+        spark=mrr_pulse.spark if mrr_pulse else [],
+    )
+
+
 async def _compute_live_features(
     db: AsyncSession,
     now: datetime,
@@ -1766,48 +1946,19 @@ async def get_admin_console(
     # Features — LD-4: 8 tiles computed from live tables.
     features = await _compute_live_features(db, now)
 
-    # Calls (today) ─────────────────────────────────────────────────────
-    call_rows = (
-        await db.execute(
-            select(AdminConsoleCall).order_by(AdminConsoleCall.scheduled_for)
-        )
-    ).scalars().all()
-    calls = [
-        AdminConsoleCallItem(
-            student_id=str(c.student_id),
-            time=c.display_time,
-            reason=c.reason,
-        )
-        for c in call_rows
-    ]
+    # Calls (today) — LD-5: from outreach_log where kind='admin_manual'
+    # and the outreach was logged today UTC. The richer
+    # "scheduled_call" concept (with explicit scheduled_at column)
+    # is a future migration; for now we reuse today's manual sends
+    # as a proxy for "calls the operator has on their plate today".
+    calls = await _compute_live_calls(db, now)
 
-    # Events ────────────────────────────────────────────────────────────
-    event_rows = (
-        await db.execute(
-            select(AdminConsoleEvent)
-            .order_by(AdminConsoleEvent.occurred_at.desc())
-            .limit(20)
-        )
-    ).scalars().all()
-    events = [
-        AdminConsoleEventItem(
-            student_id=str(e.student_id) if e.student_id else None,
-            kind=e.kind,
-            text=e.body_html,
-            time_label=_format_event_time(e.occurred_at),
-        )
-        for e in event_rows
-    ]
+    # Events — LD-5: from cohort_events (real, masked-handle stream
+    # populated by various agents on lifecycle moments).
+    events = await _compute_live_events(db, now)
 
-    # Revenue (rolling 30-day) — derived from MRR pulse spark when present
-    mrr_pulse = next((p for p in pulse if p.metric_key == "mrr"), None)
-    revenue = AdminConsoleRevenue(
-        month_total="$12,340",
-        new_purchases="8 · $7,120",
-        renewals="14 · $5,220",
-        refunds="0",
-        spark=mrr_pulse.spark if mrr_pulse else [],
-    )
+    # Revenue — LD-5: from payments + refunds tables.
+    revenue = await _compute_live_revenue(db, now, pulse)
 
     return AdminConsoleResponse(
         students=students,
