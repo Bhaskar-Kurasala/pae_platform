@@ -303,6 +303,27 @@ async def confirm_promotion(
     user.promoted_to_role = summary.role.to_role
     await db.commit()
     await db.refresh(user)
+
+    # Emit a cohort_event so the admin "Live event feed" picks up
+    # the promotion. Failures are non-fatal — promotion is the
+    # contractual moment; the event log is observability.
+    try:
+        from app.services.cohort_event_service import (
+            mask_handle,
+            record_event,
+        )
+
+        new_role = summary.role.to_role
+        await record_event(
+            db,
+            kind="level_up",
+            actor=user,
+            label=f"{mask_handle(user.full_name)} promoted to {new_role}",
+            level_slug=new_role,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
     return PromotionConfirmResponse(
         promoted_at=user.promoted_at,  # type: ignore[arg-type]
         promoted_to_role=user.promoted_to_role,  # type: ignore[arg-type]

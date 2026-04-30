@@ -33,6 +33,33 @@ class AuthService:
             }
         )
         log.info("auth.register", user_id=str(user.id))
+
+        # Emit a real cohort_event so the admin "Live event feed" on
+        # /admin lights up immediately when a student signs up. Only
+        # emitted for role=student — admin/instructor signups don't
+        # belong in the cohort feed.
+        if user.role == "student":
+            try:
+                from app.services.cohort_event_service import (
+                    mask_handle,
+                    record_event,
+                )
+
+                await record_event(
+                    self.repo.db,
+                    kind="signup",
+                    actor=user,
+                    label=f"{mask_handle(user.full_name)} joined the cohort",
+                )
+            except Exception as exc:  # noqa: BLE001
+                # Cohort emission must never block registration; log
+                # and move on.
+                log.warning(
+                    "auth.cohort_event_failed",
+                    user_id=str(user.id),
+                    error=str(exc),
+                )
+
         return user
 
     async def login(self, email: str, password: str) -> dict[str, str]:

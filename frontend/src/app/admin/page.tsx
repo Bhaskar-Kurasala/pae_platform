@@ -802,21 +802,36 @@ export default function AdminConsoleV1Page() {
                 </div>
               </div>
               <div className={styles.eventFeed}>
-                {data.events.map((e, i) => (
-                  <div key={i} className={styles.event}>
-                    <div className={styles.eventTime}>{e.time_label}</div>
-                    <div className={styles.eventContent}>
-                      <span
-                        className={`${styles.eventTag} ${
-                          styles[e.kind as keyof typeof styles] ?? ""
-                        }`}
-                      >
-                        {TAG_LABELS[e.kind] ?? e.kind}
-                      </span>
-                      <span dangerouslySetInnerHTML={{ __html: e.text }} />
-                    </div>
+                {data.events.length === 0 ? (
+                  <div
+                    style={{
+                      padding: "16px 4px",
+                      fontSize: 12,
+                      color: "var(--muted)",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    No cohort activity yet. Events appear here as
+                    students sign up, ship capstones, and earn
+                    promotions.
                   </div>
-                ))}
+                ) : (
+                  data.events.map((e, i) => (
+                    <div key={i} className={styles.event}>
+                      <div className={styles.eventTime}>{e.time_label}</div>
+                      <div className={styles.eventContent}>
+                        <span
+                          className={`${styles.eventTag} ${
+                            styles[e.kind as keyof typeof styles] ?? ""
+                          }`}
+                        >
+                          {TAG_LABELS[e.kind] ?? e.kind}
+                        </span>
+                        <span dangerouslySetInnerHTML={{ __html: e.text }} />
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
 
