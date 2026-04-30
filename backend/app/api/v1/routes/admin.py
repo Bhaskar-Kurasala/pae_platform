@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import structlog
@@ -1127,6 +1127,308 @@ def _format_event_time(occurred_at: datetime) -> str:
     return f"{hours // 24}d"
 
 
+def _fmt_int(n: int | float) -> str:
+    """Format a count for the pulse strip display_value field."""
+    n = int(n)
+    if n < 1000:
+        return str(n)
+    if n < 10000:
+        return f"{n:,}"
+    return f"{n / 1000:.1f}k"
+
+
+def _delta_pct(curr: float, prior: float) -> int:
+    if prior <= 0:
+        return 100 if curr > 0 else 0
+    return int(round((curr - prior) / prior * 100))
+
+
+async def _daily_buckets(
+    db: AsyncSession,
+    column,
+    where_clause,
+    now: datetime,
+    days: int = 14,
+) -> list[float]:
+    """Group `where_clause` rows by UTC day for the last `days` days.
+
+    Returns a list of length `days`, oldest first. Days with no rows = 0.
+    """
+    start = (now - timedelta(days=days - 1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    bucket_col = func.date_trunc("day", column).label("bucket")
+    rows = (
+        await db.execute(
+            select(bucket_col, func.count())
+            .where(where_clause, column >= start)
+            .group_by(bucket_col)
+        )
+    ).all()
+    by_day: dict[date, int] = {row[0].date(): int(row[1]) for row in rows}
+    out: list[float] = []
+    for i in range(days):
+        d = (start + timedelta(days=i)).date()
+        out.append(float(by_day.get(d, 0)))
+    return out
+
+
+async def _compute_live_pulse(
+    db: AsyncSession,
+    now: datetime,
+) -> list[AdminConsolePulseCard]:
+    """LD-2: Compute the 6 pulse-strip cards from live data with 14-day
+    sparklines. Replaces the seeded admin_console_pulse_metrics read.
+    """
+    from app.models.enrollment import Enrollment
+    from app.models.exercise import Exercise
+    from app.models.exercise_submission import ExerciseSubmission
+    from app.models.learning_session import LearningSession
+    from app.models.payment import Payment
+    from app.models.student_risk_signals import StudentRiskSignals
+
+    day_ago = now - timedelta(hours=24)
+    two_days_ago = now - timedelta(hours=48)
+    week_ago = now - timedelta(days=7)
+    two_weeks_ago = now - timedelta(days=14)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    yday_start = today_start - timedelta(days=1)
+    month_ago = now - timedelta(days=30)
+    two_months_ago = now - timedelta(days=60)
+
+    # ── 1. Active learners (24h) ──
+    active_24h = (
+        await db.execute(
+            select(func.count(func.distinct(AgentAction.student_id))).where(
+                AgentAction.created_at >= day_ago
+            )
+        )
+    ).scalar() or 0
+    active_prior = (
+        await db.execute(
+            select(func.count(func.distinct(AgentAction.student_id))).where(
+                AgentAction.created_at >= two_days_ago,
+                AgentAction.created_at < day_ago,
+            )
+        )
+    ).scalar() or 0
+    active_spark = await _daily_buckets(
+        db, AgentAction.created_at, AgentAction.id.is_not(None), now
+    )
+
+    # ── 2. Sessions today ──
+    sessions_today = (
+        await db.execute(
+            select(func.count(LearningSession.id)).where(
+                LearningSession.created_at >= today_start
+            )
+        )
+    ).scalar() or 0
+    sessions_yday = (
+        await db.execute(
+            select(func.count(LearningSession.id)).where(
+                LearningSession.created_at >= yday_start,
+                LearningSession.created_at < today_start,
+            )
+        )
+    ).scalar() or 0
+    sessions_spark = await _daily_buckets(
+        db, LearningSession.created_at, LearningSession.id.is_not(None), now
+    )
+
+    # ── 3. Capstones submitted this week ──
+    capstones_wk = (
+        await db.execute(
+            select(func.count(ExerciseSubmission.id))
+            .join(Exercise, Exercise.id == ExerciseSubmission.exercise_id)
+            .where(
+                Exercise.is_capstone.is_(True),
+                ExerciseSubmission.created_at >= week_ago,
+            )
+        )
+    ).scalar() or 0
+    capstones_prior = (
+        await db.execute(
+            select(func.count(ExerciseSubmission.id))
+            .join(Exercise, Exercise.id == ExerciseSubmission.exercise_id)
+            .where(
+                Exercise.is_capstone.is_(True),
+                ExerciseSubmission.created_at >= two_weeks_ago,
+                ExerciseSubmission.created_at < week_ago,
+            )
+        )
+    ).scalar() or 0
+    # Spark: capstone submissions per day (joined query — simpler to fetch ids).
+    cap_rows = (
+        await db.execute(
+            select(ExerciseSubmission.created_at)
+            .join(Exercise, Exercise.id == ExerciseSubmission.exercise_id)
+            .where(
+                Exercise.is_capstone.is_(True),
+                ExerciseSubmission.created_at >= now - timedelta(days=14),
+            )
+        )
+    ).all()
+    capstones_spark = [0.0] * 14
+    spark_start = (now - timedelta(days=13)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    for (ts,) in cap_rows:
+        idx = (ts.date() - spark_start.date()).days
+        if 0 <= idx < 14:
+            capstones_spark[idx] += 1
+
+    # ── 4. Promotions earned this week ──
+    promotions_wk = (
+        await db.execute(
+            select(func.count(User.id)).where(
+                User.promoted_at >= week_ago,  # type: ignore[arg-type]
+            )
+        )
+    ).scalar() or 0
+    promotions_prior = (
+        await db.execute(
+            select(func.count(User.id)).where(
+                User.promoted_at >= two_weeks_ago,  # type: ignore[arg-type]
+                User.promoted_at < week_ago,  # type: ignore[arg-type]
+            )
+        )
+    ).scalar() or 0
+    promotions_spark = await _daily_buckets(
+        db, User.promoted_at, User.promoted_at.is_not(None), now
+    )
+
+    # ── 5. MRR (last 30 days, in dollars) ──
+    mrr_cents = (
+        await db.execute(
+            select(func.coalesce(func.sum(Payment.amount_cents), 0)).where(
+                Payment.created_at >= month_ago,
+                Payment.status == "succeeded",
+            )
+        )
+    ).scalar() or 0
+    mrr_prior_cents = (
+        await db.execute(
+            select(func.coalesce(func.sum(Payment.amount_cents), 0)).where(
+                Payment.created_at >= two_months_ago,
+                Payment.created_at < month_ago,
+                Payment.status == "succeeded",
+            )
+        )
+    ).scalar() or 0
+    mrr_dollars = float(mrr_cents) / 100.0
+    mrr_prior_dollars = float(mrr_prior_cents) / 100.0
+    # Spark: daily revenue for last 14 days.
+    pay_rows = (
+        await db.execute(
+            select(Payment.created_at, Payment.amount_cents).where(
+                Payment.created_at >= now - timedelta(days=14),
+                Payment.status == "succeeded",
+            )
+        )
+    ).all()
+    mrr_spark = [0.0] * 14
+    for ts, cents in pay_rows:
+        idx = (ts.date() - spark_start.date()).days
+        if 0 <= idx < 14:
+            mrr_spark[idx] += float(cents) / 100.0
+
+    # ── 6. At-risk learners (right now) ──
+    # Counts every student that F1 has flagged with a slip pattern
+    # (slip_type != 'none'). Conservative: any flagged student is
+    # worth the operator's attention.
+    at_risk_now = (
+        await db.execute(
+            select(func.count(StudentRiskSignals.id)).where(
+                StudentRiskSignals.slip_type != "none",
+                StudentRiskSignals.risk_score > 0,
+            )
+        )
+    ).scalar() or 0
+    # Prior week: we don't keep historical risk snapshots, so use "at-risk
+    # last week" as a proxy via student_risk_signals.computed_at if available.
+    # For now, just no-delta when there's no prior signal.
+    at_risk_prior = at_risk_now  # no historical baseline yet → delta = 0
+    at_risk_spark = [float(at_risk_now)] * 14  # flat line until we snapshot daily
+
+    # Pretty value formatting matching the existing UI's ConsoleStudent shape.
+    def mrr_display(d: float) -> tuple[str, str]:
+        if d >= 1000:
+            return f"${d / 1000:.1f}", "k"
+        return f"${int(d)}", ""
+
+    mrr_val, mrr_unit = mrr_display(mrr_dollars)
+
+    return [
+        AdminConsolePulseCard(
+            metric_key="active_24h",
+            label="Active learners (24h)",
+            value=_fmt_int(active_24h),
+            unit="",
+            delta=_delta_pct(active_24h, active_prior),
+            delta_text="vs yesterday",
+            color="#5fa37f",
+            invert_delta=False,
+            spark=active_spark,
+        ),
+        AdminConsolePulseCard(
+            metric_key="sessions_today",
+            label="Sessions today",
+            value=_fmt_int(sessions_today),
+            unit="",
+            delta=_delta_pct(sessions_today, sessions_yday),
+            delta_text="vs yesterday",
+            color="#5fa37f",
+            invert_delta=False,
+            spark=sessions_spark,
+        ),
+        AdminConsolePulseCard(
+            metric_key="capstones_wk",
+            label="Capstones submitted",
+            value=_fmt_int(capstones_wk),
+            unit=" wk",
+            delta=_delta_pct(capstones_wk, capstones_prior),
+            delta_text="vs last week",
+            color="#5fa37f",
+            invert_delta=False,
+            spark=capstones_spark,
+        ),
+        AdminConsolePulseCard(
+            metric_key="promotions_wk",
+            label="Promotions earned",
+            value=_fmt_int(promotions_wk),
+            unit=" wk",
+            delta=_delta_pct(promotions_wk, promotions_prior),
+            delta_text="vs last week",
+            color="#d6a54d",
+            invert_delta=False,
+            spark=promotions_spark,
+        ),
+        AdminConsolePulseCard(
+            metric_key="mrr",
+            label="MRR",
+            value=mrr_val,
+            unit=mrr_unit,
+            delta=_delta_pct(mrr_dollars, mrr_prior_dollars),
+            delta_text="this month",
+            color="#5fa37f",
+            invert_delta=False,
+            spark=mrr_spark,
+        ),
+        AdminConsolePulseCard(
+            metric_key="at_risk",
+            label="At-risk learners",
+            value=_fmt_int(at_risk_now),
+            unit="",
+            delta=_delta_pct(at_risk_now, at_risk_prior),
+            delta_text="vs last week",
+            color="#b8443a",
+            invert_delta=True,
+            spark=at_risk_spark,
+        ),
+    ]
+
+
 @router.get("/console/v1", response_model=AdminConsoleResponse)
 async def get_admin_console(
     db: AsyncSession = Depends(get_db),
@@ -1214,26 +1516,8 @@ async def get_admin_console(
         )
     students.sort(key=lambda s: s.risk, reverse=True)
 
-    # Pulse ─────────────────────────────────────────────────────────────
-    pulse_rows = (
-        await db.execute(
-            select(AdminConsolePulseMetric).order_by(AdminConsolePulseMetric.sort_order)
-        )
-    ).scalars().all()
-    pulse = [
-        AdminConsolePulseCard(
-            metric_key=p.metric_key,
-            label=p.label,
-            value=p.display_value,
-            unit=p.unit,
-            delta=p.delta_pct,
-            delta_text=p.delta_text,
-            color=p.color_hex,
-            invert_delta=p.invert_delta,
-            spark=[float(x) for x in (p.spark or [])],
-        )
-        for p in pulse_rows
-    ]
+    # Pulse — LD-2: 6 cards computed from LIVE data with 14-day sparks.
+    pulse = await _compute_live_pulse(db, now)
 
     # Funnel — newest snapshot ──────────────────────────────────────────
     funnel_row = (
