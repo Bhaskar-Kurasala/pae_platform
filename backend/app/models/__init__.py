@@ -52,6 +52,7 @@ from app.models.student_progress import StudentProgress
 from app.models.student_risk_signals import StudentRiskSignals
 from app.models.outreach_log import OutreachLog
 from app.models.refund_offer import RefundOffer
+from app.models.student_message import StudentMessage
 from app.models.user import User
 from app.models.user_preferences import UserPreferences
 from app.models.saved_skill_path import SavedSkillPath
@@ -123,6 +124,7 @@ __all__ = [
     "StudentRiskSignals",
     "OutreachLog",
     "RefundOffer",
+    "StudentMessage",
     "UserPreferences",
     "UserSkillState",
     "SavedSkillPath",

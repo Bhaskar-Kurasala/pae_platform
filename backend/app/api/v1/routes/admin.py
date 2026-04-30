@@ -1234,3 +1234,86 @@ async def get_admin_console(
         revenue=revenue,
         synced_at=datetime.now(UTC),
     )
+
+
+# ── F8 — In-app messaging (admin side) ──────────────────────────────
+
+
+class _AdminSendMessage(PydanticModel):
+    thread_id: str | None = None  # missing → start a new thread
+    body: str
+
+
+class _AdminMessageRead(PydanticModel):
+    id: str
+    thread_id: str
+    student_id: str
+    sender_role: str
+    sender_id: str | None
+    body: str
+    read_at: str | None
+    created_at: str
+
+
+def _admin_msg_to_read(m: Any) -> _AdminMessageRead:
+    return _AdminMessageRead(
+        id=str(m.id),
+        thread_id=str(m.thread_id),
+        student_id=str(m.student_id),
+        sender_role=m.sender_role,
+        sender_id=str(m.sender_id) if m.sender_id else None,
+        body=m.body,
+        read_at=m.read_at.isoformat() if m.read_at else None,
+        created_at=m.created_at.isoformat(),
+    )
+
+
+@router.post(
+    "/students/{student_id}/messages",
+    response_model=_AdminMessageRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def admin_send_message(
+    student_id: uuid.UUID,
+    payload: _AdminSendMessage,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(_require_admin),
+) -> _AdminMessageRead:
+    """Admin sends an in-app DM. If thread_id is omitted, mints a new
+    thread; otherwise appends to the existing one. Mirrors to
+    outreach_log via F3 for the audit trail."""
+    from app.services import student_message_service
+
+    await _require_student(db, student_id)
+    thread_uuid: uuid.UUID | None = None
+    if payload.thread_id:
+        thread_uuid = uuid.UUID(payload.thread_id)
+    msg = await student_message_service.create_message(
+        db,
+        thread_id=thread_uuid,
+        student_id=student_id,
+        sender_role="admin",
+        sender_id=admin.id,
+        body=payload.body,
+    )
+    return _admin_msg_to_read(msg)
+
+
+@router.get(
+    "/students/{student_id}/messages",
+    response_model=list[_AdminMessageRead],
+)
+async def admin_list_messages(
+    student_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(_require_admin),
+) -> list[_AdminMessageRead]:
+    """All messages for one student (across threads), newest first.
+    Powers the per-student admin DM view."""
+    from app.services import student_message_service
+
+    await _require_student(db, student_id)
+    msgs = await student_message_service.list_for_student(
+        db, student_id=student_id
+    )
+    return [_admin_msg_to_read(m) for m in msgs]
