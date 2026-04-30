@@ -81,14 +81,17 @@ const PANEL_ORDER: PanelDef[] = [
   },
 ];
 
+// Tone classes use explicit color stops so they look right on BOTH the
+// light Tailwind admin shell AND the CareerForge console (which sets
+// its own data-theme="dark" island and bypasses Tailwind's `dark`
+// variant). Each entry includes a translucent panel fill that reads
+// over both white and dark-green surfaces.
 const TONE_CLASSES: Record<PanelDef["tone"], string> = {
-  red: "border-red-200 bg-red-50/50 dark:border-red-900/40 dark:bg-red-950/30",
-  amber:
-    "border-amber-200 bg-amber-50/50 dark:border-amber-900/40 dark:bg-amber-950/30",
-  blue: "border-blue-200 bg-blue-50/50 dark:border-blue-900/40 dark:bg-blue-950/30",
-  green:
-    "border-green-200 bg-green-50/50 dark:border-green-900/40 dark:bg-green-950/30",
-  slate: "border-slate-200 bg-slate-50/50 dark:border-slate-800/40 dark:bg-slate-950/30",
+  red: "border-red-400/40 bg-red-500/[0.06]",
+  amber: "border-amber-400/40 bg-amber-500/[0.06]",
+  blue: "border-blue-400/40 bg-blue-500/[0.06]",
+  green: "border-emerald-400/40 bg-emerald-500/[0.06]",
+  slate: "border-zinc-400/30 bg-zinc-500/[0.05]",
 };
 
 function avatarLabel(name: string): string {
@@ -102,30 +105,32 @@ function avatarLabel(name: string): string {
 }
 
 function StudentRow({ s }: { s: RiskPanelStudent }) {
+  // currentColor-based tints so the row reads correctly under both
+  // the light Tailwind shell and the dark CareerForge console island.
   return (
     <Link
       href={`/admin/students/${s.user_id}`}
-      className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 text-left transition hover:bg-muted/50"
+      className="flex items-center gap-3 rounded-lg border border-current/10 bg-current/[0.04] px-3 py-2.5 text-left transition hover:bg-current/[0.08]"
     >
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-current/10 text-xs font-semibold">
         {avatarLabel(s.name)}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium">{s.name}</span>
           {s.paid && (
-            <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
+            <span className="rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-violet-500">
               Paid
             </span>
           )}
         </div>
-        <div className="truncate text-xs text-muted-foreground">
+        <div className="truncate text-xs opacity-70">
           {s.risk_reason ?? `Score ${s.risk_score}`}
         </div>
       </div>
       <div className="shrink-0 text-right">
         <div className="text-sm font-semibold tabular-nums">{s.risk_score}</div>
-        <div className="text-[10px] uppercase text-muted-foreground">risk</div>
+        <div className="text-[10px] uppercase opacity-60">risk</div>
       </div>
     </Link>
   );
@@ -140,7 +145,7 @@ function Panel({ def, panel }: { def: PanelDef; panel: RiskPanels[keyof RiskPane
     >
       <div className="mb-3 flex items-start justify-between gap-2">
         <div className="flex items-start gap-2">
-          <Icon className="mt-0.5 h-4 w-4 shrink-0 text-foreground/70" aria-hidden="true" />
+          <Icon className="mt-0.5 h-4 w-4 shrink-0 opacity-70" aria-hidden="true" />
           <div>
             <h3
               id={`panel-${def.key}-title`}
@@ -148,16 +153,16 @@ function Panel({ def, panel }: { def: PanelDef; panel: RiskPanels[keyof RiskPane
             >
               {def.title}
             </h3>
-            <p className="mt-0.5 text-xs text-muted-foreground">{def.blurb}</p>
+            <p className="mt-0.5 text-xs opacity-70">{def.blurb}</p>
           </div>
         </div>
-        <span className="shrink-0 rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-semibold tabular-nums">
+        <span className="shrink-0 rounded-full bg-current/10 px-2 py-0.5 text-xs font-semibold tabular-nums">
           {panel.total}
         </span>
       </div>
 
       {panel.students.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border bg-background/40 py-3 text-center text-xs text-muted-foreground">
+        <p className="rounded-lg border border-dashed border-current/20 bg-current/[0.03] py-3 text-center text-xs opacity-70">
           {def.tone === "red"
             ? "Nice — every paid student is active."
             : "No students in this bucket right now."}
@@ -170,7 +175,7 @@ function Panel({ def, panel }: { def: PanelDef; panel: RiskPanels[keyof RiskPane
           {panel.total > 5 && (
             <Link
               href={`/admin/at-risk?slip_type=${def.key}`}
-              className="block rounded-lg py-1.5 text-center text-xs font-medium text-primary hover:underline"
+              className="block rounded-lg py-1.5 text-center text-xs font-medium text-emerald-500 hover:underline"
             >
               See all {panel.total} →
             </Link>
@@ -190,7 +195,7 @@ export function RetentionPanels() {
         {[1, 2, 3, 4, 5].map((i) => (
           <div
             key={i}
-            className="h-44 animate-pulse rounded-xl border border-border bg-muted/30"
+            className="h-44 animate-pulse rounded-xl border border-current/10 bg-current/[0.05]"
           />
         ))}
       </div>
@@ -198,7 +203,7 @@ export function RetentionPanels() {
   }
   if (isError || !data) {
     return (
-      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+      <div className="rounded-xl border border-red-500/40 bg-red-500/[0.06] p-4 text-sm text-red-500">
         Failed to load retention panels: {(error as Error)?.message ?? "unknown error"}
       </div>
     );
@@ -208,7 +213,7 @@ export function RetentionPanels() {
     <section aria-label="Retention engine — student slip patterns">
       <div className="mb-4">
         <h2 className="text-base font-semibold tracking-tight">Retention engine</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">
+        <p className="mt-0.5 text-xs opacity-70">
           Six slip patterns, ordered by urgency. Click any student to open their profile and
           intervene. Numbers refresh nightly from the F1 risk-scoring Celery task.
         </p>
