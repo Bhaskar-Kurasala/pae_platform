@@ -36,6 +36,56 @@ function nextClientSort(current: SortState, key: ClientSortKey): SortState {
   return { kind: "client", key, dir: "desc" };
 }
 
+function SortIndicator({
+  active,
+  direction,
+}: {
+  active: boolean;
+  direction: "asc" | "desc";
+}) {
+  if (!active)
+    return <ArrowUpDown className="h-3 w-3 opacity-40" aria-hidden="true" />;
+  return direction === "desc" ? (
+    <ArrowDown className="h-3 w-3" aria-hidden="true" />
+  ) : (
+    <ArrowUp className="h-3 w-3" aria-hidden="true" />
+  );
+}
+
+function serverHeaderState(
+  sort: SortState,
+  base: "joined" | "name" | "last_seen",
+) {
+  const active =
+    sort.kind === "server" && (sort.key as string).startsWith(base);
+  const direction: "asc" | "desc" =
+    active && (sort.key as string).endsWith("_asc") ? "asc" : "desc";
+  return {
+    active,
+    direction,
+    ariaSort: (active
+      ? direction === "desc"
+        ? "descending"
+        : "ascending"
+      : "none") as "ascending" | "descending" | "none",
+  };
+}
+
+function clientHeaderState(sort: SortState, key: ClientSortKey) {
+  const active = sort.kind === "client" && sort.key === key;
+  const direction: "asc" | "desc" =
+    sort.kind === "client" && active ? sort.dir : "desc";
+  return {
+    active,
+    direction,
+    ariaSort: (active
+      ? direction === "desc"
+        ? "descending"
+        : "ascending"
+      : "none") as "ascending" | "descending" | "none",
+  };
+}
+
 function SkeletonRow() {
   return (
     <tr>
@@ -74,54 +124,14 @@ export default function AdminStudentsPage() {
     return [...students].sort((a, b) => (a[key] - b[key]) * dir);
   }, [students, sort]);
 
-  function SortIndicator({
-    active,
-    direction,
-  }: {
-    active: boolean;
-    direction: "asc" | "desc";
-  }) {
-    if (!active)
-      return <ArrowUpDown className="h-3 w-3 opacity-40" aria-hidden="true" />;
-    return direction === "desc" ? (
-      <ArrowDown className="h-3 w-3" aria-hidden="true" />
-    ) : (
-      <ArrowUp className="h-3 w-3" aria-hidden="true" />
-    );
-  }
-
-  function serverHeaderProps(base: "joined" | "name" | "last_seen") {
-    const active =
-      sort.kind === "server" && (sort.key as string).startsWith(base);
-    const direction: "asc" | "desc" =
-      active && (sort.key as string).endsWith("_asc") ? "asc" : "desc";
-    return {
-      active,
-      direction,
-      onClick: () => setSort((s) => nextServerSort(s, base)),
-      ariaSort: (active
-        ? direction === "desc"
-          ? "descending"
-          : "ascending"
-        : "none") as "ascending" | "descending" | "none",
-    };
-  }
-
-  function clientHeaderProps(key: ClientSortKey) {
-    const active = sort.kind === "client" && sort.key === key;
-    const direction: "asc" | "desc" =
-      sort.kind === "client" && active ? sort.dir : "desc";
-    return {
-      active,
-      direction,
-      onClick: () => setSort((s) => nextClientSort(s, key)),
-      ariaSort: (active
-        ? direction === "desc"
-          ? "descending"
-          : "ascending"
-        : "none") as "ascending" | "descending" | "none",
-    };
-  }
+  const serverHeaderProps = (base: "joined" | "name" | "last_seen") => ({
+    ...serverHeaderState(sort, base),
+    onClick: () => setSort((s) => nextServerSort(s, base)),
+  });
+  const clientHeaderProps = (key: ClientSortKey) => ({
+    ...clientHeaderState(sort, key),
+    onClick: () => setSort((s) => nextClientSort(s, key)),
+  });
 
   return (
     <div className="p-6 md:p-8 max-w-6xl mx-auto">

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
@@ -105,28 +106,41 @@ export default function StudentDrilldownPage() {
   const [refundFlash, setRefundFlash] = useState<string | null>(null);
   const [dmDraft, setDmDraft] = useState<string>("");
 
-  // F14 — pagination state for older timeline events. `olderPages`
-  // holds successive `before=<cursor>` page results; `cursor` is the
-  // `at` of the oldest event currently on screen. `endReached` is set
-  // when a fetch returns fewer than the page size, so we hide the
-  // button.
+  // F14 — pagination state for older timeline events. We track the
+  // stack of cursors that have been requested; the *current* cursor
+  // (top of stack) drives the active query, and prior cursors' results
+  // are read from react-query's cache so we don't need to mirror
+  // them into local state.
   const PAGE_SIZE = 50;
-  const [olderPages, setOlderPages] = useState<StudentTimelineEvent[][]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [endReached, setEndReached] = useState<boolean>(false);
-  const olderQuery = useStudentTimelineOlder(studentId, cursor);
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
+  const activeCursor = cursorStack[cursorStack.length - 1] ?? null;
+  const olderQuery = useStudentTimelineOlder(studentId, activeCursor);
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    if (!cursor || !olderQuery.data) return;
-    setOlderPages((prev) => {
-      // Don't double-append on react-query refetches — match by cursor.
-      if (prev.length > 0 && prev[prev.length - 1][0]?.at === olderQuery.data[0]?.at) {
-        return prev;
-      }
-      return [...prev, olderQuery.data];
-    });
-    if (olderQuery.data.length < PAGE_SIZE) setEndReached(true);
-  }, [cursor, olderQuery.data]);
+  // olderQuery.data is intentionally in the deps — when a new page
+  // resolves we want this memo to re-read the cache for all cursors.
+  const olderQueryData = olderQuery.data;
+  const olderPages: StudentTimelineEvent[][] = useMemo(() => {
+    if (!studentId) return [];
+    void olderQueryData; // recompute trigger
+    return cursorStack
+      .map((c) =>
+        queryClient.getQueryData<StudentTimelineEvent[]>([
+          "admin",
+          "students",
+          studentId,
+          "timeline",
+          "before",
+          c,
+        ]),
+      )
+      .filter((p): p is StudentTimelineEvent[] => Array.isArray(p));
+  }, [cursorStack, studentId, queryClient, olderQueryData]);
+
+  const endReached =
+    cursorStack.length > 0 &&
+    olderQuery.isSuccess &&
+    (olderQuery.data?.length ?? 0) < PAGE_SIZE;
 
   const allEvents: StudentTimelineEvent[] = useMemo(
     () => [...timeline, ...olderPages.flat()],
@@ -136,7 +150,8 @@ export default function StudentDrilldownPage() {
   function handleLoadOlder() {
     if (allEvents.length === 0) return;
     const oldest = allEvents[allEvents.length - 1];
-    setCursor(oldest.at);
+    if (oldest.at === activeCursor) return; // already loading this cursor
+    setCursorStack((prev) => [...prev, oldest.at]);
   }
 
   async function handleSendRefundOffer() {

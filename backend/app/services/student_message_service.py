@@ -17,7 +17,6 @@ loop on F3's "did the user respond?" tracking.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
 
