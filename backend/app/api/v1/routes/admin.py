@@ -1173,6 +1173,106 @@ async def _daily_buckets(
     return out
 
 
+async def _compute_live_funnel(
+    db: AsyncSession,
+) -> list[AdminConsoleFunnelStage]:
+    """LD-3: Compute the 7-stage learner funnel from live data.
+
+    Stages, all over the entire student population:
+      Signups       — every student in users table
+      Onboarded     — has a goal_contracts row (completed onboarding)
+      First lesson  — has at least one student_progress completed
+      Paid          — has at least one course_entitlements row
+      Capstone      — has submitted at least one capstone exercise
+      Promoted      — users.promoted_at IS NOT NULL
+      Hired         — placeholder; we don't track hires yet, returns 0
+    """
+    from app.models.course_entitlement import CourseEntitlement
+    from app.models.exercise import Exercise
+    from app.models.exercise_submission import ExerciseSubmission
+    from app.models.goal_contract import GoalContract
+    from app.models.student_progress import StudentProgress
+
+    # Signups — every student.
+    signups = (
+        await db.execute(
+            select(func.count(User.id)).where(
+                User.role == "student", User.is_deleted.is_(False)
+            )
+        )
+    ).scalar() or 0
+
+    # Onboarded — has a goal_contracts row.
+    onboarded = (
+        await db.execute(
+            select(func.count(func.distinct(GoalContract.user_id)))
+            .join(User, User.id == GoalContract.user_id)
+            .where(User.role == "student", User.is_deleted.is_(False))
+        )
+    ).scalar() or 0
+
+    # First lesson — has at least one completed student_progress row.
+    first_lesson = (
+        await db.execute(
+            select(func.count(func.distinct(StudentProgress.student_id)))
+            .join(User, User.id == StudentProgress.student_id)
+            .where(
+                User.role == "student",
+                User.is_deleted.is_(False),
+                StudentProgress.status == "completed",
+            )
+        )
+    ).scalar() or 0
+
+    # Paid — has at least one entitlement row.
+    paid = (
+        await db.execute(
+            select(func.count(func.distinct(CourseEntitlement.user_id)))
+            .join(User, User.id == CourseEntitlement.user_id)
+            .where(User.role == "student", User.is_deleted.is_(False))
+        )
+    ).scalar() or 0
+
+    # Capstone — has submitted at least one capstone exercise.
+    capstone = (
+        await db.execute(
+            select(func.count(func.distinct(ExerciseSubmission.student_id)))
+            .join(User, User.id == ExerciseSubmission.student_id)
+            .join(Exercise, Exercise.id == ExerciseSubmission.exercise_id)
+            .where(
+                User.role == "student",
+                User.is_deleted.is_(False),
+                Exercise.is_capstone.is_(True),
+            )
+        )
+    ).scalar() or 0
+
+    # Promoted — users.promoted_at IS NOT NULL.
+    promoted = (
+        await db.execute(
+            select(func.count(User.id)).where(
+                User.role == "student",
+                User.is_deleted.is_(False),
+                User.promoted_at.is_not(None),
+            )
+        )
+    ).scalar() or 0
+
+    # Hired — we don't track hires yet. Future: a `users.hired_at`
+    # column or a separate `placements` table.
+    hired = 0
+
+    return [
+        AdminConsoleFunnelStage(name="Signups", count=int(signups)),
+        AdminConsoleFunnelStage(name="Onboarded", count=int(onboarded)),
+        AdminConsoleFunnelStage(name="First lesson", count=int(first_lesson)),
+        AdminConsoleFunnelStage(name="Paid", count=int(paid)),
+        AdminConsoleFunnelStage(name="Capstone", count=int(capstone)),
+        AdminConsoleFunnelStage(name="Promoted", count=int(promoted)),
+        AdminConsoleFunnelStage(name="Hired", count=hired),
+    ]
+
+
 async def _compute_live_pulse(
     db: AsyncSession,
     now: datetime,
@@ -1519,25 +1619,12 @@ async def get_admin_console(
     # Pulse — LD-2: 6 cards computed from LIVE data with 14-day sparks.
     pulse = await _compute_live_pulse(db, now)
 
-    # Funnel — newest snapshot ──────────────────────────────────────────
-    funnel_row = (
-        await db.execute(
-            select(AdminConsoleFunnelSnapshot)
-            .order_by(AdminConsoleFunnelSnapshot.snapshot_date.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    funnel: list[AdminConsoleFunnelStage] = []
-    if funnel_row:
-        funnel = [
-            AdminConsoleFunnelStage(name="Signups", count=funnel_row.signups),
-            AdminConsoleFunnelStage(name="Onboarded", count=funnel_row.onboarded),
-            AdminConsoleFunnelStage(name="First lesson", count=funnel_row.first_lesson),
-            AdminConsoleFunnelStage(name="Paid", count=funnel_row.paid),
-            AdminConsoleFunnelStage(name="Capstone", count=funnel_row.capstone),
-            AdminConsoleFunnelStage(name="Promoted", count=funnel_row.promoted),
-            AdminConsoleFunnelStage(name="Hired", count=funnel_row.hired),
-        ]
+    # Funnel — LD-3: live counts over the entire student population
+    # (not a 30-day cohort — the marketing-funnel narrative the CEO
+    # cares about is "where are all my students right now along the
+    # journey"). Stages mirror the existing 7-stage demo so the chart
+    # renders identically.
+    funnel = await _compute_live_funnel(db)
 
     # Features ──────────────────────────────────────────────────────────
     feature_rows = (
