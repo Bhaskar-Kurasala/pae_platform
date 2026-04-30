@@ -174,7 +174,7 @@ function Panel({ def, panel }: { def: PanelDef; panel: RiskPanels[keyof RiskPane
           ))}
           {panel.total > 5 && (
             <Link
-              href={`/admin/at-risk?slip_type=${def.key}`}
+              href={`/admin/students?slip_type=${def.key}`}
               className="block rounded-lg py-1.5 text-center text-xs font-medium text-emerald-500 hover:underline"
             >
               See all {panel.total} →

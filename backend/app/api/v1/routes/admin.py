@@ -204,13 +204,21 @@ async def get_agents_health(
 @router.get("/students")
 async def list_students(
     skip: int = 0,
-    limit: int = 50,
+    limit: int = Query(200, ge=1, le=500),
     q: str | None = Query(None, description="Case-insensitive substring match on email OR full_name"),
     sort: str = Query(
         "joined_desc",
         description=(
             "Sort key: joined_asc, joined_desc (default), name_asc, name_desc, "
             "last_seen_asc, last_seen_desc"
+        ),
+    ),
+    slip_type: str | None = Query(
+        None,
+        pattern="^(paid_silent|capstone_stalled|streak_broken|promotion_avoidant|cold_signup|unpaid_stalled)$",
+        description=(
+            "Filter to students whose F1 slip pattern matches. Used by the "
+            "retention-panel 'See all N →' deep-link."
         ),
     ),
     db: AsyncSession = Depends(get_db),
@@ -227,8 +235,14 @@ async def list_students(
     login. Sorting on lessons/agent_interactions is intentionally
     client-side: those are derived per-row counts that don't index well
     here, and the page is capped at `limit` rows anyway.
+
+    Slip-type filter — `slip_type` joins against student_risk_signals
+    so the retention-panel "See all 92 →" link lands on a roster page
+    that shows only the matching slip pattern (e.g. all 92 cold_signup
+    students, sorted by risk score DESC by default for that view).
     """
     from app.models.student_progress import StudentProgress
+    from app.models.student_risk_signals import StudentRiskSignals
 
     stmt = select(User).where(User.role == "student", User.is_deleted.is_(False))
     if q:
@@ -236,6 +250,14 @@ async def list_students(
         stmt = stmt.where(
             func.lower(User.email).like(pattern) | func.lower(User.full_name).like(pattern)
         )
+
+    # Slip-type filter — restrict to students whose F1-classified
+    # slip pattern matches. Implemented via a join + WHERE rather
+    # than a subquery so the existing sort still applies.
+    if slip_type is not None:
+        stmt = stmt.join(
+            StudentRiskSignals, StudentRiskSignals.user_id == User.id
+        ).where(StudentRiskSignals.slip_type == slip_type)
 
     # F13 — sort whitelist. NULLS LAST on last_seen so never-logged-in
     # students don't pollute the top of the asc list.

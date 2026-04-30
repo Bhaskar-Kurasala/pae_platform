@@ -71,19 +71,32 @@ export type AdminStudentSort =
   | "last_seen_asc"
   | "last_seen_desc";
 
+export type SlipType =
+  | "paid_silent"
+  | "capstone_stalled"
+  | "streak_broken"
+  | "promotion_avoidant"
+  | "cold_signup"
+  | "unpaid_stalled";
+
 export function useAdminStudents(
   search: string = "",
   sort: AdminStudentSort = "joined_desc",
+  slipType: SlipType | null = null,
 ) {
   // DISC-56 — push the filter to the backend when the user types something.
   // F13 — sort param goes through the same query string.
+  // Retention deep-link — slip_type filters to students whose F1
+  // pattern matches, so the panel "See all N →" link lands on the
+  // roster pre-filtered to that slip pattern.
   const sp = new URLSearchParams();
   if (search.trim()) sp.set("q", search.trim());
   if (sort !== "joined_desc") sp.set("sort", sort);
+  if (slipType) sp.set("slip_type", slipType);
   const qs = sp.toString();
   const params = qs ? `?${qs}` : "";
   return useQuery<AdminStudent[]>({
-    queryKey: ["admin", "students", search.trim(), sort],
+    queryKey: ["admin", "students", search.trim(), sort, slipType],
     queryFn: () => api.get<AdminStudent[]>(`/api/v1/admin/students${params}`),
   });
 }

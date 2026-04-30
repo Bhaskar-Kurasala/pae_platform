@@ -2,9 +2,58 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight, Search, Users } from "lucide-react";
-import { useAdminStudents, type AdminStudentSort } from "@/lib/hooks/use-admin";
+import { useSearchParams } from "next/navigation";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight, Search, Users, X } from "lucide-react";
+import {
+  useAdminStudents,
+  type AdminStudentSort,
+  type SlipType,
+} from "@/lib/hooks/use-admin";
 import { Badge } from "@/components/ui/badge";
+import { StudentDetailModal } from "../_components/student-detail-modal";
+
+// Friendly display labels for each slip pattern. Used by the
+// "Showing N cold-signup students" banner when arriving from a
+// retention-panel "See all N →" deep-link.
+const SLIP_LABELS: Record<SlipType, { label: string; description: string }> = {
+  paid_silent: {
+    label: "Paid + silent",
+    description: "Paid students with no recent learning sessions",
+  },
+  capstone_stalled: {
+    label: "Capstone stalled",
+    description: "Capstone in flight but no submissions in 7+ days",
+  },
+  streak_broken: {
+    label: "Streak broken",
+    description: "Had a 3+ day streak that just broke",
+  },
+  promotion_avoidant: {
+    label: "Ready but stalled",
+    description: "Cleared all four promotion gates, hasn't claimed",
+  },
+  cold_signup: {
+    label: "Never returned",
+    description: "Signed up 3+ days ago, no first session",
+  },
+  unpaid_stalled: {
+    label: "Unpaid stalled",
+    description: "Free tier completed, no paid enrollment in 7+ days",
+  },
+};
+
+const VALID_SLIP_TYPES: SlipType[] = [
+  "paid_silent",
+  "capstone_stalled",
+  "streak_broken",
+  "promotion_avoidant",
+  "cold_signup",
+  "unpaid_stalled",
+];
+
+function isValidSlipType(s: string | null): s is SlipType {
+  return s !== null && (VALID_SLIP_TYPES as string[]).includes(s);
+}
 
 // F13 — sortable columns. The three sort axes that actually exist on
 // the User row (joined, name, last_seen) round-trip to the backend.
@@ -99,9 +148,18 @@ function SkeletonRow() {
 }
 
 export default function AdminStudentsPage() {
+  const searchParams = useSearchParams();
+  const slipParam = searchParams?.get("slip_type") ?? null;
+  const slipType: SlipType | null = isValidSlipType(slipParam)
+    ? (slipParam as SlipType)
+    : null;
+
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [sort, setSort] = useState<SortState>({ kind: "server", key: "joined_desc" });
+  // Same student-detail modal as /admin uses, so row click opens
+  // a focused popup with all 5 operator cards rather than navigating.
+  const [modalStudentId, setModalStudentId] = useState<string | null>(null);
 
   // DISC-56 — debounced server-side search. The old client-side filter kept
   // the whole student catalog in memory and filtered on every keystroke; this
@@ -113,7 +171,11 @@ export default function AdminStudentsPage() {
 
   const serverSort: AdminStudentSort =
     sort.kind === "server" ? sort.key : "joined_desc";
-  const { data: students, isLoading } = useAdminStudents(debounced, serverSort);
+  const { data: students, isLoading } = useAdminStudents(
+    debounced,
+    serverSort,
+    slipType,
+  );
 
   // F13 — apply client-side sort on top of the server-sorted page when
   // the user clicks Lessons or AI Chats.
@@ -135,11 +197,16 @@ export default function AdminStudentsPage() {
 
   return (
     <div className="p-6 md:p-8 max-w-6xl mx-auto">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-8">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
         <div>
           <h1 className="text-2xl font-bold">Students</h1>
           <p className="text-muted-foreground mt-1">
-            {sortedStudents?.length ?? 0} {debounced ? "matching" : "registered"} students
+            {sortedStudents?.length ?? 0}{" "}
+            {slipType
+              ? SLIP_LABELS[slipType].label.toLowerCase() + " students"
+              : debounced
+              ? "matching students"
+              : "registered students"}
           </p>
         </div>
         <div className="relative">
@@ -155,6 +222,34 @@ export default function AdminStudentsPage() {
         </div>
       </div>
 
+      {/* Slip-type filter chip — appears when arriving from a
+          retention-panel "See all N →" deep-link. Cleared by clicking
+          the X (which strips ?slip_type= from the URL). */}
+      {slipType && (
+        <div className="mb-6 flex items-start gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">
+              Showing only{" "}
+              <span className="text-primary">
+                {SLIP_LABELS[slipType].label}
+              </span>{" "}
+              students
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {SLIP_LABELS[slipType].description}
+            </p>
+          </div>
+          <Link
+            href="/admin/students"
+            className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted/50"
+            aria-label="Clear slip-type filter"
+          >
+            <X className="h-3 w-3" aria-hidden="true" />
+            Clear filter
+          </Link>
+        </div>
+      )}
+
       {/* DISC-58 — stacked cards on mobile; the 5-column table overflows phones */}
       <div className="md:hidden space-y-2">
         {isLoading
@@ -162,10 +257,11 @@ export default function AdminStudentsPage() {
               <div key={i} className="h-16 animate-pulse rounded-lg bg-muted" />
             ))
           : (sortedStudents ?? []).map((student) => (
-              <Link
+              <button
                 key={student.id}
-                href={`/admin/students/${student.id}`}
-                className="flex items-center justify-between rounded-lg border p-3 hover:bg-muted/30 transition-colors"
+                type="button"
+                onClick={() => setModalStudentId(student.id)}
+                className="flex w-full items-center justify-between rounded-lg border p-3 text-left hover:bg-muted/30 transition-colors"
               >
                 <div className="min-w-0">
                   <p className="font-medium truncate">{student.full_name}</p>
@@ -186,7 +282,7 @@ export default function AdminStudentsPage() {
                   </Badge>
                   <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                 </div>
-              </Link>
+              </button>
             ))}
         {!isLoading && (sortedStudents?.length ?? 0) === 0 && (
           <div className="py-12 text-center text-muted-foreground">
@@ -291,15 +387,11 @@ export default function AdminStudentsPage() {
               <tr
                 key={student.id}
                 className="hover:bg-muted/30 transition-colors cursor-pointer"
+                onClick={() => setModalStudentId(student.id)}
               >
                 <td className="px-4 py-3">
-                  <Link
-                    href={`/admin/students/${student.id}`}
-                    className="block hover:underline underline-offset-2"
-                  >
-                    <p className="font-medium">{student.full_name}</p>
-                    <p className="text-xs text-muted-foreground">{student.email}</p>
-                  </Link>
+                  <p className="font-medium">{student.full_name}</p>
+                  <p className="text-xs text-muted-foreground">{student.email}</p>
                 </td>
                 <td className="px-4 py-3 text-muted-foreground">
                   {new Date(student.created_at).toLocaleDateString()}
@@ -336,6 +428,17 @@ export default function AdminStudentsPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Same modal /admin uses — row click opens it instead of
+          navigating, so the operator's filter + scroll position
+          is preserved. */}
+      <StudentDetailModal
+        studentId={modalStudentId}
+        open={modalStudentId !== null}
+        onOpenChange={(o) => {
+          if (!o) setModalStudentId(null);
+        }}
+      />
     </div>
   );
 }
