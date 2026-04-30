@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import structlog
@@ -1127,6 +1127,725 @@ def _format_event_time(occurred_at: datetime) -> str:
     return f"{hours // 24}d"
 
 
+def _fmt_int(n: int | float) -> str:
+    """Format a count for the pulse strip display_value field."""
+    n = int(n)
+    if n < 1000:
+        return str(n)
+    if n < 10000:
+        return f"{n:,}"
+    return f"{n / 1000:.1f}k"
+
+
+def _delta_pct(curr: float, prior: float) -> int:
+    if prior <= 0:
+        return 100 if curr > 0 else 0
+    return int(round((curr - prior) / prior * 100))
+
+
+async def _daily_buckets(
+    db: AsyncSession,
+    column,
+    where_clause,
+    now: datetime,
+    days: int = 14,
+) -> list[float]:
+    """Group `where_clause` rows by UTC day for the last `days` days.
+
+    Returns a list of length `days`, oldest first. Days with no rows = 0.
+    """
+    start = (now - timedelta(days=days - 1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    bucket_col = func.date_trunc("day", column).label("bucket")
+    rows = (
+        await db.execute(
+            select(bucket_col, func.count())
+            .where(where_clause, column >= start)
+            .group_by(bucket_col)
+        )
+    ).all()
+    by_day: dict[date, int] = {row[0].date(): int(row[1]) for row in rows}
+    out: list[float] = []
+    for i in range(days):
+        d = (start + timedelta(days=i)).date()
+        out.append(float(by_day.get(d, 0)))
+    return out
+
+
+async def _compute_live_calls(
+    db: AsyncSession,
+    now: datetime,
+) -> list[AdminConsoleCallItem]:
+    """LD-5: today's call list. We don't have a dedicated
+    `scheduled_call` outreach kind yet, so for now we surface the
+    students that the operator has reached out to manually today
+    via outreach_log (triggered_by='admin_manual'). The future
+    F-extension introduces a proper scheduled_at column.
+    """
+    from app.models.outreach_log import OutreachLog
+
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    rows = (
+        await db.execute(
+            select(OutreachLog, User)
+            .join(User, User.id == OutreachLog.user_id)
+            .where(
+                OutreachLog.triggered_by == "admin_manual",
+                OutreachLog.sent_at >= today_start,
+            )
+            .order_by(OutreachLog.sent_at.asc())
+            .limit(20)
+        )
+    ).all()
+
+    out: list[AdminConsoleCallItem] = []
+    for log_row, user in rows:
+        out.append(
+            AdminConsoleCallItem(
+                student_id=str(user.id),
+                time=log_row.sent_at.strftime("%H:%M"),
+                reason=log_row.body_preview[:60] if log_row.body_preview else "Manual outreach",
+            )
+        )
+    return out
+
+
+async def _compute_live_events(
+    db: AsyncSession,
+    now: datetime,
+) -> list[AdminConsoleEventItem]:
+    """LD-5: live event feed from cohort_events.
+
+    cohort_events is populated by various agents on lifecycle
+    moments (promotion, capstone shipped, streak started, milestone).
+    Already uses masked actor_handle so first-name + last-initial
+    privacy is preserved.
+    """
+    from app.models.cohort_event import CohortEvent
+
+    rows = (
+        await db.execute(
+            select(CohortEvent)
+            .order_by(CohortEvent.occurred_at.desc())
+            .limit(20)
+        )
+    ).scalars().all()
+
+    # Map cohort_event.kind to the UI's CSS color class. The UI
+    # already styles 5 known kinds: promo, capstone, purchase,
+    # review, signup. Map the cohort_event vocabulary onto those.
+    KIND_MAP = {
+        "level_up": "promo",
+        "promotion_earned": "promo",
+        "capstone_shipped": "capstone",
+        "purchase": "purchase",
+        "purchase_made": "purchase",
+        "review_requested": "review",
+        "signup": "signup",
+        "streak_started": "signup",
+        "milestone": "promo",
+    }
+
+    out: list[AdminConsoleEventItem] = []
+    for ev in rows:
+        ui_kind = KIND_MAP.get(ev.kind, ev.kind)
+        out.append(
+            AdminConsoleEventItem(
+                student_id=str(ev.actor_id) if ev.actor_id else None,
+                kind=ui_kind,
+                text=ev.label,
+                time_label=_format_event_time(ev.occurred_at),
+            )
+        )
+    return out
+
+
+async def _compute_live_revenue(
+    db: AsyncSession,
+    now: datetime,
+    pulse: list[AdminConsolePulseCard],
+) -> AdminConsoleRevenue:
+    """LD-5: revenue card from payments + refunds tables.
+
+    Surfaces month-to-date total, count + total of new purchases this
+    month, count + total of renewals this month (proxied as repeat
+    payments from same user), and refunds this month. Spark reuses
+    the MRR pulse card's spark for cohesion.
+    """
+    from app.models.payment import Payment
+    from app.models.refund import Refund
+
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    # Month total ($)
+    month_total_cents = (
+        await db.execute(
+            select(func.coalesce(func.sum(Payment.amount_cents), 0)).where(
+                Payment.created_at >= month_start,
+                Payment.status == "succeeded",
+            )
+        )
+    ).scalar() or 0
+    month_total_dollars = float(month_total_cents) / 100.0
+
+    # All succeeded payments this month — used to split into "new"
+    # vs "renewal" (a user's first-ever payment is new; subsequent
+    # are renewals).
+    pay_rows = (
+        await db.execute(
+            select(Payment.user_id, Payment.amount_cents, Payment.created_at).where(
+                Payment.status == "succeeded",
+                Payment.created_at >= month_start,
+            )
+        )
+    ).all()
+
+    # Per user: was this month their first-ever payment?
+    first_pay_cache: dict[uuid.UUID, datetime] = {}
+    if pay_rows:
+        user_ids = {row[0] for row in pay_rows}
+        first_rows = (
+            await db.execute(
+                select(Payment.user_id, func.min(Payment.created_at))
+                .where(
+                    Payment.status == "succeeded",
+                    Payment.user_id.in_(user_ids),
+                )
+                .group_by(Payment.user_id)
+            )
+        ).all()
+        first_pay_cache = {uid: ts for uid, ts in first_rows}
+
+    new_count = 0
+    new_cents = 0
+    renew_count = 0
+    renew_cents = 0
+    for user_id, cents, created in pay_rows:
+        first = first_pay_cache.get(user_id)
+        if first is not None and first >= month_start:
+            new_count += 1
+            new_cents += cents
+        else:
+            renew_count += 1
+            renew_cents += cents
+
+    # Refunds this month — count rows.
+    refund_count = (
+        await db.execute(
+            select(func.count(Refund.id)).where(Refund.created_at >= month_start)
+        )
+    ).scalar() or 0
+
+    def _money(d: float) -> str:
+        if d >= 1000:
+            return f"${d / 1000:.1f}k"
+        return f"${int(d)}"
+
+    mrr_pulse = next((p for p in pulse if p.metric_key == "mrr"), None)
+    return AdminConsoleRevenue(
+        month_total=_money(month_total_dollars),
+        new_purchases=f"{new_count} · {_money(new_cents / 100.0)}",
+        renewals=f"{renew_count} · {_money(renew_cents / 100.0)}",
+        refunds=str(int(refund_count)),
+        spark=mrr_pulse.spark if mrr_pulse else [],
+    )
+
+
+async def _compute_live_features(
+    db: AsyncSession,
+    now: datetime,
+) -> list[AdminConsoleFeatureTile]:
+    """LD-4: Compute the 8 feature-pulse tiles from live data.
+
+    Each tile shows current week count + delta vs prior week + 7-day
+    daily sparkline. Dimming (`cold`) flag fires when current week
+    is less than half of prior week.
+    """
+    from app.models.ai_review import AIReview
+    from app.models.exercise import Exercise
+    from app.models.exercise_submission import ExerciseSubmission
+    from app.models.interview_session import InterviewSession
+    from app.models.jd_decoder import JdMatchScore
+    from app.models.notebook_entry import NotebookEntry
+    from app.models.srs_card import SRSCard
+
+    week_ago = now - timedelta(days=7)
+    two_weeks_ago = now - timedelta(days=14)
+
+    async def _count_and_spark(column, where_filter) -> tuple[int, int, list[int]]:
+        """Returns (current_week_count, prior_week_count, 7-day spark)."""
+        curr = (
+            await db.execute(
+                select(func.count())
+                .select_from(where_filter.froms[0] if hasattr(where_filter, "froms") else None)
+                .where(column >= week_ago)
+            )
+        ).scalar() if False else None
+        # Simpler: use the same filter, just adjust the time window.
+        curr = (
+            await db.execute(where_filter.where(column >= week_ago))
+        ).scalar() or 0
+        prior = (
+            await db.execute(
+                where_filter.where(column >= two_weeks_ago, column < week_ago)
+            )
+        ).scalar() or 0
+
+        # 7-day spark.
+        spark_start = (now - timedelta(days=6)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        bucket_col = func.date_trunc("day", column)
+        spark_rows = (
+            await db.execute(
+                where_filter.with_only_columns(
+                    bucket_col.label("bucket"), func.count()
+                ).where(column >= spark_start).group_by(bucket_col)
+            )
+        ).all()
+        by_day: dict[date, int] = {row[0].date(): int(row[1]) for row in spark_rows}
+        spark = []
+        for i in range(7):
+            d = (spark_start + timedelta(days=i)).date()
+            spark.append(by_day.get(d, 0))
+        return int(curr), int(prior), spark
+
+    def _make_tile(
+        feature_key: str,
+        name: str,
+        curr: int,
+        prior: int,
+        bars: list[int],
+    ) -> AdminConsoleFeatureTile:
+        if prior == 0:
+            sub = "this week · new" if curr > 0 else "no activity yet"
+            cold = False
+        else:
+            pct = int(round((curr - prior) / prior * 100))
+            arrow = "▲" if pct >= 0 else "▼"
+            sub = f"this week · {arrow} {abs(pct)}%"
+            cold = curr < 0.5 * prior
+        return AdminConsoleFeatureTile(
+            feature_key=feature_key,
+            name=name,
+            count=_fmt_int(curr),
+            sub=sub,
+            cold=cold,
+            bars=bars,
+        )
+
+    # Each feature's base SELECT — count over the appropriate column.
+    flashcards_curr, flashcards_prior, flashcards_bars = await _count_and_spark(
+        SRSCard.last_reviewed_at,
+        select(func.count(SRSCard.id)).where(SRSCard.last_reviewed_at.is_not(None)),
+    )
+    agent_q_curr, agent_q_prior, agent_q_bars = await _count_and_spark(
+        AgentAction.created_at,
+        select(func.count(AgentAction.id)).where(
+            AgentAction.agent_name == "socratic_tutor"
+        ),
+    )
+    senior_curr, senior_prior, senior_bars = await _count_and_spark(
+        AIReview.created_at,
+        select(func.count(AIReview.id)),
+    )
+    notes_curr, notes_prior, notes_bars = await _count_and_spark(
+        NotebookEntry.graduated_at,
+        select(func.count(NotebookEntry.id)).where(
+            NotebookEntry.graduated_at.is_not(None)
+        ),
+    )
+    labs_curr, labs_prior, labs_bars = await _count_and_spark(
+        ExerciseSubmission.created_at,
+        select(func.count(ExerciseSubmission.id))
+        .join(Exercise, Exercise.id == ExerciseSubmission.exercise_id)
+        .where(Exercise.is_capstone.is_(False)),
+    )
+    cap_curr, cap_prior, cap_bars = await _count_and_spark(
+        ExerciseSubmission.created_at,
+        select(func.count(ExerciseSubmission.id))
+        .join(Exercise, Exercise.id == ExerciseSubmission.exercise_id)
+        .where(Exercise.is_capstone.is_(True)),
+    )
+    jd_curr, jd_prior, jd_bars = await _count_and_spark(
+        JdMatchScore.created_at,
+        select(func.count(JdMatchScore.id)),
+    )
+    iv_curr, iv_prior, iv_bars = await _count_and_spark(
+        InterviewSession.created_at,
+        select(func.count(InterviewSession.id)),
+    )
+
+    return [
+        _make_tile("flashcards", "Flashcard reviews", flashcards_curr, flashcards_prior, flashcards_bars),
+        _make_tile("agent_q", "Agent questions", agent_q_curr, agent_q_prior, agent_q_bars),
+        _make_tile("senior_reviews", "Senior reviews", senior_curr, senior_prior, senior_bars),
+        _make_tile("notes", "Notes graduated", notes_curr, notes_prior, notes_bars),
+        _make_tile("labs", "Lab completions", labs_curr, labs_prior, labs_bars),
+        _make_tile("capstones", "Capstone submissions", cap_curr, cap_prior, cap_bars),
+        _make_tile("jd_match", "JD Match runs", jd_curr, jd_prior, jd_bars),
+        _make_tile("interview", "Interview Coach", iv_curr, iv_prior, iv_bars),
+    ]
+
+
+async def _compute_live_funnel(
+    db: AsyncSession,
+) -> list[AdminConsoleFunnelStage]:
+    """LD-3: Compute the 7-stage learner funnel from live data.
+
+    Stages, all over the entire student population:
+      Signups       — every student in users table
+      Onboarded     — has a goal_contracts row (completed onboarding)
+      First lesson  — has at least one student_progress completed
+      Paid          — has at least one course_entitlements row
+      Capstone      — has submitted at least one capstone exercise
+      Promoted      — users.promoted_at IS NOT NULL
+      Hired         — placeholder; we don't track hires yet, returns 0
+    """
+    from app.models.course_entitlement import CourseEntitlement
+    from app.models.exercise import Exercise
+    from app.models.exercise_submission import ExerciseSubmission
+    from app.models.goal_contract import GoalContract
+    from app.models.student_progress import StudentProgress
+
+    # Signups — every student.
+    signups = (
+        await db.execute(
+            select(func.count(User.id)).where(
+                User.role == "student", User.is_deleted.is_(False)
+            )
+        )
+    ).scalar() or 0
+
+    # Onboarded — has a goal_contracts row.
+    onboarded = (
+        await db.execute(
+            select(func.count(func.distinct(GoalContract.user_id)))
+            .join(User, User.id == GoalContract.user_id)
+            .where(User.role == "student", User.is_deleted.is_(False))
+        )
+    ).scalar() or 0
+
+    # First lesson — has at least one completed student_progress row.
+    first_lesson = (
+        await db.execute(
+            select(func.count(func.distinct(StudentProgress.student_id)))
+            .join(User, User.id == StudentProgress.student_id)
+            .where(
+                User.role == "student",
+                User.is_deleted.is_(False),
+                StudentProgress.status == "completed",
+            )
+        )
+    ).scalar() or 0
+
+    # Paid — has at least one entitlement row.
+    paid = (
+        await db.execute(
+            select(func.count(func.distinct(CourseEntitlement.user_id)))
+            .join(User, User.id == CourseEntitlement.user_id)
+            .where(User.role == "student", User.is_deleted.is_(False))
+        )
+    ).scalar() or 0
+
+    # Capstone — has submitted at least one capstone exercise.
+    capstone = (
+        await db.execute(
+            select(func.count(func.distinct(ExerciseSubmission.student_id)))
+            .join(User, User.id == ExerciseSubmission.student_id)
+            .join(Exercise, Exercise.id == ExerciseSubmission.exercise_id)
+            .where(
+                User.role == "student",
+                User.is_deleted.is_(False),
+                Exercise.is_capstone.is_(True),
+            )
+        )
+    ).scalar() or 0
+
+    # Promoted — users.promoted_at IS NOT NULL.
+    promoted = (
+        await db.execute(
+            select(func.count(User.id)).where(
+                User.role == "student",
+                User.is_deleted.is_(False),
+                User.promoted_at.is_not(None),
+            )
+        )
+    ).scalar() or 0
+
+    # Hired — we don't track hires yet. Future: a `users.hired_at`
+    # column or a separate `placements` table.
+    hired = 0
+
+    return [
+        AdminConsoleFunnelStage(name="Signups", count=int(signups)),
+        AdminConsoleFunnelStage(name="Onboarded", count=int(onboarded)),
+        AdminConsoleFunnelStage(name="First lesson", count=int(first_lesson)),
+        AdminConsoleFunnelStage(name="Paid", count=int(paid)),
+        AdminConsoleFunnelStage(name="Capstone", count=int(capstone)),
+        AdminConsoleFunnelStage(name="Promoted", count=int(promoted)),
+        AdminConsoleFunnelStage(name="Hired", count=hired),
+    ]
+
+
+async def _compute_live_pulse(
+    db: AsyncSession,
+    now: datetime,
+) -> list[AdminConsolePulseCard]:
+    """LD-2: Compute the 6 pulse-strip cards from live data with 14-day
+    sparklines. Replaces the seeded admin_console_pulse_metrics read.
+    """
+    from app.models.enrollment import Enrollment
+    from app.models.exercise import Exercise
+    from app.models.exercise_submission import ExerciseSubmission
+    from app.models.learning_session import LearningSession
+    from app.models.payment import Payment
+    from app.models.student_risk_signals import StudentRiskSignals
+
+    day_ago = now - timedelta(hours=24)
+    two_days_ago = now - timedelta(hours=48)
+    week_ago = now - timedelta(days=7)
+    two_weeks_ago = now - timedelta(days=14)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    yday_start = today_start - timedelta(days=1)
+    month_ago = now - timedelta(days=30)
+    two_months_ago = now - timedelta(days=60)
+
+    # ── 1. Active learners (24h) ──
+    active_24h = (
+        await db.execute(
+            select(func.count(func.distinct(AgentAction.student_id))).where(
+                AgentAction.created_at >= day_ago
+            )
+        )
+    ).scalar() or 0
+    active_prior = (
+        await db.execute(
+            select(func.count(func.distinct(AgentAction.student_id))).where(
+                AgentAction.created_at >= two_days_ago,
+                AgentAction.created_at < day_ago,
+            )
+        )
+    ).scalar() or 0
+    active_spark = await _daily_buckets(
+        db, AgentAction.created_at, AgentAction.id.is_not(None), now
+    )
+
+    # ── 2. Sessions today ──
+    sessions_today = (
+        await db.execute(
+            select(func.count(LearningSession.id)).where(
+                LearningSession.created_at >= today_start
+            )
+        )
+    ).scalar() or 0
+    sessions_yday = (
+        await db.execute(
+            select(func.count(LearningSession.id)).where(
+                LearningSession.created_at >= yday_start,
+                LearningSession.created_at < today_start,
+            )
+        )
+    ).scalar() or 0
+    sessions_spark = await _daily_buckets(
+        db, LearningSession.created_at, LearningSession.id.is_not(None), now
+    )
+
+    # ── 3. Capstones submitted this week ──
+    capstones_wk = (
+        await db.execute(
+            select(func.count(ExerciseSubmission.id))
+            .join(Exercise, Exercise.id == ExerciseSubmission.exercise_id)
+            .where(
+                Exercise.is_capstone.is_(True),
+                ExerciseSubmission.created_at >= week_ago,
+            )
+        )
+    ).scalar() or 0
+    capstones_prior = (
+        await db.execute(
+            select(func.count(ExerciseSubmission.id))
+            .join(Exercise, Exercise.id == ExerciseSubmission.exercise_id)
+            .where(
+                Exercise.is_capstone.is_(True),
+                ExerciseSubmission.created_at >= two_weeks_ago,
+                ExerciseSubmission.created_at < week_ago,
+            )
+        )
+    ).scalar() or 0
+    # Spark: capstone submissions per day (joined query — simpler to fetch ids).
+    cap_rows = (
+        await db.execute(
+            select(ExerciseSubmission.created_at)
+            .join(Exercise, Exercise.id == ExerciseSubmission.exercise_id)
+            .where(
+                Exercise.is_capstone.is_(True),
+                ExerciseSubmission.created_at >= now - timedelta(days=14),
+            )
+        )
+    ).all()
+    capstones_spark = [0.0] * 14
+    spark_start = (now - timedelta(days=13)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    for (ts,) in cap_rows:
+        idx = (ts.date() - spark_start.date()).days
+        if 0 <= idx < 14:
+            capstones_spark[idx] += 1
+
+    # ── 4. Promotions earned this week ──
+    promotions_wk = (
+        await db.execute(
+            select(func.count(User.id)).where(
+                User.promoted_at >= week_ago,  # type: ignore[arg-type]
+            )
+        )
+    ).scalar() or 0
+    promotions_prior = (
+        await db.execute(
+            select(func.count(User.id)).where(
+                User.promoted_at >= two_weeks_ago,  # type: ignore[arg-type]
+                User.promoted_at < week_ago,  # type: ignore[arg-type]
+            )
+        )
+    ).scalar() or 0
+    promotions_spark = await _daily_buckets(
+        db, User.promoted_at, User.promoted_at.is_not(None), now
+    )
+
+    # ── 5. MRR (last 30 days, in dollars) ──
+    mrr_cents = (
+        await db.execute(
+            select(func.coalesce(func.sum(Payment.amount_cents), 0)).where(
+                Payment.created_at >= month_ago,
+                Payment.status == "succeeded",
+            )
+        )
+    ).scalar() or 0
+    mrr_prior_cents = (
+        await db.execute(
+            select(func.coalesce(func.sum(Payment.amount_cents), 0)).where(
+                Payment.created_at >= two_months_ago,
+                Payment.created_at < month_ago,
+                Payment.status == "succeeded",
+            )
+        )
+    ).scalar() or 0
+    mrr_dollars = float(mrr_cents) / 100.0
+    mrr_prior_dollars = float(mrr_prior_cents) / 100.0
+    # Spark: daily revenue for last 14 days.
+    pay_rows = (
+        await db.execute(
+            select(Payment.created_at, Payment.amount_cents).where(
+                Payment.created_at >= now - timedelta(days=14),
+                Payment.status == "succeeded",
+            )
+        )
+    ).all()
+    mrr_spark = [0.0] * 14
+    for ts, cents in pay_rows:
+        idx = (ts.date() - spark_start.date()).days
+        if 0 <= idx < 14:
+            mrr_spark[idx] += float(cents) / 100.0
+
+    # ── 6. At-risk learners (right now) ──
+    # Counts every student that F1 has flagged with a slip pattern
+    # (slip_type != 'none'). Conservative: any flagged student is
+    # worth the operator's attention.
+    at_risk_now = (
+        await db.execute(
+            select(func.count(StudentRiskSignals.id)).where(
+                StudentRiskSignals.slip_type != "none",
+                StudentRiskSignals.risk_score > 0,
+            )
+        )
+    ).scalar() or 0
+    # Prior week: we don't keep historical risk snapshots, so use "at-risk
+    # last week" as a proxy via student_risk_signals.computed_at if available.
+    # For now, just no-delta when there's no prior signal.
+    at_risk_prior = at_risk_now  # no historical baseline yet → delta = 0
+    at_risk_spark = [float(at_risk_now)] * 14  # flat line until we snapshot daily
+
+    # Pretty value formatting matching the existing UI's ConsoleStudent shape.
+    def mrr_display(d: float) -> tuple[str, str]:
+        if d >= 1000:
+            return f"${d / 1000:.1f}", "k"
+        return f"${int(d)}", ""
+
+    mrr_val, mrr_unit = mrr_display(mrr_dollars)
+
+    return [
+        AdminConsolePulseCard(
+            metric_key="active_24h",
+            label="Active learners (24h)",
+            value=_fmt_int(active_24h),
+            unit="",
+            delta=_delta_pct(active_24h, active_prior),
+            delta_text="vs yesterday",
+            color="#5fa37f",
+            invert_delta=False,
+            spark=active_spark,
+        ),
+        AdminConsolePulseCard(
+            metric_key="sessions_today",
+            label="Sessions today",
+            value=_fmt_int(sessions_today),
+            unit="",
+            delta=_delta_pct(sessions_today, sessions_yday),
+            delta_text="vs yesterday",
+            color="#5fa37f",
+            invert_delta=False,
+            spark=sessions_spark,
+        ),
+        AdminConsolePulseCard(
+            metric_key="capstones_wk",
+            label="Capstones submitted",
+            value=_fmt_int(capstones_wk),
+            unit=" wk",
+            delta=_delta_pct(capstones_wk, capstones_prior),
+            delta_text="vs last week",
+            color="#5fa37f",
+            invert_delta=False,
+            spark=capstones_spark,
+        ),
+        AdminConsolePulseCard(
+            metric_key="promotions_wk",
+            label="Promotions earned",
+            value=_fmt_int(promotions_wk),
+            unit=" wk",
+            delta=_delta_pct(promotions_wk, promotions_prior),
+            delta_text="vs last week",
+            color="#d6a54d",
+            invert_delta=False,
+            spark=promotions_spark,
+        ),
+        AdminConsolePulseCard(
+            metric_key="mrr",
+            label="MRR",
+            value=mrr_val,
+            unit=mrr_unit,
+            delta=_delta_pct(mrr_dollars, mrr_prior_dollars),
+            delta_text="this month",
+            color="#5fa37f",
+            invert_delta=False,
+            spark=mrr_spark,
+        ),
+        AdminConsolePulseCard(
+            metric_key="at_risk",
+            label="At-risk learners",
+            value=_fmt_int(at_risk_now),
+            unit="",
+            delta=_delta_pct(at_risk_now, at_risk_prior),
+            delta_text="vs last week",
+            color="#b8443a",
+            invert_delta=True,
+            spark=at_risk_spark,
+        ),
+    ]
+
+
 @router.get("/console/v1", response_model=AdminConsoleResponse)
 async def get_admin_console(
     db: AsyncSession = Depends(get_db),
@@ -1134,173 +1853,122 @@ async def get_admin_console(
 ) -> AdminConsoleResponse:
     """All data the v1 Admin Console needs in one round-trip.
 
-    Pulls from the `admin_console_*` tables seeded by
-    `scripts.seed_admin_console`. One bulk endpoint keeps the page fast and
-    avoids 8 separate auth round-trips.
-    """
-    from app.models.admin_console import (
-        AdminConsoleCall,
-        AdminConsoleEngagement,
-        AdminConsoleEvent,
-        AdminConsoleFeatureUsage,
-        AdminConsoleFunnelSnapshot,
-        AdminConsoleProfile,
-        AdminConsolePulseMetric,
-        AdminConsoleRiskReason,
-    )
+    LD-1..LD-5 (live data migration) and LD-7 (cleanup) — every block
+    on /admin now reads from live tables instead of the seeded
+    admin_console_* demo:
 
-    # Students — join profile + engagement + risk reason ────────────────
-    profile_rows = (
-        await db.execute(select(AdminConsoleProfile))
-    ).scalars().all()
-    engagement_rows = (
-        await db.execute(select(AdminConsoleEngagement))
+      LD-1  students roster + action band → users + student_risk_signals
+      LD-2  pulse strip                   → agent_actions + learning_sessions
+                                            + exercise_submissions + users
+                                            + payments + student_risk_signals
+      LD-3  learner funnel                → users + goal_contracts +
+                                            student_progress + course_entitlements
+                                            + exercise_submissions
+      LD-4  feature pulse tiles           → srs_cards + agent_actions +
+                                            ai_reviews + notebook_entries +
+                                            exercise_submissions + jd_match_scores
+                                            + interview_sessions
+      LD-5  right rail (calls + events    → outreach_log + cohort_events +
+            + revenue)                      payments + refunds
+
+    The 8 admin_console_* tables and their seed script remain in the
+    schema for one more deploy as a safety net; they are dropped by
+    a follow-up alembic migration once this code soaks in production.
+
+    One bulk endpoint keeps the page fast and avoids 8 separate
+    auth round-trips.
+    """
+    from app.models.student_risk_signals import StudentRiskSignals
+
+    # Students — LIVE: users LEFT JOIN student_risk_signals.
+    # Includes ALL students (paid or not, at-risk or not). The risk
+    # score is 0 for students with no signal row (treated as healthy
+    # until F1 nightly task scores them). Sorted by risk DESC so the
+    # action band's "top 3" picks the most urgent.
+    user_rows = (
+        await db.execute(
+            select(User)
+            .where(User.role == "student", User.is_deleted.is_(False))
+            .order_by(User.created_at.desc())
+        )
     ).scalars().all()
     risk_rows = (
-        await db.execute(select(AdminConsoleRiskReason))
+        await db.execute(select(StudentRiskSignals))
     ).scalars().all()
+    risk_by_uid = {r.user_id: r for r in risk_rows}
 
-    eng_by_sid = {e.student_id: e for e in engagement_rows}
-    risk_by_sid = {r.student_id: r.reason for r in risk_rows}
+    now = datetime.now(UTC)
 
-    student_ids = [p.student_id for p in profile_rows]
-    user_rows = (
-        await db.execute(select(User).where(User.id.in_(student_ids)))
-    ).scalars().all()
-    user_by_id = {u.id: u for u in user_rows}
+    def _last_seen_days(u: User) -> int:
+        if u.last_login_at is None:
+            # Never logged in — show as "days since signup" for the UI to
+            # render "Stale 71d" rather than "Today".
+            return max(0, (now - u.created_at).days)
+        return max(0, (now - u.last_login_at).days)
+
+    def _joined_label(u: User) -> str:
+        return u.created_at.strftime("%b %d")
 
     students: list[AdminConsoleStudent] = []
-    for p in profile_rows:
-        u = user_by_id.get(p.student_id)
-        e = eng_by_sid.get(p.student_id)
+    for u in user_rows:
+        risk = risk_by_uid.get(u.id)
         students.append(
             AdminConsoleStudent(
-                id=str(p.student_id),
-                name=u.full_name if u else "Unknown",
-                email=u.email if u else None,
-                track=p.track,
-                stage=p.stage,
-                progress=p.progress_pct,
-                streak=p.streak_days,
-                last_seen=p.last_seen_days,
-                risk=p.risk_score,
-                paid=p.paid,
-                joined=p.joined_label,
-                city=p.city,
-                sessions14=e.sessions_14d if e else 0,
-                flashcards=e.flashcards_14d if e else 0,
-                agent_q=e.agent_questions_14d if e else 0,
-                reviews=e.reviews_14d if e else 0,
-                notes=e.notes_14d if e else 0,
-                labs=e.labs_14d if e else 0,
-                capstones=e.capstones_14d if e else 0,
-                purchases=e.purchases_total if e else 0,
-                risk_reason=risk_by_sid.get(p.student_id),
+                id=str(u.id),
+                name=u.full_name or u.email,
+                email=u.email,
+                # Track / stage / progress aren't on the User row yet —
+                # placeholder until per-student rollups land in LD-4.
+                track="—",
+                stage="—",
+                progress=0,
+                streak=risk.max_streak_ever if risk else 0,
+                last_seen=risk.days_since_last_session
+                if (risk and risk.days_since_last_session is not None)
+                else _last_seen_days(u),
+                risk=risk.risk_score if risk else 0,
+                paid=risk.paid if risk else False,
+                joined=_joined_label(u),
+                city=None,
+                sessions14=0,
+                flashcards=0,
+                agent_q=0,
+                reviews=0,
+                notes=0,
+                labs=0,
+                capstones=0,
+                purchases=0,
+                risk_reason=risk.risk_reason if risk else None,
             )
         )
     students.sort(key=lambda s: s.risk, reverse=True)
 
-    # Pulse ─────────────────────────────────────────────────────────────
-    pulse_rows = (
-        await db.execute(
-            select(AdminConsolePulseMetric).order_by(AdminConsolePulseMetric.sort_order)
-        )
-    ).scalars().all()
-    pulse = [
-        AdminConsolePulseCard(
-            metric_key=p.metric_key,
-            label=p.label,
-            value=p.display_value,
-            unit=p.unit,
-            delta=p.delta_pct,
-            delta_text=p.delta_text,
-            color=p.color_hex,
-            invert_delta=p.invert_delta,
-            spark=[float(x) for x in (p.spark or [])],
-        )
-        for p in pulse_rows
-    ]
+    # Pulse — LD-2: 6 cards computed from LIVE data with 14-day sparks.
+    pulse = await _compute_live_pulse(db, now)
 
-    # Funnel — newest snapshot ──────────────────────────────────────────
-    funnel_row = (
-        await db.execute(
-            select(AdminConsoleFunnelSnapshot)
-            .order_by(AdminConsoleFunnelSnapshot.snapshot_date.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    funnel: list[AdminConsoleFunnelStage] = []
-    if funnel_row:
-        funnel = [
-            AdminConsoleFunnelStage(name="Signups", count=funnel_row.signups),
-            AdminConsoleFunnelStage(name="Onboarded", count=funnel_row.onboarded),
-            AdminConsoleFunnelStage(name="First lesson", count=funnel_row.first_lesson),
-            AdminConsoleFunnelStage(name="Paid", count=funnel_row.paid),
-            AdminConsoleFunnelStage(name="Capstone", count=funnel_row.capstone),
-            AdminConsoleFunnelStage(name="Promoted", count=funnel_row.promoted),
-            AdminConsoleFunnelStage(name="Hired", count=funnel_row.hired),
-        ]
+    # Funnel — LD-3: live counts over the entire student population
+    # (not a 30-day cohort — the marketing-funnel narrative the CEO
+    # cares about is "where are all my students right now along the
+    # journey"). Stages mirror the existing 7-stage demo so the chart
+    # renders identically.
+    funnel = await _compute_live_funnel(db)
 
-    # Features ──────────────────────────────────────────────────────────
-    feature_rows = (
-        await db.execute(
-            select(AdminConsoleFeatureUsage).order_by(AdminConsoleFeatureUsage.sort_order)
-        )
-    ).scalars().all()
-    features = [
-        AdminConsoleFeatureTile(
-            feature_key=f.feature_key,
-            name=f.name,
-            count=f.count_label,
-            sub=f.sub_label,
-            cold=f.is_cold,
-            bars=[int(x) for x in (f.bars or [])],
-        )
-        for f in feature_rows
-    ]
+    # Features — LD-4: 8 tiles computed from live tables.
+    features = await _compute_live_features(db, now)
 
-    # Calls (today) ─────────────────────────────────────────────────────
-    call_rows = (
-        await db.execute(
-            select(AdminConsoleCall).order_by(AdminConsoleCall.scheduled_for)
-        )
-    ).scalars().all()
-    calls = [
-        AdminConsoleCallItem(
-            student_id=str(c.student_id),
-            time=c.display_time,
-            reason=c.reason,
-        )
-        for c in call_rows
-    ]
+    # Calls (today) — LD-5: from outreach_log where kind='admin_manual'
+    # and the outreach was logged today UTC. The richer
+    # "scheduled_call" concept (with explicit scheduled_at column)
+    # is a future migration; for now we reuse today's manual sends
+    # as a proxy for "calls the operator has on their plate today".
+    calls = await _compute_live_calls(db, now)
 
-    # Events ────────────────────────────────────────────────────────────
-    event_rows = (
-        await db.execute(
-            select(AdminConsoleEvent)
-            .order_by(AdminConsoleEvent.occurred_at.desc())
-            .limit(20)
-        )
-    ).scalars().all()
-    events = [
-        AdminConsoleEventItem(
-            student_id=str(e.student_id) if e.student_id else None,
-            kind=e.kind,
-            text=e.body_html,
-            time_label=_format_event_time(e.occurred_at),
-        )
-        for e in event_rows
-    ]
+    # Events — LD-5: from cohort_events (real, masked-handle stream
+    # populated by various agents on lifecycle moments).
+    events = await _compute_live_events(db, now)
 
-    # Revenue (rolling 30-day) — derived from MRR pulse spark when present
-    mrr_pulse = next((p for p in pulse if p.metric_key == "mrr"), None)
-    revenue = AdminConsoleRevenue(
-        month_total="$12,340",
-        new_purchases="8 · $7,120",
-        renewals="14 · $5,220",
-        refunds="0",
-        spark=mrr_pulse.spark if mrr_pulse else [],
-    )
+    # Revenue — LD-5: from payments + refunds tables.
+    revenue = await _compute_live_revenue(db, now, pulse)
 
     return AdminConsoleResponse(
         students=students,

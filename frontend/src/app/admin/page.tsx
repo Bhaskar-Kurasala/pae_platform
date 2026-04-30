@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
@@ -163,11 +164,21 @@ const TAG_LABELS: Record<string, string> = {
 
 export default function AdminConsoleV1Page() {
   const { user } = useAuthStore();
+  const router = useRouter();
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "risk", dir: "desc" });
   const [search, setSearch] = useState("");
-  const [openStudentId, setOpenStudentId] = useState<string | null>(null);
+
+  // LD-1/LD-6: row-click on the roster opens the real
+  // /admin/students/[id] page (live data, all five operator cards).
+  // The legacy in-page modal was removed in LD-6 — the drilldown page
+  // is strictly better (it has Trigger agent, Refund offer, Admin
+  // notes, Direct message, Activity timeline; the modal had only
+  // hardcoded JS-built timelines).
+  function navigateToStudent(studentId: string) {
+    router.push(`/admin/students/${studentId}`);
+  }
 
   const { data, isLoading, isError } = useQuery<ConsoleResponse>({
     queryKey: ["admin", "console", "v1"],
@@ -210,10 +221,6 @@ export default function AdminConsoleV1Page() {
     });
     return list;
   }, [students, filter, search, sort]);
-
-  const openStudent = openStudentId
-    ? students.find((s) => s.id === openStudentId) ?? null
-    : null;
 
   const onSortClick = (k: SortKey) => {
     setSort((cur) => {
@@ -334,7 +341,7 @@ export default function AdminConsoleV1Page() {
                   <div
                     key={s.id}
                     className={`${styles.riskCard} ${styles.severe}`}
-                    onClick={() => setOpenStudentId(s.id)}
+                    onClick={() => navigateToStudent(s.id)}
                   >
                     <div className={styles.rcHead}>
                       <div className={styles.rcAvatar} style={{ background: avatarBg(s.id) }}>
@@ -362,7 +369,7 @@ export default function AdminConsoleV1Page() {
                         className={`${styles.rcBtn} ${styles.primary}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          setOpenStudentId(s.id);
+                          navigateToStudent(s.id);
                         }}
                       >
                         Open profile
@@ -609,7 +616,7 @@ export default function AdminConsoleV1Page() {
                         </tr>
                       ) : (
                         filtered.map((s) => (
-                          <tr key={s.id} onClick={() => setOpenStudentId(s.id)}>
+                          <tr key={s.id} onClick={() => navigateToStudent(s.id)}>
                             <td>
                               <div className={styles.trName}>
                                 <div
@@ -674,7 +681,7 @@ export default function AdminConsoleV1Page() {
                                 className={styles.trActionBtn}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setOpenStudentId(s.id);
+                                  navigateToStudent(s.id);
                                 }}
                               >
                                 Open
@@ -706,7 +713,7 @@ export default function AdminConsoleV1Page() {
                     <div
                       key={c.student_id + c.time}
                       className={styles.callItem}
-                      onClick={() => setOpenStudentId(c.student_id)}
+                      onClick={() => navigateToStudent(c.student_id)}
                     >
                       <div className={styles.callTime}>{c.time}</div>
                       <div className={styles.callInfo}>
@@ -777,11 +784,6 @@ export default function AdminConsoleV1Page() {
         </div>
       )}
 
-      {/* MODAL */}
-      <StudentModal
-        student={openStudent}
-        onClose={() => setOpenStudentId(null)}
-      />
     </div>
   );
 }
@@ -983,293 +985,4 @@ function FeatureIcon({ featureKey }: { featureKey: string }) {
         </svg>
       );
   }
-}
-
-// ── Modal ───────────────────────────────────────────────────────────────
-
-interface TimelineEvent {
-  time: string;
-  text: string;
-  cls?: "danger" | "gold";
-}
-function buildTimeline(s: ConsoleStudent): TimelineEvent[] {
-  if (s.risk >= 75) {
-    return [
-      { time: "today", text: "<b>No activity.</b>", cls: "danger" },
-      {
-        time: `${s.last_seen}d ago`,
-        text: `Last login — opened <b>${s.stage}</b> for 4 minutes, no actions taken.`,
-        cls: "danger",
-      },
-      {
-        time: `${s.last_seen + 3}d ago`,
-        text: "Failed Lab B test cases on third attempt. Did not request review.",
-      },
-      {
-        time: `${s.last_seen + 5}d ago`,
-        text: 'Asked agent: <i>"why does my retry decorator not work"</i>',
-      },
-      {
-        time: `${s.last_seen + 9}d ago`,
-        text: "Streak broken (was 6d).",
-        cls: "danger",
-      },
-      {
-        time: `${s.last_seen + 12}d ago`,
-        text: `Purchased <b>${s.track}</b> track ($89).`,
-        cls: "gold",
-      },
-      { time: `Joined ${s.joined}`, text: "Account created." },
-    ];
-  }
-  if (s.risk >= 50) {
-    return [
-      { time: "today", text: `Opened <b>${s.stage}</b>, completed 1 flashcard set.` },
-      { time: "2d ago", text: "Asked agent 2 questions about async retry logic." },
-      { time: "4d ago", text: "Submitted Lab A — passed 4/5 tests." },
-      { time: "6d ago", text: "Streak dropped from 5d to 1d.", cls: "danger" },
-      { time: "9d ago", text: "Capstone draft started." },
-      {
-        time: "14d ago",
-        text: "Promoted from <b>Onboarding</b> to <b>Today</b>.",
-        cls: "gold",
-      },
-      { time: `Joined ${s.joined}`, text: "Account created." },
-    ];
-  }
-  if (s.risk < 30) {
-    return [
-      { time: "today", text: `Completed Lesson 4 · <b>+5%</b> readiness.` },
-      { time: "today", text: "Submitted senior review on rate-limit lab." },
-      {
-        time: "1d ago",
-        text: `<b>${s.flashcards} flashcards</b> reviewed across 2 sessions.`,
-      },
-      { time: "2d ago", text: `Asked agent about <i>vector embeddings</i>.` },
-      {
-        time: "3d ago",
-        text: `Capstone draft milestone — Production readiness <b>72</b>.`,
-        cls: "gold",
-      },
-      { time: "5d ago", text: `Streak reached <b>${s.streak}d</b>.`, cls: "gold" },
-      { time: `Joined ${s.joined}`, text: "Account created." },
-    ];
-  }
-  return [
-    { time: "today", text: `Completed warm-up · ${(s.flashcards % 8) + 4} cards.` },
-    { time: "1d ago", text: `Worked through Lab B for 35 min.` },
-    { time: "3d ago", text: "Submitted reflection note." },
-    { time: "5d ago", text: `Asked agent ${Math.max(1, s.agent_q - 3)} questions.` },
-    { time: "1w ago", text: `Started ${s.stage} phase.` },
-    { time: `Joined ${s.joined}`, text: "Account created." },
-  ];
-}
-
-function StudentModal({
-  student,
-  onClose,
-}: {
-  student: ConsoleStudent | null;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    if (!student) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [student, onClose]);
-
-  if (!student) {
-    return <div className={styles.modalBackdrop} aria-hidden />;
-  }
-  const timeline = buildTimeline(student);
-  const tier = riskTier(student.risk);
-  return (
-    <div className={`${styles.modalBackdrop} ${styles.open}`} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.modalHead}>
-          <div className={styles.mhAvatar} style={{ background: avatarBg(student.id) }}>
-            {initials(student.name)}
-          </div>
-          <div>
-            <div className={styles.mhName}>{student.name}</div>
-            <div className={styles.mhMeta}>
-              <span>{student.track}</span>
-              <span className="dot" />
-              <span>{student.stage}</span>
-              <span className="dot" />
-              <span>Joined {student.joined}</span>
-              <span className="dot" />
-              <span>
-                {student.paid
-                  ? `Paid · ${student.purchases > 1 ? "2 tracks" : "1 track"}`
-                  : "Free tier"}
-              </span>
-            </div>
-          </div>
-          <button className={styles.mhClose} onClick={onClose} aria-label="Close">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-        <div className={styles.modalBody}>
-          <div className={styles.mbGrid}>
-            <Stat
-              label="Risk"
-              value={String(student.risk)}
-              sub={riskLabel(student.risk)}
-              danger={tier === "severe" || tier === "high"}
-            />
-            <Stat
-              label="Progress"
-              value={`${student.progress}%`}
-              sub="to next role"
-            />
-            <Stat
-              label="Streak"
-              value={`${student.streak}d`}
-              sub={
-                student.streak > 5
-                  ? "strong"
-                  : student.streak > 0
-                  ? "building"
-                  : "broken"
-              }
-            />
-            <Stat
-              label="Last seen"
-              value={lastSeenText(student.last_seen)}
-              sub={`${student.sessions14} sessions · 14d`}
-              danger={student.last_seen >= 7}
-            />
-          </div>
-
-          <div className={styles.mbSection}>
-            <div className={styles.mbSectionTitle}>Platform usage · last 14 days</div>
-            <div className={styles.usageGrid}>
-              <UsageTile num={student.flashcards} name="Flashcards reviewed" />
-              <UsageTile num={student.agent_q} name="Agent questions" />
-              <UsageTile num={student.reviews} name="Senior reviews" />
-              <UsageTile num={student.notes} name="Notes graduated" />
-              <UsageTile num={student.labs} name="Labs completed" />
-              <UsageTile num={student.capstones} name="Capstones shipped" />
-            </div>
-          </div>
-
-          <div className={styles.mbSection}>
-            <div className={styles.mbSectionTitle}>Activity timeline</div>
-            <div style={{ position: "relative", paddingLeft: 18 }}>
-              <div
-                style={{
-                  position: "absolute",
-                  left: 5,
-                  top: 8,
-                  bottom: 8,
-                  width: 1,
-                  background: "var(--line-2)",
-                }}
-              />
-              {timeline.map((t, i) => (
-                <div
-                  key={i}
-                  style={{
-                    position: "relative",
-                    padding: "8px 0 12px",
-                    display: "flex",
-                    gap: 14,
-                    fontSize: 12,
-                  }}
-                >
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: -18,
-                      top: 13,
-                      width: 11,
-                      height: 11,
-                      borderRadius: "50%",
-                      background: "var(--panel)",
-                      border: `2px solid ${
-                        t.cls === "danger"
-                          ? "var(--red-2)"
-                          : t.cls === "gold"
-                          ? "var(--gold)"
-                          : "var(--forest-3)"
-                      }`,
-                    }}
-                  />
-                  <div
-                    style={{
-                      fontFamily: "var(--mono)",
-                      fontSize: 11,
-                      color: "var(--muted)",
-                      minWidth: 90,
-                    }}
-                  >
-                    {t.time}
-                  </div>
-                  <div
-                    style={{ color: "var(--ink-2)", lineHeight: 1.5 }}
-                    dangerouslySetInnerHTML={{ __html: t.text }}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className={styles.modalFoot}>
-          <button className={`${styles.btn} ${styles.ghost}`}>Send DM</button>
-          <button className={`${styles.btn} ${styles.ghost}`}>Add note</button>
-          {/* F10 — pre-filled mailto invite. Real Cal.com flow lands later (F10 v2). */}
-          <a
-            className={`${styles.btn} ${styles.primary}`}
-            href={
-              student.email
-                ? buildCallInviteMailto({
-                    studentEmail: student.email,
-                    studentName: student.name,
-                    riskReason: student.risk_reason,
-                  })
-                : undefined
-            }
-            aria-disabled={!student.email}
-          >
-            Schedule call
-          </a>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  sub,
-  danger = false,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-  danger?: boolean;
-}) {
-  return (
-    <div className={styles.mbStat}>
-      <div className={styles.mbStatLabel}>{label}</div>
-      <div className={`${styles.mbStatVal} ${danger ? styles.danger : ""}`}>{value}</div>
-      <div className={styles.mbStatSub}>{sub}</div>
-    </div>
-  );
-}
-
-function UsageTile({ num, name }: { num: number; name: string }) {
-  return (
-    <div className={styles.usageTile}>
-      <div className={styles.usageNum}>{num}</div>
-      <div className={styles.usageName}>{name}</div>
-    </div>
-  );
 }
