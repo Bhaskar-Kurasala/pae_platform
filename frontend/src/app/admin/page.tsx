@@ -117,10 +117,17 @@ function initials(name: string): string {
     .join("")
     .toUpperCase();
 }
+// Tier thresholds aligned to the F1 score formula in
+// risk_scoring_service.py — base scores are paid_silent=80,
+// capstone_stalled=70, streak_broken=55, promotion_avoidant=45,
+// unpaid_stalled=35, cold_signup=25. Anything F1 has flagged
+// (risk > 0) deserves at least a "Watch" tier; risk=0 is genuinely
+// healthy. Severe = paid+silent territory; High = capstone or
+// streak; Watch = newer slip patterns + cold signups.
 function riskTier(r: number): "severe" | "high" | "med" | "low" {
   if (r >= 75) return "severe";
   if (r >= 50) return "high";
-  if (r >= 30) return "med";
+  if (r > 0) return "med";
   return "low";
 }
 function riskLabel(r: number): string {
@@ -189,20 +196,42 @@ export default function AdminConsoleV1Page() {
 
   const students = data?.students ?? [];
 
+  // Top 3 at-risk students for the action-band cards.
   const topRisk = useMemo(
-    () => [...students].sort((a, b) => b.risk - a.risk).slice(0, 3),
+    () =>
+      [...students]
+        .filter((s) => s.risk > 0)
+        .sort((a, b) => b.risk - a.risk)
+        .slice(0, 3),
+    [students],
+  );
+
+  // Total flagged students — drives the action-band headline count
+  // ("47 students need a personal nudge") rather than always "3".
+  const flaggedCount = useMemo(
+    () => students.filter((s) => s.risk > 0).length,
     [students],
   );
 
   const filtered = useMemo(() => {
     let list = [...students];
+    // Filters use the same risk thresholds as riskTier() so the tier
+    // labels in the rightmost column ("Severe", "High", "Watch",
+    // "Healthy") line up with the chip the operator clicks.
     if (filter === "severe") list = list.filter((s) => s.risk >= 75);
     else if (filter === "high") list = list.filter((s) => s.risk >= 50 && s.risk < 75);
     else if (filter === "paid-stalled") list = list.filter((s) => s.paid && s.last_seen >= 5);
-    else if (filter === "thriving") list = list.filter((s) => s.risk < 30);
+    // "Thriving" = no slip pattern flagged at all (F1 hasn't given
+    // them a risk signal). Anything > 0 is at least "Watch".
+    else if (filter === "thriving") list = list.filter((s) => s.risk === 0);
+    // "Joined < 7d" is computed from the days-since-signup, not from
+    // a hardcoded date list (was a demo-data leftover).
     else if (filter === "new") {
-      const newJoiners = ["Apr 19", "Apr 21", "Apr 22"];
-      list = list.filter((s) => newJoiners.includes(s.joined));
+      const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      list = list.filter((s) => {
+        const joinedDate = new Date(`${s.joined} ${new Date().getFullYear()}`);
+        return !isNaN(joinedDate.valueOf()) && joinedDate.getTime() >= sevenDaysAgo;
+      });
     }
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -314,7 +343,7 @@ export default function AdminConsoleV1Page() {
                     This week&apos;s call list
                   </div>
                   <h2 className={styles.abTitle}>
-                    <b>{topRisk.length} students</b> need a personal nudge.
+                    <b>{flaggedCount} {flaggedCount === 1 ? "student" : "students"}</b> need a personal nudge.
                   </h2>
                   <p className={styles.abSub}>
                     These are the learners whose momentum has slipped most against their own
@@ -324,7 +353,14 @@ export default function AdminConsoleV1Page() {
                 <button
                   className={styles.abBtn}
                   onClick={() => {
-                    setFilter("severe");
+                    // Scroll to the roster with "All" filter selected
+                    // and the default risk-DESC sort. The action band's
+                    // top-3 cards will be at the top of the roster
+                    // (same sort order), so the operator sees the
+                    // continuous tail of "everyone else who needs a
+                    // nudge" right below them.
+                    setFilter("all");
+                    setSort({ key: "risk", dir: "desc" });
                     document
                       .getElementById("studentSection")
                       ?.scrollIntoView({ behavior: "smooth", block: "start" });
