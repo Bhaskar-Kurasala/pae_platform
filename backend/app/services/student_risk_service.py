@@ -351,17 +351,42 @@ async def score_user(db: AsyncSession, user: User) -> RiskSignal:
 
 
 async def score_all_users(db: AsyncSession) -> int:
-    """Recompute signals for every active user. Returns count.
+    """Recompute signals for every active student. Returns count.
 
     Called by the nightly Celery task. Iterates user-by-user — 4 tiny
     queries each — rather than one megajoin so each user's scoring is
     isolated (a single bad row doesn't take down the whole pass).
 
+    Filters to role='student' (admins / instructors don't get scored,
+    they don't have a "slip pattern" to detect). The `users.role` filter
+    is what fixes the historical inflation where the cold_signup panel
+    counted ~7 admin accounts as "Never returned" candidates.
+
     Upserts via ON CONFLICT (user_id) so the table is always one-row-
     per-user and yesterday's signals get overwritten cleanly.
+
+    Also opportunistically deletes any existing risk_signals rows
+    that point at non-student users (a one-time cleanup that
+    self-heals if the role of a user ever changes).
     """
+    # Self-healing cleanup: any signal rows for non-students get
+    # dropped before we re-score. Cheap (one bulk DELETE).
+    await db.execute(
+        StudentRiskSignals.__table__.delete().where(
+            StudentRiskSignals.user_id.in_(
+                select(User.id).where(
+                    (User.role != "student") | (User.is_deleted.is_(True))
+                )
+            )
+        )
+    )
+
     users_q = await db.execute(
-        select(User).where(User.is_active.is_(True))
+        select(User).where(
+            User.is_active.is_(True),
+            User.role == "student",
+            User.is_deleted.is_(False),
+        )
     )
     users = users_q.scalars().all()
 

@@ -403,12 +403,18 @@ async def get_risk_panels(
     PANEL_LIMIT = 10  # show top 10 per panel; UI can load-more later
 
     result: dict[str, Any] = {}
+    # Both queries (top-N rows AND the total count) filter to real
+    # students only — no admins, no deleted users. Without this filter
+    # the panel total inflated by ~7 because F1's nightly task had
+    # been scoring admin accounts too (now also fixed in the task).
+    student_filter = (User.role == "student") & (User.is_deleted.is_(False))
+
     for slip_type in PANELS:
         # Top-N rows for the panel, joined with users for display name.
         rows_q = await db.execute(
             select(StudentRiskSignals, User)
             .join(User, StudentRiskSignals.user_id == User.id)
-            .where(StudentRiskSignals.slip_type == slip_type)
+            .where(StudentRiskSignals.slip_type == slip_type, student_filter)
             .order_by(StudentRiskSignals.risk_score.desc())
             .limit(PANEL_LIMIT)
         )
@@ -428,13 +434,13 @@ async def get_risk_panels(
                 }
             )
 
-        # Total count for "see all (N)" links — small extra query,
-        # acceptable cost vs. the alternative (fetching everything and
-        # measuring length on the frontend).
+        # Total count for "see all (N)" links — same join + filter so
+        # the displayed count equals the number of rows the panel can
+        # actually surface.
         count_q = await db.execute(
-            select(func.count(StudentRiskSignals.id)).where(
-                StudentRiskSignals.slip_type == slip_type
-            )
+            select(func.count(StudentRiskSignals.id))
+            .join(User, StudentRiskSignals.user_id == User.id)
+            .where(StudentRiskSignals.slip_type == slip_type, student_filter)
         )
         total = count_q.scalar() or 0
         result[slip_type] = {"students": students, "total": total}
