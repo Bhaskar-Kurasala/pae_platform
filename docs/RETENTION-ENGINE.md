@@ -364,14 +364,14 @@ These ARE the product for inactive students. They're the only thing the student 
 
 ## Tier 3 — Polish
 
-### 🔲 F12 — Wire pulse 24h/7d/30d windows
-Backend support + frontend tabs. ~3 hours.
+### ✅ F12 — Wire pulse 24h/7d/30d windows
+**Closed by `7b80094`.** Backend takes `?window=24h|7d|30d`; frontend tab switcher recomputes active_students, agent_calls, avg_eval_score. Legacy `_24h` response keys preserved on default window for backwards-compat.
 
-### 🔲 F13 — Admin sort columns on `/admin/students`
-Currently no sort. Add 3 columns (risk_score, last_seen, paid_at). ~1 hour.
+### ✅ F13 — Admin sort columns on `/admin/students`
+**Closed by `7b80094`.** Sortable headers on Joined / Name / Last seen (server-side via `?sort=`) + Lessons / AI Chats (client-side off the limit-capped page). Adds a "Last seen" column that was missing before.
 
-### 🔲 F14 — Student-detail timeline pagination
-`?since=` query param. ~2 hours.
+### ✅ F14 — Student-detail timeline pagination
+**Closed by `7b80094`.** Backend `?before=<iso-ts>` cursor; "Load older" button below the timeline fetches the next page. Synthetic "Last login" anchor only emitted on the first page so it doesn't duplicate.
 
 ---
 
