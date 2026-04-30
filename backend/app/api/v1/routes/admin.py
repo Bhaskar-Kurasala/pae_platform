@@ -1173,6 +1173,143 @@ async def _daily_buckets(
     return out
 
 
+async def _compute_live_features(
+    db: AsyncSession,
+    now: datetime,
+) -> list[AdminConsoleFeatureTile]:
+    """LD-4: Compute the 8 feature-pulse tiles from live data.
+
+    Each tile shows current week count + delta vs prior week + 7-day
+    daily sparkline. Dimming (`cold`) flag fires when current week
+    is less than half of prior week.
+    """
+    from app.models.ai_review import AIReview
+    from app.models.exercise import Exercise
+    from app.models.exercise_submission import ExerciseSubmission
+    from app.models.interview_session import InterviewSession
+    from app.models.jd_decoder import JdMatchScore
+    from app.models.notebook_entry import NotebookEntry
+    from app.models.srs_card import SRSCard
+
+    week_ago = now - timedelta(days=7)
+    two_weeks_ago = now - timedelta(days=14)
+
+    async def _count_and_spark(column, where_filter) -> tuple[int, int, list[int]]:
+        """Returns (current_week_count, prior_week_count, 7-day spark)."""
+        curr = (
+            await db.execute(
+                select(func.count())
+                .select_from(where_filter.froms[0] if hasattr(where_filter, "froms") else None)
+                .where(column >= week_ago)
+            )
+        ).scalar() if False else None
+        # Simpler: use the same filter, just adjust the time window.
+        curr = (
+            await db.execute(where_filter.where(column >= week_ago))
+        ).scalar() or 0
+        prior = (
+            await db.execute(
+                where_filter.where(column >= two_weeks_ago, column < week_ago)
+            )
+        ).scalar() or 0
+
+        # 7-day spark.
+        spark_start = (now - timedelta(days=6)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        bucket_col = func.date_trunc("day", column)
+        spark_rows = (
+            await db.execute(
+                where_filter.with_only_columns(
+                    bucket_col.label("bucket"), func.count()
+                ).where(column >= spark_start).group_by(bucket_col)
+            )
+        ).all()
+        by_day: dict[date, int] = {row[0].date(): int(row[1]) for row in spark_rows}
+        spark = []
+        for i in range(7):
+            d = (spark_start + timedelta(days=i)).date()
+            spark.append(by_day.get(d, 0))
+        return int(curr), int(prior), spark
+
+    def _make_tile(
+        feature_key: str,
+        name: str,
+        curr: int,
+        prior: int,
+        bars: list[int],
+    ) -> AdminConsoleFeatureTile:
+        if prior == 0:
+            sub = "this week · new" if curr > 0 else "no activity yet"
+            cold = False
+        else:
+            pct = int(round((curr - prior) / prior * 100))
+            arrow = "▲" if pct >= 0 else "▼"
+            sub = f"this week · {arrow} {abs(pct)}%"
+            cold = curr < 0.5 * prior
+        return AdminConsoleFeatureTile(
+            feature_key=feature_key,
+            name=name,
+            count=_fmt_int(curr),
+            sub=sub,
+            cold=cold,
+            bars=bars,
+        )
+
+    # Each feature's base SELECT — count over the appropriate column.
+    flashcards_curr, flashcards_prior, flashcards_bars = await _count_and_spark(
+        SRSCard.last_reviewed_at,
+        select(func.count(SRSCard.id)).where(SRSCard.last_reviewed_at.is_not(None)),
+    )
+    agent_q_curr, agent_q_prior, agent_q_bars = await _count_and_spark(
+        AgentAction.created_at,
+        select(func.count(AgentAction.id)).where(
+            AgentAction.agent_name == "socratic_tutor"
+        ),
+    )
+    senior_curr, senior_prior, senior_bars = await _count_and_spark(
+        AIReview.created_at,
+        select(func.count(AIReview.id)),
+    )
+    notes_curr, notes_prior, notes_bars = await _count_and_spark(
+        NotebookEntry.graduated_at,
+        select(func.count(NotebookEntry.id)).where(
+            NotebookEntry.graduated_at.is_not(None)
+        ),
+    )
+    labs_curr, labs_prior, labs_bars = await _count_and_spark(
+        ExerciseSubmission.created_at,
+        select(func.count(ExerciseSubmission.id))
+        .join(Exercise, Exercise.id == ExerciseSubmission.exercise_id)
+        .where(Exercise.is_capstone.is_(False)),
+    )
+    cap_curr, cap_prior, cap_bars = await _count_and_spark(
+        ExerciseSubmission.created_at,
+        select(func.count(ExerciseSubmission.id))
+        .join(Exercise, Exercise.id == ExerciseSubmission.exercise_id)
+        .where(Exercise.is_capstone.is_(True)),
+    )
+    jd_curr, jd_prior, jd_bars = await _count_and_spark(
+        JdMatchScore.created_at,
+        select(func.count(JdMatchScore.id)),
+    )
+    iv_curr, iv_prior, iv_bars = await _count_and_spark(
+        InterviewSession.created_at,
+        select(func.count(InterviewSession.id)),
+    )
+
+    return [
+        _make_tile("flashcards", "Flashcard reviews", flashcards_curr, flashcards_prior, flashcards_bars),
+        _make_tile("agent_q", "Agent questions", agent_q_curr, agent_q_prior, agent_q_bars),
+        _make_tile("senior_reviews", "Senior reviews", senior_curr, senior_prior, senior_bars),
+        _make_tile("notes", "Notes graduated", notes_curr, notes_prior, notes_bars),
+        _make_tile("labs", "Lab completions", labs_curr, labs_prior, labs_bars),
+        _make_tile("capstones", "Capstone submissions", cap_curr, cap_prior, cap_bars),
+        _make_tile("jd_match", "JD Match runs", jd_curr, jd_prior, jd_bars),
+        _make_tile("interview", "Interview Coach", iv_curr, iv_prior, iv_bars),
+    ]
+
+
 async def _compute_live_funnel(
     db: AsyncSession,
 ) -> list[AdminConsoleFunnelStage]:
@@ -1626,23 +1763,8 @@ async def get_admin_console(
     # renders identically.
     funnel = await _compute_live_funnel(db)
 
-    # Features ──────────────────────────────────────────────────────────
-    feature_rows = (
-        await db.execute(
-            select(AdminConsoleFeatureUsage).order_by(AdminConsoleFeatureUsage.sort_order)
-        )
-    ).scalars().all()
-    features = [
-        AdminConsoleFeatureTile(
-            feature_key=f.feature_key,
-            name=f.name,
-            count=f.count_label,
-            sub=f.sub_label,
-            cold=f.is_cold,
-            bars=[int(x) for x in (f.bars or [])],
-        )
-        for f in feature_rows
-    ]
+    # Features — LD-4: 8 tiles computed from live tables.
+    features = await _compute_live_features(db, now)
 
     # Calls (today) ─────────────────────────────────────────────────────
     call_rows = (
