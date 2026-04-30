@@ -88,37 +88,46 @@ export function StudentDetailModal({
   // gold = the same accent the action band uses for promotions/
   // streaks, lifts important numbers + section eyebrows out of the
   // visual baseline.
+  // Tokens tuned to match the Resume Lab / cockpit hero:
+  //  • bg + panelBg are deeper than before (less green saturation,
+  //    more black presence) — gives cards more contrast room.
+  //  • ink is a brighter cream so body copy reads premium, not muted.
+  //  • borders are barely-there — the gradient + chiselled top-edge
+  //    do the lifting, not an outline.
+  //  • eyebrow color is the cockpit's mint/teal accent (#5fa37f) at
+  //    half-brightness — restrained, not gold-loud.
   const surface = isDark
     ? {
-        bg: "#1a2620",
-        panelBg: "#243430",
-        panelBg2: "#2c3e37",
-        ink: "#f0e8d3",
-        ink2: "#d6cebf",
-        muted: "#8a9890",
-        gold: "#d6a54d",
-        border: "rgba(208, 212, 207, 0.10)",
-        borderTop: "rgba(255, 255, 255, 0.06)", // chiselled top-edge
-        ring: "rgba(208, 212, 207, 0.06)",
-        backdrop: "rgba(8, 12, 10, 0.65)",
-        // Subtle gradient to give cards depth without being noisy.
+        bg: "#0f1814",
+        panelBg: "#162720",
+        panelBg2: "#1c2f27",
+        ink: "#ece4cf",
+        ink2: "#c9c0a8",
+        muted: "#7a8a82",
+        eyebrow: "#7cb89a", // mint accent, dimmer than primary
+        border: "rgba(208, 212, 207, 0.06)",
+        borderTop: "rgba(255, 255, 255, 0.04)",
+        ring: "rgba(208, 212, 207, 0.04)",
+        backdrop: "rgba(0, 0, 0, 0.70)",
+        // Subtle gradient: lighter at top, fades into base. Resume Lab
+        // does the same — top-edge highlight, body recedes.
         cardGradient:
-          "linear-gradient(180deg, rgba(255,255,255,0.02), transparent)",
+          "linear-gradient(180deg, rgba(255,255,255,0.025) 0%, rgba(255,255,255,0.01) 35%, transparent 100%)",
       }
     : {
-        bg: "#fbf8f1",
+        bg: "#faf6ed",
         panelBg: "#ffffff",
         panelBg2: "#fdfbf6",
         ink: "#1a2620",
         ink2: "#3a3a3a",
         muted: "#6f7a73",
-        gold: "#b8862d",
-        border: "rgba(26, 38, 32, 0.10)",
+        eyebrow: "#356d50", // forest accent
+        border: "rgba(26, 38, 32, 0.08)",
         borderTop: "rgba(255, 255, 255, 0.6)",
-        ring: "rgba(26, 38, 32, 0.06)",
+        ring: "rgba(26, 38, 32, 0.04)",
         backdrop: "rgba(8, 12, 10, 0.40)",
         cardGradient:
-          "linear-gradient(180deg, rgba(255,255,255,0.6), transparent)",
+          "linear-gradient(180deg, rgba(255,255,255,0.6) 0%, transparent 50%)",
       };
 
   return (
@@ -139,11 +148,11 @@ export function StudentDetailModal({
           style={{
             backgroundColor: surface.bg,
             color: surface.ink,
-            borderRadius: 20,
+            borderRadius: 24,
             maxHeight: "calc(100vh - 4rem)",
             boxShadow: isDark
-              ? `0 40px 100px rgba(0,0,0,0.7), 0 0 0 1px ${surface.ring}, inset 0 1px 0 ${surface.borderTop}`
-              : `0 40px 100px rgba(20,30,25,0.20), 0 0 0 1px ${surface.ring}, inset 0 1px 0 ${surface.borderTop}`,
+              ? `0 40px 100px rgba(0,0,0,0.75), 0 0 0 1px ${surface.ring}, inset 0 1px 0 ${surface.borderTop}`
+              : `0 40px 100px rgba(20,30,25,0.18), 0 0 0 1px ${surface.ring}, inset 0 1px 0 ${surface.borderTop}`,
           }}
         >
           {/* Header — stays pinned while body scrolls. Subtle gradient
@@ -157,26 +166,36 @@ export function StudentDetailModal({
             }}
           >
             <div className="min-w-0 flex-1">
-              {/* Eyebrow — gold, mono, uppercase. Same vocabulary as
-                  the action band's "THIS WEEK'S CALL LIST" eyebrow. */}
+              {/* Eyebrow — restrained mint/teal, uppercase, mono.
+                  Matches the Resume Lab's "RESUME LAB" tone (and the
+                  rest of the cockpit's section eyebrows). */}
               <div
-                className="text-[10px] font-semibold tracking-[0.18em] uppercase mb-1.5"
+                className="text-[11px] font-medium tracking-[0.22em] uppercase mb-2"
                 style={{
-                  color: surface.gold,
-                  fontFamily: "var(--font-mono, ui-monospace, monospace)",
+                  color: surface.eyebrow,
+                  fontFamily: "var(--font-jetbrains-mono), ui-monospace, monospace",
                 }}
               >
                 Student profile
               </div>
+              {/* Title in Fraunces serif — same display font as the
+                  cockpit hero ("92 students need a personal nudge")
+                  and the Resume Lab heading. Larger size + tighter
+                  tracking to read as confident, not loud. */}
               <DialogPrimitive.Title
-                className="truncate text-2xl font-bold leading-tight"
-                style={{ color: surface.ink, letterSpacing: "-0.01em" }}
+                className="truncate font-medium leading-[1.1]"
+                style={{
+                  color: surface.ink,
+                  fontFamily: "var(--font-fraunces), Georgia, serif",
+                  fontSize: "30px",
+                  letterSpacing: "-0.015em",
+                }}
               >
                 {student?.full_name ?? "Student"}
               </DialogPrimitive.Title>
               <DialogPrimitive.Description
-                className="truncate text-sm mt-1"
-                style={{ color: surface.muted }}
+                className="truncate text-sm mt-1.5"
+                style={{ color: surface.ink2, opacity: 0.7 }}
               >
                 {student?.email ?? studentId ?? ""}
               </DialogPrimitive.Description>
@@ -277,21 +296,21 @@ export function StudentDetailModal({
               <style>{`
                 /* === Shared (light + dark) === */
                 .careerforge-modal-body [data-slot="card"] {
-                  border-radius: 14px !important;
-                  transition: box-shadow 200ms ease, border-color 200ms ease;
+                  border-radius: 16px !important;
+                  transition: box-shadow 220ms ease, border-color 220ms ease;
                   position: relative;
                 }
                 .careerforge-modal-body [data-slot="card-header"] h2 {
-                  font-size: 13px;
-                  letter-spacing: 0.01em;
+                  font-size: 13.5px;
+                  letter-spacing: 0.005em;
                 }
                 .careerforge-modal-body .tabular-nums {
-                  font-family: var(--font-mono, ui-monospace, monospace);
+                  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
                 }
                 .careerforge-modal-body time,
                 .careerforge-modal-body [data-slot="card-content"] p.text-\\[10px\\],
                 .careerforge-modal-body [data-slot="card-content"] p.text-xs.text-muted-foreground {
-                  font-family: var(--font-mono, ui-monospace, monospace);
+                  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
                   font-feature-settings: "tnum";
                 }
               `}</style>
@@ -369,21 +388,26 @@ export function StudentDetailModal({
                     background-color: rgba(95, 163, 127, 0.10) !important;
                     border-color: rgba(95, 163, 127, 0.45) !important;
                   }
-                  /* Card surface: layered (panel-bg + subtle gradient
-                     + chiselled top-edge highlight) so cards feel
-                     dimensional, not flat. */
+                  /* Card surface: layered (panel-bg + gradient that's
+                     more pronounced at the top and fades into the
+                     base) — gives cards Resume Lab's premium depth. */
                   .careerforge-modal-body [data-slot="card"] {
                     background-color: ${surface.panelBg} !important;
                     background-image: ${surface.cardGradient};
                     border: 1px solid ${surface.border} !important;
-                    box-shadow: inset 0 1px 0 ${surface.borderTop};
-                  }
-                  .careerforge-modal-body [data-slot="card"]:hover {
-                    border-color: rgba(208, 212, 207, 0.16) !important;
+                    border-radius: 16px !important;
                     box-shadow:
                       inset 0 1px 0 ${surface.borderTop},
-                      0 8px 24px rgba(0, 0, 0, 0.20);
+                      0 1px 0 rgba(0, 0, 0, 0.20);
                   }
+                  .careerforge-modal-body [data-slot="card"]:hover {
+                    border-color: rgba(208, 212, 207, 0.10) !important;
+                    box-shadow:
+                      inset 0 1px 0 ${surface.borderTop},
+                      0 12px 32px rgba(0, 0, 0, 0.30);
+                  }
+                  /* Body copy reads in cream (Resume Lab tone) instead
+                     of the muted grey we had before. */
                   .careerforge-modal-body .text-muted-foreground {
                     color: ${surface.muted} !important;
                   }
@@ -394,12 +418,18 @@ export function StudentDetailModal({
                   .careerforge-modal-body p {
                     color: ${surface.ink};
                   }
-                  /* Card section headers ("Trigger agent", "Admin notes"
-                     etc.) — keep their lucide icon in primary green;
-                     bump the heading text to the gold accent so it
-                     matches the cockpit's section eyebrows. */
+                  /* Card section header text — readable cream. */
                   .careerforge-modal-body [data-slot="card-header"] h2 {
                     color: ${surface.ink} !important;
+                    font-weight: 600;
+                    letter-spacing: 0.01em;
+                  }
+                  /* Card-header descriptive paragraph (the small "Runs on
+                     behalf..." / "Private. Used to remember..." text)
+                     gets a softer cream tone for a clear hierarchy. */
+                  .careerforge-modal-body [data-slot="card-header"] p {
+                    color: ${surface.ink2} !important;
+                    opacity: 0.75;
                   }
                 `}</style>
               ) : (
