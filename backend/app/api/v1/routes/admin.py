@@ -1599,9 +1599,17 @@ async def _compute_live_funnel(
 async def _compute_live_pulse(
     db: AsyncSession,
     now: datetime,
+    window: str = "24h",
 ) -> list[AdminConsolePulseCard]:
     """LD-2: Compute the 6 pulse-strip cards from live data with 14-day
     sparklines. Replaces the seeded admin_console_pulse_metrics read.
+
+    `window` controls the lookback for the activity-style cards
+    (active learners, sessions, capstones, promotions). It does NOT
+    affect MRR (always 30d, since "monthly" is in the name) or the
+    at-risk count (a snapshot, not a window). The 14-day sparkline is
+    fixed regardless of window — it's a 2-week trend, the value above
+    is "what's happening in the chosen window right now".
     """
     from app.models.enrollment import Enrollment
     from app.models.exercise import Exercise
@@ -1610,28 +1618,54 @@ async def _compute_live_pulse(
     from app.models.payment import Payment
     from app.models.student_risk_signals import StudentRiskSignals
 
-    day_ago = now - timedelta(hours=24)
-    two_days_ago = now - timedelta(hours=48)
-    week_ago = now - timedelta(days=7)
-    two_weeks_ago = now - timedelta(days=14)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    yday_start = today_start - timedelta(days=1)
+    # Window mapping for the activity-style cards. The "label" is what
+    # gets shown in the card eyebrow ("Active learners (24h)" etc.) and
+    # in the delta_text suffix ("vs yesterday" / "vs last week" / "vs
+    # last 30d").
+    window_specs = {
+        "24h": {
+            "delta": timedelta(hours=24),
+            "label_suffix": "(24h)",
+            "delta_text": "vs yesterday",
+            "session_label": "Sessions today",
+            "session_delta_text": "vs yesterday",
+        },
+        "7d": {
+            "delta": timedelta(days=7),
+            "label_suffix": "(7d)",
+            "delta_text": "vs prior week",
+            "session_label": "Sessions this week",
+            "session_delta_text": "vs prior week",
+        },
+        "30d": {
+            "delta": timedelta(days=30),
+            "label_suffix": "(30d)",
+            "delta_text": "vs prior 30d",
+            "session_label": "Sessions this month",
+            "session_delta_text": "vs prior 30d",
+        },
+    }
+    spec = window_specs.get(window, window_specs["24h"])
+    win_delta: timedelta = spec["delta"]  # type: ignore[assignment]
+
+    cutoff = now - win_delta
+    prior_cutoff = now - 2 * win_delta
     month_ago = now - timedelta(days=30)
     two_months_ago = now - timedelta(days=60)
 
-    # ── 1. Active learners (24h) ──
+    # ── 1. Active learners (window) ──
     active_24h = (
         await db.execute(
             select(func.count(func.distinct(AgentAction.student_id))).where(
-                AgentAction.created_at >= day_ago
+                AgentAction.created_at >= cutoff
             )
         )
     ).scalar() or 0
     active_prior = (
         await db.execute(
             select(func.count(func.distinct(AgentAction.student_id))).where(
-                AgentAction.created_at >= two_days_ago,
-                AgentAction.created_at < day_ago,
+                AgentAction.created_at >= prior_cutoff,
+                AgentAction.created_at < cutoff,
             )
         )
     ).scalar() or 0
@@ -1639,19 +1673,19 @@ async def _compute_live_pulse(
         db, AgentAction.created_at, AgentAction.id.is_not(None), now
     )
 
-    # ── 2. Sessions today ──
+    # ── 2. Sessions in chosen window ──
     sessions_today = (
         await db.execute(
             select(func.count(LearningSession.id)).where(
-                LearningSession.created_at >= today_start
+                LearningSession.created_at >= cutoff
             )
         )
     ).scalar() or 0
     sessions_yday = (
         await db.execute(
             select(func.count(LearningSession.id)).where(
-                LearningSession.created_at >= yday_start,
-                LearningSession.created_at < today_start,
+                LearningSession.created_at >= prior_cutoff,
+                LearningSession.created_at < cutoff,
             )
         )
     ).scalar() or 0
@@ -1659,14 +1693,14 @@ async def _compute_live_pulse(
         db, LearningSession.created_at, LearningSession.id.is_not(None), now
     )
 
-    # ── 3. Capstones submitted this week ──
+    # ── 3. Capstones submitted (window) ──
     capstones_wk = (
         await db.execute(
             select(func.count(ExerciseSubmission.id))
             .join(Exercise, Exercise.id == ExerciseSubmission.exercise_id)
             .where(
                 Exercise.is_capstone.is_(True),
-                ExerciseSubmission.created_at >= week_ago,
+                ExerciseSubmission.created_at >= cutoff,
             )
         )
     ).scalar() or 0
@@ -1676,8 +1710,8 @@ async def _compute_live_pulse(
             .join(Exercise, Exercise.id == ExerciseSubmission.exercise_id)
             .where(
                 Exercise.is_capstone.is_(True),
-                ExerciseSubmission.created_at >= two_weeks_ago,
-                ExerciseSubmission.created_at < week_ago,
+                ExerciseSubmission.created_at >= prior_cutoff,
+                ExerciseSubmission.created_at < cutoff,
             )
         )
     ).scalar() or 0
@@ -1701,19 +1735,19 @@ async def _compute_live_pulse(
         if 0 <= idx < 14:
             capstones_spark[idx] += 1
 
-    # ── 4. Promotions earned this week ──
+    # ── 4. Promotions earned (window) ──
     promotions_wk = (
         await db.execute(
             select(func.count(User.id)).where(
-                User.promoted_at >= week_ago,  # type: ignore[arg-type]
+                User.promoted_at >= cutoff,  # type: ignore[arg-type]
             )
         )
     ).scalar() or 0
     promotions_prior = (
         await db.execute(
             select(func.count(User.id)).where(
-                User.promoted_at >= two_weeks_ago,  # type: ignore[arg-type]
-                User.promoted_at < week_ago,  # type: ignore[arg-type]
+                User.promoted_at >= prior_cutoff,  # type: ignore[arg-type]
+                User.promoted_at < cutoff,  # type: ignore[arg-type]
             )
         )
     ).scalar() or 0
@@ -1782,25 +1816,33 @@ async def _compute_live_pulse(
 
     mrr_val, mrr_unit = mrr_display(mrr_dollars)
 
+    label_suffix = spec["label_suffix"]
+    delta_text_default = spec["delta_text"]
+    session_label = spec["session_label"]
+    session_delta_text = spec["session_delta_text"]
+    # Capstones / promotions use a "wk"-style unit; on 24h we want
+    # "today" instead of "wk", on 30d we want "mo".
+    unit_suffix = {"24h": " today", "7d": " wk", "30d": " mo"}.get(window, " wk")
+
     return [
         AdminConsolePulseCard(
             metric_key="active_24h",
-            label="Active learners (24h)",
+            label=f"Active learners {label_suffix}",
             value=_fmt_int(active_24h),
             unit="",
             delta=_delta_pct(active_24h, active_prior),
-            delta_text="vs yesterday",
+            delta_text=delta_text_default,
             color="#5fa37f",
             invert_delta=False,
             spark=active_spark,
         ),
         AdminConsolePulseCard(
             metric_key="sessions_today",
-            label="Sessions today",
+            label=session_label,
             value=_fmt_int(sessions_today),
             unit="",
             delta=_delta_pct(sessions_today, sessions_yday),
-            delta_text="vs yesterday",
+            delta_text=session_delta_text,
             color="#5fa37f",
             invert_delta=False,
             spark=sessions_spark,
@@ -1809,9 +1851,9 @@ async def _compute_live_pulse(
             metric_key="capstones_wk",
             label="Capstones submitted",
             value=_fmt_int(capstones_wk),
-            unit=" wk",
+            unit=unit_suffix,
             delta=_delta_pct(capstones_wk, capstones_prior),
-            delta_text="vs last week",
+            delta_text=delta_text_default,
             color="#5fa37f",
             invert_delta=False,
             spark=capstones_spark,
@@ -1820,9 +1862,9 @@ async def _compute_live_pulse(
             metric_key="promotions_wk",
             label="Promotions earned",
             value=_fmt_int(promotions_wk),
-            unit=" wk",
+            unit=unit_suffix,
             delta=_delta_pct(promotions_wk, promotions_prior),
-            delta_text="vs last week",
+            delta_text=delta_text_default,
             color="#d6a54d",
             invert_delta=False,
             spark=promotions_spark,
@@ -1844,7 +1886,7 @@ async def _compute_live_pulse(
             value=_fmt_int(at_risk_now),
             unit="",
             delta=_delta_pct(at_risk_now, at_risk_prior),
-            delta_text="vs last week",
+            delta_text="right now",
             color="#b8443a",
             invert_delta=True,
             spark=at_risk_spark,
@@ -1854,6 +1896,17 @@ async def _compute_live_pulse(
 
 @router.get("/console/v1", response_model=AdminConsoleResponse)
 async def get_admin_console(
+    window: str = Query(
+        "24h",
+        pattern="^(24h|7d|30d)$",
+        description=(
+            "Pulse-strip window: 24h (default), 7d, or 30d. Controls "
+            "the lookback for the activity-style cards (active learners, "
+            "sessions, capstones, promotions). MRR and at-risk count "
+            "are unaffected — they're a 30-day window and a snapshot, "
+            "respectively."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(_require_admin),
 ) -> AdminConsoleResponse:
@@ -1950,7 +2003,7 @@ async def get_admin_console(
     students.sort(key=lambda s: s.risk, reverse=True)
 
     # Pulse — LD-2: 6 cards computed from LIVE data with 14-day sparks.
-    pulse = await _compute_live_pulse(db, now)
+    pulse = await _compute_live_pulse(db, now, window)
 
     # Funnel — LD-3: live counts over the entire student population
     # (not a 30-day cohort — the marketing-funnel narrative the CEO

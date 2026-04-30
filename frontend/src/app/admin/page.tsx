@@ -176,6 +176,9 @@ export default function AdminConsoleV1Page() {
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "risk", dir: "desc" });
   const [search, setSearch] = useState("");
+  // Pulse-strip window selector. Drives the "Platform pulse" section's
+  // tab pills and round-trips to /console/v1?window=...
+  const [pulseWindow, setPulseWindow] = useState<"24h" | "7d" | "30d">("24h");
 
   // LD-1/LD-6: row-click on the roster opens the real
   // /admin/students/[id] page (live data, all five operator cards).
@@ -188,10 +191,17 @@ export default function AdminConsoleV1Page() {
   }
 
   const { data, isLoading, isError } = useQuery<ConsoleResponse>({
-    queryKey: ["admin", "console", "v1"],
-    queryFn: () => api.get<ConsoleResponse>("/api/v1/admin/console/v1"),
+    queryKey: ["admin", "console", "v1", pulseWindow],
+    queryFn: () =>
+      api.get<ConsoleResponse>(
+        `/api/v1/admin/console/v1?window=${pulseWindow}`,
+      ),
     refetchInterval: 60_000,
     staleTime: 30_000,
+    // Keep showing the previous window's data while the new one
+    // loads. Without this, switching tabs flashes the loading
+    // skeleton and the page jumps back to the top.
+    placeholderData: (previous) => previous,
   });
 
   const students = data?.students ?? [];
@@ -440,13 +450,30 @@ export default function AdminConsoleV1Page() {
             <section className={styles.section}>
               <div className={styles.sectionHead}>
                 <div>
-                  <div className={styles.sectionEyebrow}>Platform pulse · last 24 hours</div>
+                  <div className={styles.sectionEyebrow}>
+                    Platform pulse ·{" "}
+                    {pulseWindow === "24h"
+                      ? "last 24 hours"
+                      : pulseWindow === "7d"
+                      ? "last 7 days"
+                      : "last 30 days"}
+                  </div>
                   <div className={styles.sectionTitle}>How we&apos;re doing right now</div>
                 </div>
                 <div className={styles.sectionActions}>
-                  <button className={`${styles.tabPill} ${styles.on}`}>24h</button>
-                  <button className={styles.tabPill}>7d</button>
-                  <button className={styles.tabPill}>30d</button>
+                  {(["24h", "7d", "30d"] as const).map((w) => (
+                    <button
+                      key={w}
+                      type="button"
+                      onClick={() => setPulseWindow(w)}
+                      aria-pressed={pulseWindow === w}
+                      className={`${styles.tabPill} ${
+                        pulseWindow === w ? styles.on : ""
+                      }`}
+                    >
+                      {w}
+                    </button>
+                  ))}
                 </div>
               </div>
               <div className={styles.pulseStrip}>
