@@ -207,6 +207,16 @@ export function StudentDetailModal({
                     color: #f0e8d3 !important;
                     border-color: rgba(208, 212, 207, 0.18) !important;
                   }
+                  /* color-scheme: dark tells the browser to render
+                     native form chrome (the <select> popup, the
+                     scrollbar, the focus ring) in its dark variant
+                     from the first paint — without it, Chrome opens
+                     the popup in default light, then our CSS recolors
+                     the options a frame later, producing a visible
+                     white→dark flash. */
+                  .careerforge-modal-body select {
+                    color-scheme: dark;
+                  }
                   .careerforge-modal-body textarea::placeholder,
                   .careerforge-modal-body input::placeholder {
                     color: #8a9890 !important;
