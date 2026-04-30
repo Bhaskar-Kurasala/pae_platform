@@ -1,12 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
 import { buildCallInviteMailto } from "@/lib/calendar-mailto";
 import { RetentionPanels } from "./_components/retention-panels";
+import { StudentDetailModal } from "./_components/student-detail-modal";
 import styles from "./console.module.css";
 
 // The admin console is the canonical /admin entry — single production-quality
@@ -171,7 +171,6 @@ const TAG_LABELS: Record<string, string> = {
 
 export default function AdminConsoleV1Page() {
   const { user } = useAuthStore();
-  const router = useRouter();
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "risk", dir: "desc" });
@@ -180,14 +179,19 @@ export default function AdminConsoleV1Page() {
   // tab pills and round-trips to /console/v1?window=...
   const [pulseWindow, setPulseWindow] = useState<"24h" | "7d" | "30d">("24h");
 
-  // LD-1/LD-6: row-click on the roster opens the real
-  // /admin/students/[id] page (live data, all five operator cards).
-  // The legacy in-page modal was removed in LD-6 — the drilldown page
-  // is strictly better (it has Trigger agent, Refund offer, Admin
-  // notes, Direct message, Activity timeline; the modal had only
-  // hardcoded JS-built timelines).
-  function navigateToStudent(studentId: string) {
-    router.push(`/admin/students/${studentId}`);
+  // Side-drawer triage state. Replaces the previous full-page navigate
+  // — clicking a student card / roster row now opens a slide-in panel
+  // with all 5 operator cards (Trigger agent, Refund offer, Admin
+  // notes, Direct message, Activity timeline). The /admin/students/[id]
+  // route still exists for direct links / bookmarks; the drawer header
+  // exposes a "Full page ↗" link to it.
+  const [drawerStudentId, setDrawerStudentId] = useState<string | null>(null);
+
+  function openStudentDrawer(studentId: string) {
+    setDrawerStudentId(studentId);
+  }
+  function closeStudentDrawer() {
+    setDrawerStudentId(null);
   }
 
   const { data, isLoading, isError } = useQuery<ConsoleResponse>({
@@ -387,7 +391,7 @@ export default function AdminConsoleV1Page() {
                   <div
                     key={s.id}
                     className={`${styles.riskCard} ${styles.severe}`}
-                    onClick={() => navigateToStudent(s.id)}
+                    onClick={() => openStudentDrawer(s.id)}
                   >
                     <div className={styles.rcHead}>
                       <div className={styles.rcAvatar} style={{ background: avatarBg(s.id) }}>
@@ -415,7 +419,7 @@ export default function AdminConsoleV1Page() {
                         className={`${styles.rcBtn} ${styles.primary}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          navigateToStudent(s.id);
+                          openStudentDrawer(s.id);
                         }}
                       >
                         Open profile
@@ -679,7 +683,7 @@ export default function AdminConsoleV1Page() {
                         </tr>
                       ) : (
                         filtered.map((s) => (
-                          <tr key={s.id} onClick={() => navigateToStudent(s.id)}>
+                          <tr key={s.id} onClick={() => openStudentDrawer(s.id)}>
                             <td>
                               <div className={styles.trName}>
                                 <div
@@ -744,7 +748,7 @@ export default function AdminConsoleV1Page() {
                                 className={styles.trActionBtn}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  navigateToStudent(s.id);
+                                  openStudentDrawer(s.id);
                                 }}
                               >
                                 Open
@@ -776,7 +780,7 @@ export default function AdminConsoleV1Page() {
                     <div
                       key={c.student_id + c.time}
                       className={styles.callItem}
-                      onClick={() => navigateToStudent(c.student_id)}
+                      onClick={() => openStudentDrawer(c.student_id)}
                     >
                       <div className={styles.callTime}>{c.time}</div>
                       <div className={styles.callInfo}>
@@ -862,6 +866,19 @@ export default function AdminConsoleV1Page() {
         </div>
       )}
 
+      {/* Student detail modal — centered popup that rises into focus
+          when the admin clicks any student card / roster row.
+          Replaces the full-page navigate so the operator can act on
+          one student at a time without losing the cockpit context.
+          Theme-aware: matches the page's light/dark setting. */}
+      <StudentDetailModal
+        studentId={drawerStudentId}
+        open={drawerStudentId !== null}
+        onOpenChange={(o) => {
+          if (!o) closeStudentDrawer();
+        }}
+        pageTheme={theme}
+      />
     </div>
   );
 }
