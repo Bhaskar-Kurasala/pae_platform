@@ -1853,21 +1853,31 @@ async def get_admin_console(
 ) -> AdminConsoleResponse:
     """All data the v1 Admin Console needs in one round-trip.
 
-    LD-1 — Students roster + action band now read from LIVE data
-    (users + student_risk_signals), not the demo seed. Pulse / funnel /
-    features / calls / events / revenue still come from admin_console_*
-    seeded tables; they migrate to live data in LD-2 through LD-5.
+    LD-1..LD-5 (live data migration) and LD-7 (cleanup) — every block
+    on /admin now reads from live tables instead of the seeded
+    admin_console_* demo:
+
+      LD-1  students roster + action band → users + student_risk_signals
+      LD-2  pulse strip                   → agent_actions + learning_sessions
+                                            + exercise_submissions + users
+                                            + payments + student_risk_signals
+      LD-3  learner funnel                → users + goal_contracts +
+                                            student_progress + course_entitlements
+                                            + exercise_submissions
+      LD-4  feature pulse tiles           → srs_cards + agent_actions +
+                                            ai_reviews + notebook_entries +
+                                            exercise_submissions + jd_match_scores
+                                            + interview_sessions
+      LD-5  right rail (calls + events    → outreach_log + cohort_events +
+            + revenue)                      payments + refunds
+
+    The 8 admin_console_* tables and their seed script remain in the
+    schema for one more deploy as a safety net; they are dropped by
+    a follow-up alembic migration once this code soaks in production.
 
     One bulk endpoint keeps the page fast and avoids 8 separate
     auth round-trips.
     """
-    from app.models.admin_console import (
-        AdminConsoleCall,
-        AdminConsoleEvent,
-        AdminConsoleFeatureUsage,
-        AdminConsoleFunnelSnapshot,
-        AdminConsolePulseMetric,
-    )
     from app.models.student_risk_signals import StudentRiskSignals
 
     # Students — LIVE: users LEFT JOIN student_risk_signals.
