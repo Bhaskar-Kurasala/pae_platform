@@ -63,13 +63,27 @@ export function useAgentsHealth() {
   });
 }
 
-export function useAdminStudents(search: string = "") {
-  // DISC-56 — push the filter to the backend when the user types something;
-  // `q` is null-safe there, so an empty string falls back to the unfiltered
-  // list. React Query keys on `search` so each query is cached independently.
-  const params = search.trim() ? `?q=${encodeURIComponent(search.trim())}` : "";
+export type AdminStudentSort =
+  | "joined_asc"
+  | "joined_desc"
+  | "name_asc"
+  | "name_desc"
+  | "last_seen_asc"
+  | "last_seen_desc";
+
+export function useAdminStudents(
+  search: string = "",
+  sort: AdminStudentSort = "joined_desc",
+) {
+  // DISC-56 — push the filter to the backend when the user types something.
+  // F13 — sort param goes through the same query string.
+  const sp = new URLSearchParams();
+  if (search.trim()) sp.set("q", search.trim());
+  if (sort !== "joined_desc") sp.set("sort", sort);
+  const qs = sp.toString();
+  const params = qs ? `?${qs}` : "";
   return useQuery<AdminStudent[]>({
-    queryKey: ["admin", "students", search.trim()],
+    queryKey: ["admin", "students", search.trim(), sort],
     queryFn: () => api.get<AdminStudent[]>(`/api/v1/admin/students${params}`),
   });
 }
@@ -82,6 +96,25 @@ export function useStudentTimeline(studentId: string | null | undefined) {
         `/api/v1/admin/students/${studentId}/timeline`,
       ),
     enabled: !!studentId,
+  });
+}
+
+// F14 — fetch the next page of older timeline events. Caller passes the
+// `at` of the oldest event currently rendered as the cursor; backend
+// returns events strictly older than that.
+export function useStudentTimelineOlder(
+  studentId: string | null | undefined,
+  before: string | null,
+) {
+  return useQuery<StudentTimelineEvent[]>({
+    queryKey: ["admin", "students", studentId, "timeline", "before", before],
+    queryFn: () =>
+      api.get<StudentTimelineEvent[]>(
+        `/api/v1/admin/students/${studentId}/timeline?before=${encodeURIComponent(
+          before ?? "",
+        )}`,
+      ),
+    enabled: !!studentId && !!before,
   });
 }
 
@@ -191,18 +224,27 @@ export function useResolveFeedback() {
 }
 
 // ── Pulse dashboard (#180) ─────────────────────────────────────────
+export type PulseWindow = "24h" | "7d" | "30d";
+
 export interface PulseData {
-  active_students_24h: number;
-  agent_calls_24h: number;
-  avg_eval_score_24h: number;
+  window: PulseWindow;
+  active_students: number;
+  agent_calls: number;
+  avg_eval_score: number;
   new_enrollments_7d: number;
   open_feedback: number;
+  // Legacy keys — only present when window=24h. Don't read these in
+  // new code; window-aware components should use the unsuffixed keys.
+  active_students_24h?: number;
+  agent_calls_24h?: number;
+  avg_eval_score_24h?: number;
 }
 
-export function useAdminPulse() {
+export function useAdminPulse(window: PulseWindow = "24h") {
   return useQuery<PulseData>({
-    queryKey: ["admin", "pulse"],
-    queryFn: () => api.get<PulseData>("/api/v1/admin/pulse"),
+    queryKey: ["admin", "pulse", window],
+    queryFn: () =>
+      api.get<PulseData>(`/api/v1/admin/pulse?window=${window}`),
     refetchInterval: 60_000,
     staleTime: 30_000,
   });

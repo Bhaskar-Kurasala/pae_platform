@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
@@ -25,7 +25,9 @@ import {
   useSendRefundOffer,
   useStudentNotes,
   useStudentTimeline,
+  useStudentTimelineOlder,
   useTriggerAgent,
+  type StudentTimelineEvent,
 } from "@/lib/hooks/use-admin";
 import {
   useAdminMessagesForStudent,
@@ -102,6 +104,40 @@ export default function StudentDrilldownPage() {
   const [refundReason, setRefundReason] = useState<string>("");
   const [refundFlash, setRefundFlash] = useState<string | null>(null);
   const [dmDraft, setDmDraft] = useState<string>("");
+
+  // F14 — pagination state for older timeline events. `olderPages`
+  // holds successive `before=<cursor>` page results; `cursor` is the
+  // `at` of the oldest event currently on screen. `endReached` is set
+  // when a fetch returns fewer than the page size, so we hide the
+  // button.
+  const PAGE_SIZE = 50;
+  const [olderPages, setOlderPages] = useState<StudentTimelineEvent[][]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [endReached, setEndReached] = useState<boolean>(false);
+  const olderQuery = useStudentTimelineOlder(studentId, cursor);
+
+  useEffect(() => {
+    if (!cursor || !olderQuery.data) return;
+    setOlderPages((prev) => {
+      // Don't double-append on react-query refetches — match by cursor.
+      if (prev.length > 0 && prev[prev.length - 1][0]?.at === olderQuery.data[0]?.at) {
+        return prev;
+      }
+      return [...prev, olderQuery.data];
+    });
+    if (olderQuery.data.length < PAGE_SIZE) setEndReached(true);
+  }, [cursor, olderQuery.data]);
+
+  const allEvents: StudentTimelineEvent[] = useMemo(
+    () => [...timeline, ...olderPages.flat()],
+    [timeline, olderPages],
+  );
+
+  function handleLoadOlder() {
+    if (allEvents.length === 0) return;
+    const oldest = allEvents[allEvents.length - 1];
+    setCursor(oldest.at);
+  }
 
   async function handleSendRefundOffer() {
     if (!studentId) return;
@@ -495,26 +531,40 @@ export default function StudentDrilldownPage() {
                 <div key={i} className="h-10 animate-pulse rounded bg-muted" />
               ))}
             </div>
-          ) : timeline.length === 0 ? (
+          ) : allEvents.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-6">
               No activity yet.
             </p>
           ) : (
-            <ol className="space-y-2.5">
-              {timeline.map((ev, i) => (
-                <li key={`${ev.kind}-${ev.at}-${i}`} className="flex items-start gap-3 text-sm">
-                  <span className="mt-0.5 text-muted-foreground">
-                    <TimelineIcon kind={ev.kind} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium text-sm leading-tight">{ev.summary}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {new Date(ev.at).toLocaleString()}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ol>
+            <>
+              <ol className="space-y-2.5">
+                {allEvents.map((ev, i) => (
+                  <li key={`${ev.kind}-${ev.at}-${i}`} className="flex items-start gap-3 text-sm">
+                    <span className="mt-0.5 text-muted-foreground">
+                      <TimelineIcon kind={ev.kind} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-sm leading-tight">{ev.summary}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {new Date(ev.at).toLocaleString()}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+              {!endReached && (
+                <div className="mt-4 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={handleLoadOlder}
+                    disabled={olderQuery.isFetching}
+                    className="rounded-lg border border-border px-4 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-muted/50 disabled:opacity-50"
+                  >
+                    {olderQuery.isFetching ? "Loading…" : "Load older"}
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

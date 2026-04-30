@@ -206,6 +206,13 @@ async def list_students(
     skip: int = 0,
     limit: int = 50,
     q: str | None = Query(None, description="Case-insensitive substring match on email OR full_name"),
+    sort: str = Query(
+        "joined_desc",
+        description=(
+            "Sort key: joined_asc, joined_desc (default), name_asc, name_desc, "
+            "last_seen_asc, last_seen_desc"
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(_require_admin),
 ) -> list[dict[str, Any]]:
@@ -215,6 +222,11 @@ async def list_students(
     every student into the browser before filtering; past a few hundred rows
     that stops scaling. Passing `?q=autop` now narrows at the DB and keeps
     p95 well under the 500 ms SLO at any catalog size.
+
+    F13 — `sort` lets the operator order by joined date, name, or last
+    login. Sorting on lessons/agent_interactions is intentionally
+    client-side: those are derived per-row counts that don't index well
+    here, and the page is capped at `limit` rows anyway.
     """
     from app.models.student_progress import StudentProgress
 
@@ -224,7 +236,19 @@ async def list_students(
         stmt = stmt.where(
             func.lower(User.email).like(pattern) | func.lower(User.full_name).like(pattern)
         )
-    stmt = stmt.offset(skip).limit(limit).order_by(User.created_at.desc())
+
+    # F13 — sort whitelist. NULLS LAST on last_seen so never-logged-in
+    # students don't pollute the top of the asc list.
+    sort_map = {
+        "joined_asc": User.created_at.asc(),
+        "joined_desc": User.created_at.desc(),
+        "name_asc": func.lower(User.full_name).asc(),
+        "name_desc": func.lower(User.full_name).desc(),
+        "last_seen_asc": User.last_login_at.asc().nulls_last(),
+        "last_seen_desc": User.last_login_at.desc().nulls_last(),
+    }
+    order_by = sort_map.get(sort, User.created_at.desc())
+    stmt = stmt.offset(skip).limit(limit).order_by(order_by)
     students_result = await db.execute(stmt)
     students = list(students_result.scalars().all())
 
@@ -589,6 +613,14 @@ async def get_audit_log(
 async def get_student_timeline(
     student_id: uuid.UUID,
     limit: int = Query(50, ge=1, le=200),
+    before: datetime | None = Query(
+        None,
+        description=(
+            "F14 — paginate older. Returns events strictly older than this "
+            "ISO-8601 timestamp. Pass the `at` of the oldest event from the "
+            "previous page as a cursor."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(_require_admin),
 ) -> list[StudentTimelineEvent]:
@@ -598,6 +630,11 @@ async def get_student_timeline(
     submissions — and merges newest-first. `login` events are derived from
     `users.last_login_at` as a best-effort anchor since we don't persist a
     login-history table yet.
+
+    F14 — pagination via `?before=<iso-ts>` cursor. The page is the next
+    `limit` events strictly older than `before`. Skips the synthetic
+    "Last login" anchor on paginated requests since it's a single point,
+    not a series.
     """
     from app.models.exercise_submission import ExerciseSubmission
     from app.models.lesson import Lesson
@@ -606,14 +643,15 @@ async def get_student_timeline(
     await _require_student(db, student_id)
     events: list[StudentTimelineEvent] = []
 
-    agent_rows = (
-        await db.execute(
-            select(AgentAction)
-            .where(AgentAction.student_id == student_id)
-            .order_by(AgentAction.created_at.desc())
-            .limit(limit)
-        )
-    ).scalars().all()
+    agent_stmt = (
+        select(AgentAction)
+        .where(AgentAction.student_id == student_id)
+        .order_by(AgentAction.created_at.desc())
+        .limit(limit)
+    )
+    if before is not None:
+        agent_stmt = agent_stmt.where(AgentAction.created_at < before)
+    agent_rows = (await db.execute(agent_stmt)).scalars().all()
     for row in agent_rows:
         events.append(
             StudentTimelineEvent(
@@ -628,18 +666,19 @@ async def get_student_timeline(
             )
         )
 
-    lesson_rows = (
-        await db.execute(
-            select(StudentProgress, Lesson.title)
-            .join(Lesson, StudentProgress.lesson_id == Lesson.id)
-            .where(
-                StudentProgress.student_id == student_id,
-                StudentProgress.status == "completed",
-            )
-            .order_by(StudentProgress.completed_at.desc())
-            .limit(limit)
+    lesson_stmt = (
+        select(StudentProgress, Lesson.title)
+        .join(Lesson, StudentProgress.lesson_id == Lesson.id)
+        .where(
+            StudentProgress.student_id == student_id,
+            StudentProgress.status == "completed",
         )
-    ).all()
+        .order_by(StudentProgress.completed_at.desc())
+        .limit(limit)
+    )
+    if before is not None:
+        lesson_stmt = lesson_stmt.where(StudentProgress.completed_at < before)
+    lesson_rows = (await db.execute(lesson_stmt)).all()
     for rec, title in lesson_rows:
         if rec.completed_at is None:
             continue
@@ -652,14 +691,15 @@ async def get_student_timeline(
             )
         )
 
-    sub_rows = (
-        await db.execute(
-            select(ExerciseSubmission)
-            .where(ExerciseSubmission.student_id == student_id)
-            .order_by(ExerciseSubmission.created_at.desc())
-            .limit(limit)
-        )
-    ).scalars().all()
+    sub_stmt = (
+        select(ExerciseSubmission)
+        .where(ExerciseSubmission.student_id == student_id)
+        .order_by(ExerciseSubmission.created_at.desc())
+        .limit(limit)
+    )
+    if before is not None:
+        sub_stmt = sub_stmt.where(ExerciseSubmission.created_at < before)
+    sub_rows = (await db.execute(sub_stmt)).scalars().all()
     for sub in sub_rows:
         events.append(
             StudentTimelineEvent(
@@ -675,17 +715,21 @@ async def get_student_timeline(
             )
         )
 
-    user_row = (
-        await db.execute(select(User).where(User.id == student_id))
-    ).scalar_one_or_none()
-    if user_row and user_row.last_login_at:
-        events.append(
-            StudentTimelineEvent(
-                kind="login",
-                at=user_row.last_login_at,
-                summary="Last login",
+    # The synthetic "Last login" anchor is a single point in time, not a
+    # series — including it on every page would duplicate it forever.
+    # Only include on the first page (no `before` cursor).
+    if before is None:
+        user_row = (
+            await db.execute(select(User).where(User.id == student_id))
+        ).scalar_one_or_none()
+        if user_row and user_row.last_login_at:
+            events.append(
+                StudentTimelineEvent(
+                    kind="login",
+                    at=user_row.last_login_at,
+                    summary="Last login",
+                )
             )
-        )
 
     events.sort(key=lambda e: e.at, reverse=True)
     return events[:limit]
@@ -868,28 +912,48 @@ async def update_exercise_rubric(
 
 @router.get("/pulse")
 async def get_pulse(
+    window: str = Query(
+        "24h",
+        pattern="^(24h|7d|30d)$",
+        description="F12 — rolling window for activity metrics: 24h, 7d, or 30d.",
+    ),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(_require_admin),
 ) -> dict[str, Any]:
-    """5-metric platform health view (#180)."""
+    """5-metric platform health view (#180).
+
+    F12 — `window` controls active students / agent calls / avg eval
+    score windows. New enrollments stays 7d (it's a leading-edge funnel
+    signal, not an activity series), and open feedback is a snapshot
+    count regardless of window. Legacy `_24h` / `_7d` suffixed keys are
+    preserved for backwards-compat with any existing consumers; new
+    callers should read the unsuffixed keys + `window` field.
+    """
     from app.models.enrollment import Enrollment
     from app.models.feedback import Feedback
 
+    window_map = {
+        "24h": timedelta(hours=24),
+        "7d": timedelta(days=7),
+        "30d": timedelta(days=30),
+    }
+    delta = window_map[window]
+
     now = datetime.now(UTC)
-    day_ago = now - timedelta(hours=24)
+    cutoff = now - delta
     week_ago = now - timedelta(days=7)
 
     active_students: int = (
         await db.execute(
             select(func.count(func.distinct(AgentAction.student_id))).where(
-                AgentAction.created_at >= day_ago
+                AgentAction.created_at >= cutoff
             )
         )
     ).scalar() or 0
 
     agent_calls: int = (
         await db.execute(
-            select(func.count(AgentAction.id)).where(AgentAction.created_at >= day_ago)
+            select(func.count(AgentAction.id)).where(AgentAction.created_at >= cutoff)
         )
     ).scalar() or 0
 
@@ -898,7 +962,7 @@ async def get_pulse(
     avg_score_raw = (
         await db.execute(
             select(func.avg(AgentAction.duration_ms)).where(
-                AgentAction.created_at >= day_ago,
+                AgentAction.created_at >= cutoff,
                 AgentAction.duration_ms.isnot(None),
             )
         )
@@ -917,13 +981,27 @@ async def get_pulse(
         )
     ).scalar() or 0
 
-    log.info("admin.pulse_viewed", active_students=active_students)
+    log.info("admin.pulse_viewed", window=window, active_students=active_students)
     return {
-        "active_students_24h": active_students,
-        "agent_calls_24h": agent_calls,
-        "avg_eval_score_24h": avg_score,
+        "window": window,
+        "active_students": active_students,
+        "agent_calls": agent_calls,
+        "avg_eval_score": avg_score,
         "new_enrollments_7d": new_enrollments,
         "open_feedback": open_feedback,
+        # Legacy aliases — only populated for the 24h window so existing
+        # consumers reading `_24h` keys see the same value they did
+        # before. For 7d/30d these are intentionally absent so a stale
+        # consumer fails loudly instead of silently mixing windows.
+        **(
+            {
+                "active_students_24h": active_students,
+                "agent_calls_24h": agent_calls,
+                "avg_eval_score_24h": avg_score,
+            }
+            if window == "24h"
+            else {}
+        ),
     }
 
 
