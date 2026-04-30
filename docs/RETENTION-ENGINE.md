@@ -319,46 +319,46 @@ These ARE the product for inactive students. They're the only thing the student 
 
 ---
 
-### 🔲 F8 — In-app DM (real implementation)
+### ✅ F8 — In-app DM (real implementation)
 
-**Status:** Open
+**Status:** Closed by `c48f96d` (merged via `c673e5e`)
 **Depends on:** F3
 **Estimated:** 1.5 days
 **Why later:** Only useful for *active* students. The retention engine's first concern is *inactive* students. Build after F1-F6 ship.
 
-**What it builds:** `student_messages` table, banner notification on `/today`, `MessageThread` UI. Admin sends from `/admin/students/{id}` via a "Send DM" panel. Student sees on next login. Reply lands as an `outreach_log` `reply_at` flip.
+**What shipped:** `student_messages` table (alembic 0053, chained off F11's 0052), admin compose card on `/admin/students/{id}` alongside refund offer + admin notes. Student-side endpoints: unread-count poller, thread list, thread detail, reply, mark-read. Admin sends double-write to `outreach_log` for engagement attribution; student replies stamp `replied_at` on the most recent admin/system outreach. 8/8 service tests green.
 
 ---
 
-### 🔲 F9 — Nightly `disrupt_prevention_v2` Celery task
+### ✅ F9 — Nightly `disrupt_prevention_v2` Celery task
 
-**Status:** Open
+**Status:** Closed by `61ebcd8` (merged via `c673e5e`)
 **Depends on:** F1, F3, F5, F6
 **Estimated:** 4 hours
 **Why later:** Don't auto-send emails until F1-F6 are solid AND we've manually sent through the system at least 50 times. Otherwise we'll auto-send a bug to 100 students.
 
-**What it builds:** Reads `student_risk_signals` (F1), looks up the right `recommended_intervention`, calls `OutreachService.send_email()` (F5) using the right template (F6). Per-user throttle of 2 emails/week max regardless of slip type. Dry-run mode that logs to `outreach_log` with status=`would_send`.
+**What shipped:** `disrupt_prevention_v2_service.run_nightly_outreach` reads `student_risk_signals` (F1), dispatches via the slip-typed templates from F5/F6. Layered defenses: production gate (ENV=production AND OUTREACH_AUTO_SEND=1), per-template throttle (F3), global cap of 2/week per user (admin_manual sends excluded), excluded test/dev email suffixes, AUTOMATABLE_SLIPS allowlist of 6 slip types. Beat schedule entry `outreach-automation-nightly` at 09:00 UTC (6h after F1's 03:00 risk scoring, leaving an operator review window). 8/8 service tests green.
 
 ---
 
-### 🔲 F10 — Calendar integration (Cal.com or Google Calendar OAuth)
+### ✅ F10 — Calendar integration (mailto-shim)
 
-**Status:** Open
+**Status:** Closed by `a7762fb` (merged via `475591a`)
 **Estimated:** 1.5 days
 **Why later:** Required when you have >20 paid students. Until then, mailto: with subject "Quick check-in?" works.
 
-**What it builds:** Cal.com link generator + Google OAuth flow. "Schedule call" CTA generates a real calendar event with the student's email pre-filled.
+**What shipped:** `buildCallInviteMailto` helper + "Schedule call" CTA on `/admin/students/{id}` that generates a mailto URL with student email pre-filled and a slip-type-aware subject/body. Real Cal.com / OAuth integration deferred to Tier 3.
 
 ---
 
-### 🔲 F11 — Refund offer flow (Slip 4 day 14)
+### ✅ F11 — Refund offer flow (Slip 4 day 14)
 
-**Status:** Open
+**Status:** Closed by `1bc1c7e` (merged via `475591a`)
 **Depends on:** F9
 **Estimated:** 4 hours
 **Why later:** Risk of mis-firing — don't auto-offer refunds until you've validated the trigger by hand a few times.
 
-**What it builds:** When a Slip 4 student crosses day 14 with no engagement, system writes to `refund_offers` table (admin-reviewed before sending). Admin clicks "Send refund offer" on `/admin/students/{id}`, system sends a specific email + records to `outreach_log`.
+**What shipped:** `refund_offers` table (alembic 0052), admin-only refund offer card on `/admin/students/{id}` visible only when student is in the paid_silent risk panel. Admin clicks "Send refund offer", service writes the offer row + sends the templated email + records to `outreach_log`. Send failures keep the offer in `proposed` state for retry. 5/5 service tests green + 1 Playwright e2e.
 
 ---
 
