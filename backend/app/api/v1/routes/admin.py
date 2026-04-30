@@ -1134,68 +1134,82 @@ async def get_admin_console(
 ) -> AdminConsoleResponse:
     """All data the v1 Admin Console needs in one round-trip.
 
-    Pulls from the `admin_console_*` tables seeded by
-    `scripts.seed_admin_console`. One bulk endpoint keeps the page fast and
-    avoids 8 separate auth round-trips.
+    LD-1 — Students roster + action band now read from LIVE data
+    (users + student_risk_signals), not the demo seed. Pulse / funnel /
+    features / calls / events / revenue still come from admin_console_*
+    seeded tables; they migrate to live data in LD-2 through LD-5.
+
+    One bulk endpoint keeps the page fast and avoids 8 separate
+    auth round-trips.
     """
     from app.models.admin_console import (
         AdminConsoleCall,
-        AdminConsoleEngagement,
         AdminConsoleEvent,
         AdminConsoleFeatureUsage,
         AdminConsoleFunnelSnapshot,
-        AdminConsoleProfile,
         AdminConsolePulseMetric,
-        AdminConsoleRiskReason,
     )
+    from app.models.student_risk_signals import StudentRiskSignals
 
-    # Students — join profile + engagement + risk reason ────────────────
-    profile_rows = (
-        await db.execute(select(AdminConsoleProfile))
-    ).scalars().all()
-    engagement_rows = (
-        await db.execute(select(AdminConsoleEngagement))
+    # Students — LIVE: users LEFT JOIN student_risk_signals.
+    # Includes ALL students (paid or not, at-risk or not). The risk
+    # score is 0 for students with no signal row (treated as healthy
+    # until F1 nightly task scores them). Sorted by risk DESC so the
+    # action band's "top 3" picks the most urgent.
+    user_rows = (
+        await db.execute(
+            select(User)
+            .where(User.role == "student", User.is_deleted.is_(False))
+            .order_by(User.created_at.desc())
+        )
     ).scalars().all()
     risk_rows = (
-        await db.execute(select(AdminConsoleRiskReason))
+        await db.execute(select(StudentRiskSignals))
     ).scalars().all()
+    risk_by_uid = {r.user_id: r for r in risk_rows}
 
-    eng_by_sid = {e.student_id: e for e in engagement_rows}
-    risk_by_sid = {r.student_id: r.reason for r in risk_rows}
+    now = datetime.now(UTC)
 
-    student_ids = [p.student_id for p in profile_rows]
-    user_rows = (
-        await db.execute(select(User).where(User.id.in_(student_ids)))
-    ).scalars().all()
-    user_by_id = {u.id: u for u in user_rows}
+    def _last_seen_days(u: User) -> int:
+        if u.last_login_at is None:
+            # Never logged in — show as "days since signup" for the UI to
+            # render "Stale 71d" rather than "Today".
+            return max(0, (now - u.created_at).days)
+        return max(0, (now - u.last_login_at).days)
+
+    def _joined_label(u: User) -> str:
+        return u.created_at.strftime("%b %d")
 
     students: list[AdminConsoleStudent] = []
-    for p in profile_rows:
-        u = user_by_id.get(p.student_id)
-        e = eng_by_sid.get(p.student_id)
+    for u in user_rows:
+        risk = risk_by_uid.get(u.id)
         students.append(
             AdminConsoleStudent(
-                id=str(p.student_id),
-                name=u.full_name if u else "Unknown",
-                email=u.email if u else None,
-                track=p.track,
-                stage=p.stage,
-                progress=p.progress_pct,
-                streak=p.streak_days,
-                last_seen=p.last_seen_days,
-                risk=p.risk_score,
-                paid=p.paid,
-                joined=p.joined_label,
-                city=p.city,
-                sessions14=e.sessions_14d if e else 0,
-                flashcards=e.flashcards_14d if e else 0,
-                agent_q=e.agent_questions_14d if e else 0,
-                reviews=e.reviews_14d if e else 0,
-                notes=e.notes_14d if e else 0,
-                labs=e.labs_14d if e else 0,
-                capstones=e.capstones_14d if e else 0,
-                purchases=e.purchases_total if e else 0,
-                risk_reason=risk_by_sid.get(p.student_id),
+                id=str(u.id),
+                name=u.full_name or u.email,
+                email=u.email,
+                # Track / stage / progress aren't on the User row yet —
+                # placeholder until per-student rollups land in LD-4.
+                track="—",
+                stage="—",
+                progress=0,
+                streak=risk.max_streak_ever if risk else 0,
+                last_seen=risk.days_since_last_session
+                if (risk and risk.days_since_last_session is not None)
+                else _last_seen_days(u),
+                risk=risk.risk_score if risk else 0,
+                paid=risk.paid if risk else False,
+                joined=_joined_label(u),
+                city=None,
+                sessions14=0,
+                flashcards=0,
+                agent_q=0,
+                reviews=0,
+                notes=0,
+                labs=0,
+                capstones=0,
+                purchases=0,
+                risk_reason=risk.risk_reason if risk else None,
             )
         )
     students.sort(key=lambda s: s.risk, reverse=True)

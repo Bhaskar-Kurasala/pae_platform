@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
@@ -163,11 +164,20 @@ const TAG_LABELS: Record<string, string> = {
 
 export default function AdminConsoleV1Page() {
   const { user } = useAuthStore();
+  const router = useRouter();
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "risk", dir: "desc" });
   const [search, setSearch] = useState("");
   const [openStudentId, setOpenStudentId] = useState<string | null>(null);
+
+  // LD-1: row-click on the roster opens the real /admin/students/[id]
+  // page (live data, all five operator cards). The legacy in-page modal
+  // remains in this file for now; LD-6 either re-wires it to live data
+  // or removes it.
+  function navigateToStudent(studentId: string) {
+    router.push(`/admin/students/${studentId}`);
+  }
 
   const { data, isLoading, isError } = useQuery<ConsoleResponse>({
     queryKey: ["admin", "console", "v1"],
@@ -334,7 +344,7 @@ export default function AdminConsoleV1Page() {
                   <div
                     key={s.id}
                     className={`${styles.riskCard} ${styles.severe}`}
-                    onClick={() => setOpenStudentId(s.id)}
+                    onClick={() => navigateToStudent(s.id)}
                   >
                     <div className={styles.rcHead}>
                       <div className={styles.rcAvatar} style={{ background: avatarBg(s.id) }}>
@@ -362,7 +372,7 @@ export default function AdminConsoleV1Page() {
                         className={`${styles.rcBtn} ${styles.primary}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          setOpenStudentId(s.id);
+                          navigateToStudent(s.id);
                         }}
                       >
                         Open profile
@@ -609,7 +619,7 @@ export default function AdminConsoleV1Page() {
                         </tr>
                       ) : (
                         filtered.map((s) => (
-                          <tr key={s.id} onClick={() => setOpenStudentId(s.id)}>
+                          <tr key={s.id} onClick={() => navigateToStudent(s.id)}>
                             <td>
                               <div className={styles.trName}>
                                 <div
@@ -674,7 +684,7 @@ export default function AdminConsoleV1Page() {
                                 className={styles.trActionBtn}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setOpenStudentId(s.id);
+                                  navigateToStudent(s.id);
                                 }}
                               >
                                 Open
@@ -706,7 +716,7 @@ export default function AdminConsoleV1Page() {
                     <div
                       key={c.student_id + c.time}
                       className={styles.callItem}
-                      onClick={() => setOpenStudentId(c.student_id)}
+                      onClick={() => navigateToStudent(c.student_id)}
                     >
                       <div className={styles.callTime}>{c.time}</div>
                       <div className={styles.callInfo}>
