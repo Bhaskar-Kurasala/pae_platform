@@ -11,11 +11,16 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const { login, isAuthenticated, _hasHydrated } = useAuthStore();
+  const { login, isAuthenticated, user, _hasHydrated } = useAuthStore();
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextParam = sanitizeNext(searchParams?.get("next") ?? null);
-  const landing = nextParam ?? "/today";
+  // Role-aware landing: admins go to /admin, students to /today.
+  // An explicit ?next= always wins so deep links keep working
+  // (e.g. an admin clicking a /admin/students/<id> link from email).
+  const roleLanding =
+    user?.role === "admin" || user?.role === "instructor" ? "/admin" : "/today";
+  const landing = nextParam ?? roleLanding;
 
   useEffect(() => {
     if (_hasHydrated && isAuthenticated) {
@@ -29,7 +34,16 @@ function LoginForm() {
     setLoading(true);
     try {
       await login(email, password);
-      router.replace(landing);
+      // Re-read the store directly: login() awaits authApi.me() and
+      // sets `user` before resolving, so the role is available here.
+      // The local `user` reference closes over a stale render.
+      const fresh = useAuthStore.getState().user;
+      const postLoginLanding =
+        nextParam ??
+        (fresh?.role === "admin" || fresh?.role === "instructor"
+          ? "/admin"
+          : "/today");
+      router.replace(postLoginLanding);
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
