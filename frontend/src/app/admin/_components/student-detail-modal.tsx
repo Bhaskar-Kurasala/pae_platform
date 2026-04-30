@@ -28,9 +28,8 @@
  */
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
-import { ExternalLink, X } from "lucide-react";
+import { X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useAdminStudents } from "@/lib/hooks/use-admin";
 import { StudentDetailPanel } from "./student-detail-panel";
@@ -156,46 +155,26 @@ export function StudentDetailModal({
                 </div>
               )}
             </div>
-            {/* Right-side header controls */}
-            <div className="flex items-center gap-2 shrink-0 pt-0.5">
-              {studentId && (
-                <Link
-                  href={`/admin/students/${studentId}`}
-                  className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition"
-                  title="Open the full-page view (good for bookmarks or sharing a direct link)"
-                  style={{
-                    color: surface.ink2,
-                    border: `1px solid ${surface.border}`,
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = isDark
-                      ? "rgba(208,212,207,0.05)"
-                      : "rgba(26,38,32,0.04)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = "transparent";
-                  }}
-                >
-                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                  Full page
-                </Link>
-              )}
-              <DialogPrimitive.Close
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full transition outline-none"
-                aria-label="Close"
-                style={{ color: surface.ink2 }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = isDark
-                    ? "rgba(208,212,207,0.08)"
-                    : "rgba(26,38,32,0.06)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = "transparent";
-                }}
-              >
-                <X className="h-4 w-4" />
-              </DialogPrimitive.Close>
-            </div>
+            {/* Close button — Esc / backdrop click also work. The
+                "Full page" link was removed: the modal now contains
+                the same data the route page does, and the route is
+                still reachable via /admin/students/<id> for the rare
+                deep-link/share case. */}
+            <DialogPrimitive.Close
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full transition outline-none shrink-0"
+              aria-label="Close"
+              style={{ color: surface.ink2 }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = isDark
+                  ? "rgba(208,212,207,0.08)"
+                  : "rgba(26,38,32,0.06)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "transparent";
+              }}
+            >
+              <X className="h-4 w-4" />
+            </DialogPrimitive.Close>
           </div>
 
           {/* Body — scrollable */}
@@ -204,20 +183,84 @@ export function StudentDetailModal({
               className="flex-1 overflow-y-auto px-6 py-5"
               style={{ backgroundColor: surface.bg }}
             >
-              {/* Wrap the panel in a div that overrides the cards'
-                  bg-card with the modal surface, so cards sit on a
-                  slightly raised panelBg above the modal bg. */}
-              <div
-                style={
-                  {
-                    "--card": surface.panelBg,
-                    "--background": surface.bg,
-                    "--foreground": surface.ink,
-                    "--muted-foreground": surface.muted,
-                    "--border": surface.border,
-                  } as React.CSSProperties
-                }
-              >
+              {/* The shared <StudentDetailPanel> uses Tailwind tokens
+                  like bg-background / text-foreground / border-input
+                  that are tuned for the global light theme. When the
+                  page is in CareerForge dark, those tokens fall back
+                  to colors that vanish into our dark surface (textarea
+                  text reads black-on-near-black, the select renders
+                  as a black stripe, etc.).
+
+                  Rather than re-theming every utility class inside
+                  the panel, we scope a small CSS block to the modal's
+                  body when data-theme="dark" — explicit, isolated,
+                  and only affects content rendered inside this
+                  modal. */}
+              {isDark && (
+                <style>{`
+                  .careerforge-modal-body textarea,
+                  .careerforge-modal-body select,
+                  .careerforge-modal-body input[type="text"],
+                  .careerforge-modal-body input[type="email"],
+                  .careerforge-modal-body input[type="search"] {
+                    background-color: rgba(255, 255, 255, 0.04) !important;
+                    color: #f0e8d3 !important;
+                    border-color: rgba(208, 212, 207, 0.18) !important;
+                  }
+                  .careerforge-modal-body textarea::placeholder,
+                  .careerforge-modal-body input::placeholder {
+                    color: #8a9890 !important;
+                  }
+                  .careerforge-modal-body select option {
+                    background-color: #243430;
+                    color: #f0e8d3;
+                  }
+                  /* "Schedule call" link, "Load older" button, and any
+                     other ghost button rendered as a bordered link/btn. */
+                  .careerforge-modal-body a[href^="mailto:"],
+                  .careerforge-modal-body button.border,
+                  .careerforge-modal-body a.border {
+                    color: #f0e8d3 !important;
+                  }
+                  /* DM message body + admin notes saved rows: the panel
+                     uses bg-background/50 and bg-primary/5 which both
+                     render as near-black against our dark surface.
+                     Override the body text + the message bubble bg. */
+                  .careerforge-modal-body pre {
+                    color: #f0e8d3 !important;
+                  }
+                  .careerforge-modal-body li.rounded-lg {
+                    background-color: rgba(255, 255, 255, 0.03) !important;
+                    border-color: rgba(208, 212, 207, 0.14) !important;
+                  }
+                  /* The admin's own DM bubble had a primary-tint highlight
+                     in light mode; preserve the highlight in dark too. */
+                  .careerforge-modal-body li.border-primary\\/30 {
+                    background-color: rgba(95, 163, 127, 0.10) !important;
+                    border-color: rgba(95, 163, 127, 0.40) !important;
+                  }
+                  /* Card surface — sits one shade above the modal bg
+                     so cards have a subtle lift. */
+                  .careerforge-modal-body [data-slot="card"] {
+                    background-color: #243430 !important;
+                    border-color: rgba(208, 212, 207, 0.10) !important;
+                  }
+                  /* All small muted/timestamp text inside the modal
+                     was using text-muted-foreground which mapped to
+                     a near-black hex. Bump it to a readable dim. */
+                  .careerforge-modal-body .text-muted-foreground {
+                    color: #8a9890 !important;
+                  }
+                  .careerforge-modal-body .text-foreground,
+                  .careerforge-modal-body .font-semibold,
+                  .careerforge-modal-body h1,
+                  .careerforge-modal-body h2,
+                  .careerforge-modal-body p {
+                    color: #f0e8d3;
+                  }
+                `}</style>
+              )}
+              <div className="careerforge-modal-body">
                 <StudentDetailPanel
                   studentId={studentId}
                   hideHeader
