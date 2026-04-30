@@ -104,18 +104,25 @@ function avatarLabel(name: string): string {
     .toUpperCase();
 }
 
-function StudentRow({ s }: { s: RiskPanelStudent }) {
+function StudentRow({
+  s,
+  onOpen,
+}: {
+  s: RiskPanelStudent;
+  onOpen?: (id: string) => void;
+}) {
   // currentColor-based tints so the row reads correctly under both
   // the light Tailwind shell and the dark CareerForge console island.
-  return (
-    <Link
-      href={`/admin/students/${s.user_id}`}
-      className="flex items-center gap-3 rounded-lg border border-current/10 bg-current/[0.04] px-3 py-2.5 text-left transition hover:bg-current/[0.08]"
-    >
+  // Uses a button + onOpen callback when the parent provides one
+  // (modal-in-place flow on /admin), otherwise falls back to a
+  // route navigation so the component is still usable in other
+  // contexts (e.g. tests, alternate hosts).
+  const inner = (
+    <>
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-current/10 text-xs font-semibold">
         {avatarLabel(s.name)}
       </div>
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 text-left">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium">{s.name}</span>
           {s.paid && (
@@ -132,11 +139,35 @@ function StudentRow({ s }: { s: RiskPanelStudent }) {
         <div className="text-sm font-semibold tabular-nums">{s.risk_score}</div>
         <div className="text-[10px] uppercase opacity-60">risk</div>
       </div>
+    </>
+  );
+  const cls =
+    "flex w-full items-center gap-3 rounded-lg border border-current/10 bg-current/[0.04] px-3 py-2.5 text-left transition hover:bg-current/[0.08]";
+  if (onOpen) {
+    return (
+      <button type="button" onClick={() => onOpen(s.user_id)} className={cls}>
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <Link href={`/admin/students/${s.user_id}`} className={cls}>
+      {inner}
     </Link>
   );
 }
 
-function Panel({ def, panel }: { def: PanelDef; panel: RiskPanels[keyof RiskPanels] }) {
+function Panel({
+  def,
+  panel,
+  onSeeAll,
+  onOpenStudent,
+}: {
+  def: PanelDef;
+  panel: RiskPanels[keyof RiskPanels];
+  onSeeAll?: (slipKey: keyof RiskPanels) => void;
+  onOpenStudent?: (id: string) => void;
+}) {
   const Icon = def.icon;
   return (
     <section
@@ -170,23 +201,52 @@ function Panel({ def, panel }: { def: PanelDef; panel: RiskPanels[keyof RiskPane
       ) : (
         <div className="space-y-1.5">
           {panel.students.slice(0, 5).map((s) => (
-            <StudentRow key={s.user_id} s={s} />
+            <StudentRow key={s.user_id} s={s} onOpen={onOpenStudent} />
           ))}
-          {panel.total > 5 && (
-            <Link
-              href={`/admin/students?slip_type=${def.key}`}
-              className="block rounded-lg py-1.5 text-center text-xs font-medium text-emerald-500 hover:underline"
-            >
-              See all {panel.total} →
-            </Link>
-          )}
+          {panel.total > 5 &&
+            (onSeeAll ? (
+              <button
+                type="button"
+                onClick={() => onSeeAll(def.key)}
+                className="block w-full rounded-lg py-1.5 text-center text-xs font-medium text-emerald-500 hover:underline"
+              >
+                See all {panel.total} →
+              </button>
+            ) : (
+              <Link
+                href={`/admin/students?slip_type=${def.key}`}
+                className="block rounded-lg py-1.5 text-center text-xs font-medium text-emerald-500 hover:underline"
+              >
+                See all {panel.total} →
+              </Link>
+            ))}
         </div>
       )}
     </section>
   );
 }
 
-export function RetentionPanels() {
+interface RetentionPanelsProps {
+  /**
+   * Called when the operator clicks "See all N →" on a panel. Lets
+   * the parent /admin page scroll the existing roster into view +
+   * apply a slip-type filter chip — no navigation. When omitted,
+   * the link falls back to /admin/students?slip_type=… for use in
+   * standalone contexts.
+   */
+  onSeeAll?: (slipKey: keyof RiskPanels) => void;
+  /**
+   * Called when the operator clicks a student row inside a panel.
+   * Same pattern: parent opens the modal in place. When omitted,
+   * row click navigates to /admin/students/[id].
+   */
+  onOpenStudent?: (id: string) => void;
+}
+
+export function RetentionPanels({
+  onSeeAll,
+  onOpenStudent,
+}: RetentionPanelsProps = {}) {
   const { data, isLoading, isError, error } = useRiskPanels();
 
   if (isLoading) {
@@ -220,7 +280,13 @@ export function RetentionPanels() {
       </div>
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
         {PANEL_ORDER.map((def) => (
-          <Panel key={def.key} def={def} panel={data[def.key]} />
+          <Panel
+            key={def.key}
+            def={def}
+            panel={data[def.key]}
+            onSeeAll={onSeeAll}
+            onOpenStudent={onOpenStudent}
+          />
         ))}
       </div>
     </section>

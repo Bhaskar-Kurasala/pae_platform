@@ -7,6 +7,7 @@ import { useAuthStore } from "@/stores/auth-store";
 import { buildCallInviteMailto } from "@/lib/calendar-mailto";
 import { RetentionPanels } from "./_components/retention-panels";
 import { StudentDetailModal } from "./_components/student-detail-modal";
+import { useRiskPanels } from "@/lib/hooks/use-admin";
 import styles from "./console.module.css";
 
 // The admin console is the canonical /admin entry — single production-quality
@@ -155,7 +156,24 @@ function sparkPath(data: number[], w = 120, h = 24): { line: string; area: strin
   return { line, area };
 }
 
-type FilterKey = "all" | "severe" | "high" | "paid-stalled" | "thriving" | "new";
+// Filter chips. The first 6 are general-purpose (risk tier / paid /
+// thriving / recently joined). The "slip:*" prefixed keys correspond
+// to the F1 retention slip patterns and are added by the retention
+// panels' "See all N →" buttons (which scroll the operator down to
+// this filter row + auto-apply the matching chip — no nav).
+type FilterKey =
+  | "all"
+  | "severe"
+  | "high"
+  | "paid-stalled"
+  | "thriving"
+  | "new"
+  | "slip:paid_silent"
+  | "slip:capstone_stalled"
+  | "slip:streak_broken"
+  | "slip:promotion_avoidant"
+  | "slip:cold_signup"
+  | "slip:unpaid_stalled";
 type SortKey = "name" | "role" | "stage" | "progress" | "streak" | "last" | "risk";
 type SortDir = "asc" | "desc";
 
@@ -227,6 +245,41 @@ export default function AdminConsoleV1Page() {
     [students],
   );
 
+  // Risk panel data — the F1 slip patterns. Used to drive the
+  // slip-type filter chips on the roster (so "See all 92 →" can
+  // apply a slip filter without leaving the page) and to count
+  // students per slip pattern for the chip labels.
+  const { data: riskPanelsData } = useRiskPanels();
+  const slipUserIds = useMemo(() => {
+    const out: Record<string, Set<string>> = {};
+    if (!riskPanelsData) return out;
+    for (const slipKey of [
+      "paid_silent",
+      "capstone_stalled",
+      "streak_broken",
+      "promotion_avoidant",
+      "cold_signup",
+    ] as const) {
+      const panel = riskPanelsData[slipKey];
+      out[slipKey] = new Set((panel?.students ?? []).map((s) => s.user_id));
+    }
+    return out;
+  }, [riskPanelsData]);
+  const slipCounts = useMemo(() => {
+    const out: Record<string, number> = {};
+    if (!riskPanelsData) return out;
+    for (const slipKey of [
+      "paid_silent",
+      "capstone_stalled",
+      "streak_broken",
+      "promotion_avoidant",
+      "cold_signup",
+    ] as const) {
+      out[slipKey] = riskPanelsData[slipKey]?.total ?? 0;
+    }
+    return out;
+  }, [riskPanelsData]);
+
   const filtered = useMemo(() => {
     let list = [...students];
     // Filters use the same risk thresholds as riskTier() so the tier
@@ -247,6 +300,14 @@ export default function AdminConsoleV1Page() {
         return !isNaN(joinedDate.valueOf()) && joinedDate.getTime() >= sevenDaysAgo;
       });
     }
+    // Slip-pattern filter chips driven by F1 retention engine. Match
+    // by user_id against the panel's student list (loaded via the
+    // already-cached useRiskPanels hook).
+    else if (filter.startsWith("slip:")) {
+      const slipKey = filter.slice(5);
+      const ids = slipUserIds[slipKey];
+      if (ids) list = list.filter((s) => ids.has(s.id));
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter((s) => s.name.toLowerCase().includes(q));
@@ -263,7 +324,7 @@ export default function AdminConsoleV1Page() {
       return (a.risk - b.risk) * dir;
     });
     return list;
-  }, [students, filter, search, sort]);
+  }, [students, filter, search, sort, slipUserIds]);
 
   const onSortClick = (k: SortKey) => {
     setSort((cur) => {
@@ -345,7 +406,20 @@ export default function AdminConsoleV1Page() {
                 so the cohort behavior data still shows up while we
                 accumulate real signals. */}
             <section style={{ marginBottom: 32 }}>
-              <RetentionPanels />
+              <RetentionPanels
+                onSeeAll={(slipKey) => {
+                  // Apply the matching slip-type filter chip on the
+                  // roster + smooth-scroll the operator down to it.
+                  // No nav, no separate page — the operator stays
+                  // in the cockpit context.
+                  setFilter(`slip:${slipKey}` as FilterKey);
+                  setSort({ key: "risk", dir: "desc" });
+                  document
+                    .getElementById("studentSection")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+                onOpenStudent={(id) => openStudentDrawer(id)}
+              />
             </section>
 
             {/* ACTION BAND */}
@@ -606,27 +680,55 @@ export default function AdminConsoleV1Page() {
               <div className={styles.tableCard}>
                 <div className={styles.tableToolbar}>
                   <div className={styles.ttFilter}>
+                    {/* Risk-tier + general chips. */}
                     {(
                       [
-                        ["all", "All"],
-                        ["severe", "Severe risk"],
-                        ["high", "High risk"],
-                        ["paid-stalled", "Paid + stalled"],
-                        ["thriving", "Thriving"],
-                        ["new", "Joined < 7d"],
+                        ["all", "All", students.length],
+                        ["severe", "Severe risk", null],
+                        ["high", "High risk", null],
+                        ["paid-stalled", "Paid + stalled", null],
+                        ["thriving", "Thriving", null],
+                        ["new", "Joined < 7d", null],
                       ] as const
-                    ).map(([key, label]) => (
+                    ).map(([key, label, count]) => (
                       <button
                         key={key}
                         className={`${styles.filterChip} ${filter === key ? styles.on : ""}`}
                         onClick={() => setFilter(key)}
                       >
                         {label}
-                        {key === "all" && (
-                          <span className={styles.ttCount}>{students.length}</span>
+                        {count !== null && (
+                          <span className={styles.ttCount}>{count}</span>
                         )}
                       </button>
                     ))}
+                    {/* Slip-pattern chips — only render when the F1
+                        nightly task has flagged at least one student
+                        with this pattern. Keeps the chip row clean
+                        in early days when most patterns are empty. */}
+                    {(
+                      [
+                        ["slip:paid_silent", "Paid + silent"],
+                        ["slip:capstone_stalled", "Capstone stalled"],
+                        ["slip:streak_broken", "Streak broken"],
+                        ["slip:promotion_avoidant", "Ready but stalled"],
+                        ["slip:cold_signup", "Never returned"],
+                      ] as const
+                    ).map(([key, label]) => {
+                      const slipKey = key.slice(5);
+                      const count = slipCounts[slipKey] ?? 0;
+                      if (count === 0) return null;
+                      return (
+                        <button
+                          key={key}
+                          className={`${styles.filterChip} ${filter === key ? styles.on : ""}`}
+                          onClick={() => setFilter(key)}
+                        >
+                          {label}
+                          <span className={styles.ttCount}>{count}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                   <div className={styles.ttSearch}>
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

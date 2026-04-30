@@ -306,6 +306,36 @@ export function StudentDetailModal({
                     color: ${surface.ink} !important;
                     border-color: ${surface.border} !important;
                   }
+                  /* shadcn Select popup is portal-rendered outside the
+                     modal — to match the cockpit forest panel + chiselled
+                     edge we target it globally while the page is in dark
+                     (the modal's open-effect adds .dark to <html>). */
+                  html.dark [data-slot="select-content"] {
+                    background-color: ${surface.panelBg} !important;
+                    color: ${surface.ink} !important;
+                    border: 1px solid ${surface.border} !important;
+                    box-shadow:
+                      0 24px 48px rgba(0, 0, 0, 0.5),
+                      inset 0 1px 0 ${surface.borderTop} !important;
+                  }
+                  html.dark [data-slot="select-trigger"] {
+                    background-color: rgba(255, 255, 255, 0.03) !important;
+                    border-color: ${surface.border} !important;
+                    color: ${surface.ink} !important;
+                  }
+                  html.dark [data-slot="select-trigger"]:hover {
+                    background-color: rgba(255, 255, 255, 0.06) !important;
+                  }
+                  html.dark [data-slot="select-item"] {
+                    color: ${surface.ink};
+                  }
+                  html.dark [data-slot="select-item"][data-highlighted] {
+                    background-color: rgba(95, 163, 127, 0.15) !important;
+                    color: ${surface.ink} !important;
+                  }
+                  html.dark [data-slot="select-item"][data-selected] {
+                    color: #5fa37f !important;
+                  }
                   .careerforge-modal-body textarea:focus,
                   .careerforge-modal-body input:focus {
                     border-color: rgba(95, 163, 127, 0.40) !important;
