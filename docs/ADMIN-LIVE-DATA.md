@@ -45,9 +45,30 @@ The fix: keep the visual layout (it's good), swap the data source on each block 
 
 ---
 
+## Status
+
+**All 7 tickets shipped on `feat/ld-1-action-band-roster-live` branch.**
+
+| Ticket | Status | Commit |
+|---|---|---|
+| LD-1 — action band + roster + click-thru | ✅ | `e8135a0` |
+| LD-2 — pulse strip live with sparklines | ✅ | `ed0a699` |
+| LD-3 — learner funnel real counts | ✅ | `2569afd` |
+| LD-4 — feature pulse 8 tiles live | ✅ | `84b5b93` |
+| LD-5 — right rail (calls + events + revenue) | ✅ | `c24dae0` |
+| LD-6 — remove legacy student modal | ✅ | `56f9d5a` |
+| LD-7 — drop unused admin_console_* imports | ✅ | `ac90c44` |
+
+The legacy demo console v1 is now 100% sourced from live tables. The
+8 admin_console_* tables and seed_admin_console.py script remain in
+the schema for one more deploy as a safety net; a follow-up alembic
+migration will drop them after this code soaks in production.
+
+---
+
 ## Tickets
 
-### 🔲 LD-1 — Wire action band + roster to retention engine
+### ✅ LD-1 — Wire action band + roster to retention engine
 **Effort:** ~½ day
 **Depends on:** F1 (live), F4 (live)
 **Owner:** main session (foreground)
@@ -64,7 +85,7 @@ The fix: keep the visual layout (it's good), swap the data source on each block 
 
 ---
 
-### 🔲 LD-2 — Pulse strip with sparklines (live)
+### ✅ LD-2 — Pulse strip with sparklines (live)
 **Effort:** ~1 day
 **Depends on:** F12 (live)
 **Owner:** parallel agent
@@ -87,7 +108,7 @@ The fix: keep the visual layout (it's good), swap the data source on each block 
 
 ---
 
-### 🔲 LD-3 — Learner funnel real counts
+### ✅ LD-3 — Learner funnel real counts
 **Effort:** ~½ day
 **Depends on:** none
 **Owner:** parallel agent
@@ -110,7 +131,7 @@ The fix: keep the visual layout (it's good), swap the data source on each block 
 
 ---
 
-### 🔲 LD-4 — Feature pulse tiles (8 metrics)
+### ✅ LD-4 — Feature pulse tiles (8 metrics)
 **Effort:** ~1 day
 **Depends on:** none
 **Owner:** parallel agent
@@ -142,7 +163,7 @@ The fix: keep the visual layout (it's good), swap the data source on each block 
 
 ---
 
-### 🔲 LD-5 — Right rail: today's calls + live event feed + revenue
+### ✅ LD-5 — Right rail: today's calls + live event feed + revenue
 **Effort:** ~1 day
 **Depends on:** LD-1 (for outreach_log shape)
 **Owner:** sequential after LD-1
@@ -170,7 +191,7 @@ The fix: keep the visual layout (it's good), swap the data source on each block 
 
 ---
 
-### 🔲 LD-6 — Wire student modal to live drilldown
+### ✅ LD-6 — Wire student modal to live drilldown
 **Effort:** ~½ day
 **Depends on:** LD-1
 **Owner:** sequential after LD-1
@@ -196,7 +217,7 @@ The fix: keep the visual layout (it's good), swap the data source on each block 
 
 ---
 
-### 🔲 LD-7 — Retire `admin_console_*` demo tables
+### ✅ LD-7 — Retire `admin_console_*` demo tables
 **Effort:** ~½ day
 **Depends on:** LD-1 → LD-6 all merged and verified
 **Owner:** cleanup commit
