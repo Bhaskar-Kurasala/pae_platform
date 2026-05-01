@@ -175,6 +175,7 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.path_summary import router as path_summary_router
     from app.api.v1.routes.promotion_summary import router as promotion_summary_router
     from app.api.v1.routes.webhooks import router as webhooks_router
+    from app.api.v1.routes.agentic_webhooks import router as agentic_webhooks_router
     from app.api.v1.routes.feedback import router as feedback_router
     from app.api.v1.routes.mock_interview import router as mock_interview_router
     from app.api.v1.routes.tailored_resume import router as tailored_resume_router
@@ -197,6 +198,7 @@ def create_app() -> FastAPI:
         exercises_router,
         students_router,
         webhooks_router,
+        agentic_webhooks_router,
         agents_router,
         stream_router,
         chat_stream_router,

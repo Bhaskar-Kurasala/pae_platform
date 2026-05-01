@@ -15,6 +15,11 @@ celery_app = Celery(
         "app.tasks.inactivity_sweep",
         "app.tasks.risk_scoring",
         "app.tasks.outreach_automation",
+        # Agentic OS — concrete body for the proactive primitive's
+        # task name. Registered as a normal Celery task; beat
+        # entries built by `register_proactive_schedules` (below)
+        # target this name.
+        "app.tasks.proactive_runner",
     ],
 )
 
@@ -68,3 +73,54 @@ celery_app.conf.update(
         },
     },
 )
+
+
+# ── Agentic OS boot-order hook ──────────────────────────────────────
+#
+# Beat reads `celery_app.conf.beat_schedule` once at scheduler boot
+# and ignores anything registered afterward. So the order is fixed:
+#
+#   1. Import agentic agent modules — fires `__init_subclass__` and
+#      any `@proactive(...)` decorators inside them, populating the
+#      module-level `_proactive_schedules` list.
+#   2. `register_proactive_schedules(celery_app)` merges those
+#      entries into `celery_app.conf.beat_schedule`.
+#   3. Celery beat starts and reads the merged dict.
+#
+# A swallowed import error in step 1 means a proactive flow silently
+# stops working. `load_agentic_agents` re-raises with module
+# context, so any breakage shows up in the beat boot logs as
+# `AgenticAgentImportError: failed to import agent module ...`.
+#
+# Wrapping in a try/except here would defeat the loud-fail
+# contract — let the exception propagate. Beat will refuse to start
+# (which is what we want; a partial agent set is worse than no
+# agents).
+def _boot_agentic_os() -> None:
+    """Wire the agentic OS into Celery beat at module import time.
+
+    Called once when this module is imported (which Celery itself
+    does on worker / beat boot). The function is idempotent:
+    re-entry is safe because `load_agentic_agents` uses
+    `importlib.import_module` (cached) and
+    `register_proactive_schedules` merges into the existing dict.
+    """
+    from app.agents._agentic_loader import load_agentic_agents
+    from app.agents.primitives.proactive import register_proactive_schedules
+
+    load_agentic_agents()
+    register_proactive_schedules(celery_app)
+
+
+# INTENTIONALLY UNWRAPPED — DO NOT add try/except around this call.
+#
+# A swallowed import error here means a proactive flow silently
+# stops working in prod and nobody notices for a week. The
+# loud-fail contract is described in `_agentic_loader.py` and the
+# trace-semantics section of `AGENTIC_OS.md`.
+#
+# If a "wrap this for resilience" instinct fires while reading this,
+# read the conventions doc first. Resilience here is wrong: a partial
+# agent set is worse than no agents, and we need beat to refuse to
+# start when an agent module is broken.
+_boot_agentic_os()
