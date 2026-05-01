@@ -634,6 +634,94 @@ async def get_audit_log(
 # ── DISC-55: Student activity timeline ──────────────────────────────────────
 
 
+# Friendly labels for every agent the student can interact with. The
+# timeline becomes prose ("Generated a weekly progress report") instead
+# of raw audit-log identifiers ("Agent `progress_report` (completed)").
+# Add new agents here as they ship.
+_AGENT_VERBS: dict[str, str] = {
+    "adaptive_path": "Suggested a learning path",
+    "adaptive_quiz": "Ran an adaptive quiz",
+    "billing_support": "Answered a billing question",
+    "career_coach": "Coached on career direction",
+    "code_review": "Reviewed a code submission",
+    "coding_assistant": "Helped debug code",
+    "community_celebrator": "Celebrated a milestone",
+    "content_ingestion": "Ingested new course content",
+    "curriculum_mapper": "Mapped curriculum",
+    "deep_capturer": "Captured a weekly synthesis",
+    "disrupt_prevention": "Sent a re-engagement nudge",
+    "job_match": "Matched against open roles",
+    "knowledge_graph": "Updated the knowledge graph",
+    "mcq_factory": "Generated quiz questions",
+    "mock_interview": "Ran a mock interview",
+    "moa": "Routed a request",
+    "peer_matching": "Matched with study peers",
+    "portfolio_builder": "Built a portfolio entry",
+    "progress_report": "Generated a weekly progress report",
+    "project_evaluator": "Evaluated a project",
+    "socratic_tutor": "Answered with the Socratic tutor",
+    "spaced_repetition": "Scheduled spaced-repetition review",
+    "student_buddy": "Gave a quick explanation",
+}
+
+
+def _humanize_agent_event(agent_name: str, status: str) -> str:
+    """Turn an agent_action row into prose.
+
+    Examples:
+      ("disrupt_prevention", "completed")    → "Sent a re-engagement nudge"
+      ("progress_report",     "failed")      → "Weekly progress report failed to run"
+      ("unknown_agent",       "completed")   → "Ran the unknown_agent agent"
+    """
+    verb = _AGENT_VERBS.get(agent_name)
+    if verb is None:
+        # Fallback for agents not yet in the map — humanize the key but
+        # keep the snake_case readable rather than backtick-quoting it.
+        pretty = agent_name.replace("_", " ")
+        verb = f"Ran the {pretty} agent"
+    if status == "completed":
+        return verb
+    if status == "failed":
+        # Lowercase the first word so "X failed to run" reads naturally.
+        first, _, rest = verb.partition(" ")
+        return f"{first.lower()} {rest} — failed to run".capitalize()
+    # Pending / running / cancelled — surface status as a soft suffix.
+    return f"{verb} ({status})"
+
+
+def _humanize_submission(
+    lab_title: str | None, status: str, score: int | None
+) -> str:
+    """Turn an exercise_submission row into prose.
+
+    Examples:
+      ("Async retries", "passed",  91) → "Passed “Async retries” with score 91 / 100"
+      ("Async retries", "failed",  None) → "Submitted “Async retries” — needs another try"
+      (None,            "graded",  85) → "Submission graded · score 85"
+    """
+    title_quoted = f"“{lab_title}”" if lab_title else None
+    if status == "passed":
+        if score is not None and title_quoted:
+            return f"Passed {title_quoted} with score {score} / 100"
+        if score is not None:
+            return f"Passed a lab with score {score} / 100"
+        return f"Passed {title_quoted}" if title_quoted else "Passed a lab"
+    if status == "failed":
+        if title_quoted:
+            return f"Submitted {title_quoted} — needs another try"
+        return "Submitted a lab — needs another try"
+    if status == "graded":
+        if score is not None and title_quoted:
+            return f"Graded {title_quoted} · score {score} / 100"
+        if score is not None:
+            return f"Submission graded · score {score} / 100"
+        return f"Graded {title_quoted}" if title_quoted else "Submission graded"
+    # pending / submitted / etc. — neutral phrasing.
+    if title_quoted:
+        return f"Submitted {title_quoted}"
+    return "Submitted a lab"
+
+
 @router.get(
     "/students/{student_id}/timeline",
     response_model=list[StudentTimelineEvent],
@@ -664,6 +752,7 @@ async def get_student_timeline(
     "Last login" anchor on paginated requests since it's a single point,
     not a series.
     """
+    from app.models.exercise import Exercise
     from app.models.exercise_submission import ExerciseSubmission
     from app.models.lesson import Lesson
     from app.models.student_progress import StudentProgress
@@ -685,7 +774,7 @@ async def get_student_timeline(
             StudentTimelineEvent(
                 kind="agent_action",
                 at=row.created_at,
-                summary=f"Agent `{row.agent_name}` ({row.status})",
+                summary=_humanize_agent_event(row.agent_name, row.status),
                 detail={
                     "agent_name": row.agent_name,
                     "duration_ms": row.duration_ms,
@@ -720,21 +809,21 @@ async def get_student_timeline(
         )
 
     sub_stmt = (
-        select(ExerciseSubmission)
+        select(ExerciseSubmission, Exercise.title)
+        .join(Exercise, ExerciseSubmission.exercise_id == Exercise.id)
         .where(ExerciseSubmission.student_id == student_id)
         .order_by(ExerciseSubmission.created_at.desc())
         .limit(limit)
     )
     if before is not None:
         sub_stmt = sub_stmt.where(ExerciseSubmission.created_at < before)
-    sub_rows = (await db.execute(sub_stmt)).scalars().all()
-    for sub in sub_rows:
+    sub_rows = (await db.execute(sub_stmt)).all()
+    for sub, lab_title in sub_rows:
         events.append(
             StudentTimelineEvent(
                 kind="submission",
                 at=sub.created_at,
-                summary=f"Submission · status={sub.status}"
-                + (f" · score={sub.score}" if sub.score is not None else ""),
+                summary=_humanize_submission(lab_title, sub.status, sub.score),
                 detail={
                     "exercise_id": str(sub.exercise_id),
                     "status": sub.status,
@@ -755,7 +844,7 @@ async def get_student_timeline(
                 StudentTimelineEvent(
                     kind="login",
                     at=user_row.last_login_at,
-                    summary="Last login",
+                    summary="Last signed in",
                 )
             )
 

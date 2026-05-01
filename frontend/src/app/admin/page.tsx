@@ -8,6 +8,7 @@ import { buildCallInviteMailto } from "@/lib/calendar-mailto";
 import { RetentionPanels } from "./_components/retention-panels";
 import { StudentDetailModal } from "./_components/student-detail-modal";
 import { useRiskPanels } from "@/lib/hooks/use-admin";
+import { useAdminTheme } from "@/lib/hooks/use-admin-theme";
 import styles from "./console.module.css";
 
 // The admin console is the canonical /admin entry — single production-quality
@@ -189,7 +190,10 @@ const TAG_LABELS: Record<string, string> = {
 
 export default function AdminConsoleV1Page() {
   const { user } = useAuthStore();
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  // Theme persists in localStorage and broadcasts to other admin
+  // pages + the student detail modal so the cockpit's choice follows
+  // the operator everywhere in the admin section.
+  const { theme, toggleTheme } = useAdminTheme();
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "risk", dir: "desc" });
   const [search, setSearch] = useState("");
@@ -375,7 +379,7 @@ export default function AdminConsoleV1Page() {
         <button
           className={styles.themeToggle}
           aria-label="Toggle theme"
-          onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
+          onClick={toggleTheme}
         >
           <span className={`${styles.themeOpt} ${theme === "light" ? styles.active : ""}`}>
             <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">

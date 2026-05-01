@@ -62,8 +62,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+// Two-tier labels — the primary is human prose (renders in Inter),
+// the key is the technical agent name (renders in JetBrains Mono as a
+// caption). Keeps the dropdown readable while admins still see the
+// canonical key that lands in the audit log.
 const TRIGGERABLE_AGENTS = [
-  { name: "disrupt_prevention", label: "Re-engage (disrupt_prevention)" },
+  { name: "disrupt_prevention", label: "Re-engage" },
   { name: "progress_report", label: "Weekly progress report" },
   { name: "adaptive_path", label: "Suggest learning path" },
   { name: "community_celebrator", label: "Celebrate milestone" },
@@ -81,6 +85,77 @@ function TimelineIcon({ kind }: { kind: string }) {
     default:
       return <Bot className={base} aria-hidden="true" />;
   }
+}
+
+/**
+ * Card header in cockpit tone — small uppercase mono eyebrow, then a
+ * Fraunces serif title with the icon inline. Used by every operator
+ * card so the panel reads as part of the cockpit's typographic system
+ * (Fraunces hero · JetBrains eyebrow · Inter prose) instead of a
+ * generic shadcn card.
+ *
+ * Body text below the title stays Inter — Fraunces would be wrong for
+ * a paragraph of helper copy. Numerics elsewhere in the panel pick up
+ * mono via the modal's `.tabular-nums` style override.
+ */
+/**
+ * Card header in v8/cockpit tone — eyebrow with leading dot, Fraunces
+ * serif title at 22px with -0.03em tracking, generous body text. The
+ * full set of typographic variables matches the /path screen so the
+ * modal feels made of the same parts as the rest of the app.
+ *
+ *   ┌─────────────────────────────────────────────
+ *   │ ● AGENT         (10px, 0.2em, weight 700, mint dot ::before)
+ *   │ Trigger agent   (Fraunces 22px, weight 500, -0.03em)
+ *   │ Runs on behalf… (14px, line-height 1.65, muted)
+ *   └─────────────────────────────────────────────
+ *
+ * Body description uses 14px (not 12px) — at 12px Fraunces titles tower
+ * over the prose and the rhythm breaks. The /path screen runs body at
+ * 13-15px next to 22px serifs and that's what reads premium.
+ */
+function CardEyebrowHeader({
+  eyebrow,
+  title,
+  icon,
+  description,
+  iconClassName,
+}: {
+  eyebrow: string;
+  title: string;
+  icon: React.ReactNode;
+  description?: string;
+  iconClassName?: string;
+}) {
+  return (
+    <>
+      <div
+        className="cf-card-eyebrow"
+        style={{
+          fontFamily: "var(--font-jetbrains-mono), ui-monospace, monospace",
+        }}
+      >
+        {eyebrow}
+      </div>
+      <h2
+        className="cf-card-title flex items-center gap-3"
+        style={{
+          fontFamily: "var(--font-fraunces), Georgia, serif",
+        }}
+      >
+        <span
+          className={`cf-card-title-icon ${iconClassName ?? ""}`}
+          aria-hidden="true"
+        >
+          {icon}
+        </span>
+        {title}
+      </h2>
+      {description ? (
+        <p className="cf-card-prose">{description}</p>
+      ) : null}
+    </>
+  );
 }
 
 interface StudentDetailPanelProps {
@@ -251,26 +326,69 @@ export function StudentDetailPanel({
     <div className={spacing}>
       {!hideHeader && (
         <div>
-          <h1 className="text-2xl font-bold">
+          <div
+            className="text-[11px] font-medium tracking-[0.22em] uppercase mb-2 text-primary"
+            style={{
+              fontFamily: "var(--font-jetbrains-mono), ui-monospace, monospace",
+            }}
+          >
+            Student profile
+          </div>
+          <h1
+            className="font-medium leading-[1.1]"
+            style={{
+              fontFamily: "var(--font-fraunces), Georgia, serif",
+              fontSize: "30px",
+              letterSpacing: "-0.015em",
+            }}
+          >
             {student?.full_name ?? "Student"}
           </h1>
-          <p className="text-muted-foreground text-sm">
+          <p
+            className="text-muted-foreground mt-1.5"
+            style={{
+              fontFamily: "var(--font-jetbrains-mono), ui-monospace, monospace",
+              fontSize: "13px",
+              letterSpacing: "0.005em",
+            }}
+          >
             {student?.email ?? studentId}
           </p>
           {student && (
-            <div className="flex flex-wrap gap-2 mt-3 text-xs text-muted-foreground">
+            <div
+              className="flex flex-wrap items-center gap-2.5 mt-3 text-xs text-muted-foreground"
+              style={{
+                fontFamily: "var(--font-jetbrains-mono), ui-monospace, monospace",
+                fontFeatureSettings: '"tnum"',
+                letterSpacing: "0.01em",
+              }}
+            >
               <Badge
                 className={
                   student.is_active
-                    ? "bg-green-100 text-green-700 hover:bg-green-100"
-                    : "bg-muted"
+                    ? "bg-green-100 text-green-700 hover:bg-green-100 uppercase tracking-[0.12em] text-[10px] font-medium"
+                    : "bg-muted uppercase tracking-[0.12em] text-[10px] font-medium"
                 }
+                style={{
+                  fontFamily:
+                    "var(--font-jetbrains-mono), ui-monospace, monospace",
+                }}
               >
                 {student.is_active ? "Active" : "Inactive"}
               </Badge>
-              <span>{student.lessons_completed} lessons completed</span>
+              <span>
+                <span className="font-semibold text-foreground">
+                  {student.lessons_completed}
+                </span>{" "}
+                lessons completed
+              </span>
               <span>·</span>
-              <span>{student.agent_interactions} agent interactions</span>
+              <span>
+                <span className="font-semibold text-foreground">
+                  {student.agent_interactions}
+                </span>{" "}
+                agent interactions
+              </span>
               <span>·</span>
               <span>
                 Joined {new Date(student.created_at).toLocaleDateString()}
@@ -283,14 +401,13 @@ export function StudentDetailPanel({
       {/* DISC-57 — admin agent trigger panel */}
       <Card>
         <CardHeader className="pb-2">
-          <h2 className="font-semibold text-sm flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
-            Trigger agent
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            Runs on behalf of this student. Logged with your admin identity in
-            the audit log.
-          </p>
+          <CardEyebrowHeader
+            eyebrow="Agent"
+            title="Trigger agent"
+            icon={<Sparkles className="h-4 w-4" aria-hidden="true" />}
+            iconClassName="text-primary"
+            description="Runs on behalf of this student. Logged with your admin identity in the audit log."
+          />
         </CardHeader>
         <CardContent className="flex flex-col md:flex-row gap-3">
           {/* shadcn Select (base-ui combobox) — fully styled, portal-rendered.
@@ -303,9 +420,18 @@ export function StudentDetailPanel({
           >
             <SelectTrigger
               aria-label="Agent to trigger"
-              className="h-9 min-w-[260px] rounded-lg"
+              className="cf-agent-trigger min-w-[260px]"
             >
-              <SelectValue />
+              {/* Pure prose label — the technical agent key still lands
+                  in the audit log on submit, but admins only see the
+                  human verb in the UI. Single typeface (Inter), no
+                  underscores anywhere. */}
+              <SelectValue>
+                {(value) =>
+                  TRIGGERABLE_AGENTS.find((a) => a.name === value)?.label ??
+                  value
+                }
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {TRIGGERABLE_AGENTS.map((a) => (
@@ -351,17 +477,13 @@ export function StudentDetailPanel({
       {paidSilentMatch && (
         <Card className="border-red-200 bg-red-50/40 dark:border-red-900/40 dark:bg-red-950/20">
           <CardHeader className="pb-2">
-            <h2 className="font-semibold text-sm flex items-center gap-2">
-              <AlertTriangle
-                className="h-4 w-4 text-red-600"
-                aria-hidden="true"
-              />
-              Refund offer · Slip 4 day 14
-            </h2>
-            <p className="text-xs text-muted-foreground">
-              Paid + silent crosses day 14 — refund risk territory. Sending the
-              offer now beats waiting for them to ask.
-            </p>
+            <CardEyebrowHeader
+              eyebrow="Refund · Slip 4 · day 14"
+              title="Refund offer"
+              icon={<AlertTriangle className="h-4 w-4" aria-hidden="true" />}
+              iconClassName="text-red-600"
+              description="Paid + silent crosses day 14 — refund risk territory. Sending the offer now beats waiting for them to ask."
+            />
           </CardHeader>
           <CardContent className="space-y-3">
             <textarea
@@ -432,16 +554,13 @@ export function StudentDetailPanel({
       {/* F2 — Admin notes */}
       <Card>
         <CardHeader className="pb-2">
-          <h2 className="font-semibold text-sm flex items-center gap-2">
-            <NotebookPen
-              className="h-4 w-4 text-muted-foreground"
-              aria-hidden="true"
-            />
-            Admin notes
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            Private. Used to remember what was said to whom across rotations.
-          </p>
+          <CardEyebrowHeader
+            eyebrow="Notes · private"
+            title="Admin notes"
+            icon={<NotebookPen className="h-4 w-4" aria-hidden="true" />}
+            iconClassName="text-muted-foreground"
+            description="Private. Used to remember what was said to whom across rotations."
+          />
         </CardHeader>
         <CardContent className="space-y-3">
           <div>
@@ -456,7 +575,7 @@ export function StudentDetailPanel({
               disabled={createNote.isPending}
             />
             <div className="mt-2 flex items-center justify-between gap-2">
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-muted-foreground font-mono tabular-nums">
                 {noteDraft.length}/2000
               </span>
               <button
@@ -505,17 +624,15 @@ export function StudentDetailPanel({
       {/* F8 — Direct message */}
       <Card>
         <CardHeader className="pb-2">
-          <h2 className="font-semibold text-sm flex items-center gap-2">
-            <MessageSquare
-              className="h-4 w-4 text-primary"
-              aria-hidden="true"
-            />
-            Direct message
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            Visible to the student in their inbox. Replies flip the most recent
-            outreach to “responded.”
-          </p>
+          <CardEyebrowHeader
+            eyebrow="Outreach"
+            title="Direct message"
+            icon={<MessageSquare className="h-4 w-4" aria-hidden="true" />}
+            iconClassName="text-primary"
+            description={
+              "Visible to the student in their inbox. Replies flip the most recent outreach to “responded.”"
+            }
+          />
         </CardHeader>
         <CardContent className="space-y-3">
           <div>
@@ -530,7 +647,7 @@ export function StudentDetailPanel({
               disabled={sendDm.isPending}
             />
             <div className="mt-2 flex items-center justify-between gap-2">
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-muted-foreground font-mono tabular-nums">
                 {dmDraft.length}/5000
               </span>
               <button
@@ -586,16 +703,13 @@ export function StudentDetailPanel({
       {/* DISC-55 — Activity timeline */}
       <Card>
         <CardHeader className="pb-2">
-          <h2 className="font-semibold text-sm flex items-center gap-2">
-            <Clock
-              className="h-4 w-4 text-muted-foreground"
-              aria-hidden="true"
-            />
-            Activity timeline
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            Lessons, submissions, agent runs, and last login — newest first.
-          </p>
+          <CardEyebrowHeader
+            eyebrow="Activity"
+            title="Activity timeline"
+            icon={<Clock className="h-4 w-4" aria-hidden="true" />}
+            iconClassName="text-muted-foreground"
+            description="Lessons, submissions, agent runs, and last login — newest first."
+          />
         </CardHeader>
         <CardContent>
           {timelineLoading ? (
@@ -620,10 +734,14 @@ export function StudentDetailPanel({
                       <TimelineIcon kind={ev.kind} />
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="font-medium text-sm leading-tight">
-                        {ev.summary}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
+                      {/* Activity primary line — promoted to the
+                          serif/narrative register. The cockpit treats
+                          activity as a "diary" of the student's
+                          journey, so Fraunces reads truer than Inter.
+                          The modal CSS picks up `.cf-activity-summary`
+                          and renders it in Fraunces 16px medium. */}
+                      <p className="cf-activity-summary">{ev.summary}</p>
+                      <p className="cf-activity-time">
                         {new Date(ev.at).toLocaleString()}
                       </p>
                     </div>

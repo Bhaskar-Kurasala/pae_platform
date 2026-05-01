@@ -11,6 +11,7 @@ import {
 } from "@/lib/hooks/use-admin";
 import { Badge } from "@/components/ui/badge";
 import { StudentDetailModal } from "../_components/student-detail-modal";
+import { useAdminTheme } from "@/lib/hooks/use-admin-theme";
 
 // Friendly display labels for each slip pattern. Used by the
 // "Showing N cold-signup students" banner when arriving from a
@@ -160,6 +161,9 @@ export default function AdminStudentsPage() {
   // Same student-detail modal as /admin uses, so row click opens
   // a focused popup with all 5 operator cards rather than navigating.
   const [modalStudentId, setModalStudentId] = useState<string | null>(null);
+  // Inherit the cockpit's persisted light/dark choice so the modal
+  // here matches whatever the operator just left on /admin.
+  const { theme } = useAdminTheme();
 
   // DISC-56 — debounced server-side search. The old client-side filter kept
   // the whole student catalog in memory and filtered on every keystroke; this
@@ -438,6 +442,7 @@ export default function AdminStudentsPage() {
         onOpenChange={(o) => {
           if (!o) setModalStudentId(null);
         }}
+        pageTheme={theme}
       />
     </div>
   );
