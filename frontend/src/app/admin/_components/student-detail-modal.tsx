@@ -736,12 +736,12 @@ export function StudentDetailModal({
                       : "rgba(78,148,112,0.25)"
                   };
                 }
-                /* Timeline summary — Inter 14.5px weight 600 ink. The
-                   /path screen runs `.lesson-row strong` at 14px Inter
-                   for row-level primary text; serif at row scale (esp.
-                   in dark) read chunky and competed with the card
-                   title. Inter at this weight reads confident, dense,
-                   and matches the rest of the cockpit's row primitives. */
+                /* Timeline summary - Inter 14.5px weight 600 ink. The
+                   path screen runs lesson-row strong at 14px Inter
+                   for row-level primary text; serif at row scale
+                   (especially in dark) reads chunky and competes with
+                   the card title. Inter at this weight reads confident
+                   and matches the rest of the cockpit row primitives. */
                 .careerforge-modal-body .cf-activity-summary {
                   font-family: var(--font-inter), 'Inter', system-ui, sans-serif;
                   font-size: 14.5px;

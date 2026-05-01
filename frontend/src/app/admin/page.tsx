@@ -3,8 +3,8 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
-import { useAuthStore } from "@/stores/auth-store";
 import { buildCallInviteMailto } from "@/lib/calendar-mailto";
+import { AdminTopbar } from "./_components/admin-topbar";
 import { RetentionPanels } from "./_components/retention-panels";
 import { StudentDetailModal } from "./_components/student-detail-modal";
 import { useRiskPanels } from "@/lib/hooks/use-admin";
@@ -189,11 +189,13 @@ const TAG_LABELS: Record<string, string> = {
 // ── Page ────────────────────────────────────────────────────────────────
 
 export default function AdminConsoleV1Page() {
-  const { user } = useAuthStore();
-  // Theme persists in localStorage and broadcasts to other admin
-  // pages + the student detail modal so the cockpit's choice follows
-  // the operator everywhere in the admin section.
-  const { theme, toggleTheme } = useAdminTheme();
+  // Theme persists in localStorage and broadcasts to the student
+  // detail modal so the cockpit's choice follows the operator
+  // everywhere in the admin section. The shared <AdminTopbar> reads
+  // the same hook for its own toggle button — we only consume `theme`
+  // here so we can decorate the cockpit shell with the right palette
+  // (data-theme attribute drives `console.module.css` rules).
+  const { theme } = useAdminTheme();
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "risk", dir: "desc" });
   const [search, setSearch] = useState("");
@@ -339,61 +341,15 @@ export default function AdminConsoleV1Page() {
     });
   };
 
-  const adminInitials = initials(user?.full_name ?? "Admin");
+  // The cockpit's "synced HH:MM" indicator depends on the data
+  // payload, so it's computed here and passed to the shared topbar.
+  const liveLabel = data
+    ? `LIVE · synced ${new Date(data.synced_at).toLocaleTimeString()}`
+    : "LIVE · syncing…";
 
   return (
     <div className={styles.root} data-theme={theme}>
-      {/* TOP BAR */}
-      <header className={styles.topbar}>
-        <div className={styles.brand}>
-          <b>
-            Career<i>Forge</i>
-          </b>
-          <span className={styles.consoleTag}>Admin</span>
-        </div>
-        <div className={styles.tbDivider} />
-        <div className={styles.tbSearch}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.3-4.3" />
-          </svg>
-          <input
-            type="search"
-            aria-label="Search"
-            placeholder="Search students, capstones, or events…"
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <div className={styles.tbSpacer} />
-        <div className={styles.livePulse}>
-          <span className={styles.liveDot} />
-          LIVE · {data ? `synced ${new Date(data.synced_at).toLocaleTimeString()}` : "syncing…"}
-        </div>
-        <div className={styles.adminId}>
-          <div className={styles.adminAvatar}>{adminInitials}</div>
-          <div className={styles.adminName}>
-            <b>{user?.full_name ?? "Admin"}</b>
-            <span>{user?.role === "admin" ? "Founder · Admin" : "Member"}</span>
-          </div>
-        </div>
-        <button
-          className={styles.themeToggle}
-          aria-label="Toggle theme"
-          onClick={toggleTheme}
-        >
-          <span className={`${styles.themeOpt} ${theme === "light" ? styles.active : ""}`}>
-            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-              <circle cx="7" cy="7" r="2.4" />
-              <path d="M7 1v1.4M7 11.6V13M1 7h1.4M11.6 7H13M2.6 2.6l1 1M10.4 10.4l1 1M2.6 11.4l1-1M10.4 3.6l1-1" />
-            </svg>
-          </span>
-          <span className={`${styles.themeOpt} ${theme === "dark" ? styles.active : ""}`}>
-            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M11.5 8.5A4.5 4.5 0 015.5 2.5a5 5 0 106 6z" />
-            </svg>
-          </span>
-        </button>
-      </header>
+      <AdminTopbar liveLabel={liveLabel} onSearchChange={setSearch} />
 
       {isLoading ? (
         <div className={styles.skeleton}>Loading admin console…</div>
