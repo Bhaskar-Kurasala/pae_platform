@@ -95,8 +95,17 @@ services:
     restart: unless-stopped
 
   # ── PostgreSQL ──
+  # Postgres 16 + pgvector pre-baked. Same major version as the
+  # previous postgres:16-alpine image, so existing pgdata volumes
+  # carry over without a re-init. Required for the Agentic OS
+  # primitives layer (migration 0054) which `CREATE EXTENSION
+  # vector` — alpine omits the extension binaries.
+  #
+  # Pinned to a digest (not just the tag) so a silent rebuild of
+  # pgvector/pgvector:pg16 upstream cannot break dev mid-week.
+  # Digest captured 2026-05-01 from `docker pull pgvector/pgvector:pg16`.
   db:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16@sha256:7d400e340efb42f4d8c9c12c6427adb253f726881a9985d2a471bf0eed824dff
     ports:
       - "5433:5432"
     environment:

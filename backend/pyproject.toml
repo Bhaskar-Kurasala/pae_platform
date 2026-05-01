@@ -19,6 +19,7 @@ dependencies = [
     "langchain-anthropic>=1.4.0",
     "langgraph>=1.1.6",
     "passlib[bcrypt]>=1.7.4",
+    "pgvector>=0.3.6",
     "pydantic-settings>=2.13.1",
     "pydantic[email]>=2.12.5",
     "pinecone-client>=4.0.0",

@@ -9,7 +9,13 @@ from app.models.admin_console import (  # noqa: F401
     AdminConsoleRiskReason,
 )
 from app.models.agent_action import AgentAction
+from app.models.agent_call_chain import AgentCallChain  # noqa: F401
+from app.models.agent_escalation import AgentEscalation  # noqa: F401
+from app.models.agent_evaluation import AgentEvaluation  # noqa: F401
 from app.models.agent_invocation_log import AgentInvocationLog  # noqa: F401
+from app.models.agent_memory import AgentMemory  # noqa: F401
+from app.models.agent_proactive_run import AgentProactiveRun  # noqa: F401
+from app.models.agent_tool_call import AgentToolCall  # noqa: F401
 from app.models.ai_review import AIReview  # noqa: F401
 from app.models.application_kit import ApplicationKit  # noqa: F401
 from app.models.chat_attachment import ChatAttachment
@@ -78,6 +84,7 @@ from app.models.skill import Skill
 from app.models.skill_edge import SkillEdge
 from app.models.srs_card import SRSCard
 from app.models.story_bank import StoryBank  # noqa: F401
+from app.models.student_inbox import StudentInbox  # noqa: F401
 from app.models.student_message import StudentMessage
 from app.models.student_misconception import StudentMisconception
 from app.models.student_note import StudentNote
@@ -101,6 +108,13 @@ __all__ = [
     "QuizResult",
     "MCQBank",
     "AgentAction",
+    "AgentCallChain",
+    "AgentEscalation",
+    "AgentEvaluation",
+    "AgentMemory",
+    "AgentProactiveRun",
+    "AgentToolCall",
+    "StudentInbox",
     "ChatAttachment",
     "ChatMessage",
     "ChatMessageFeedback",
