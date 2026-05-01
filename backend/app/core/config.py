@@ -188,6 +188,36 @@ class Settings(BaseSettings):
     github_content_repo: str = ""  # e.g. "your-username/pae-course-content"
     github_content_branch: str = "main"
 
+    # Agentic OS — embeddings for the memory primitive.
+    # Voyage-3 is the default provider (1024 native dims, padded to
+    # 1536 in app.agents.primitives.embeddings to fit the migration's
+    # vector(1536) column). When voyage_api_key is unset the layer
+    # falls back to a deterministic hash function so dev / CI work
+    # without an external API. The full ENABLE_* feature flags for the
+    # primitives layer land in a later deliverable (10) — this
+    # commit only adds the two settings the embeddings helper reads.
+    voyage_api_key: str = ""
+    embeddings_model: str = "voyage-3"
+
+    # Inter-agent call depth ceiling. Hard cap that prevents an
+    # agent that calls itself (or an unbounded chain) from hanging
+    # the request. Default 5: enough headroom for legitimate
+    # composition (root → 4 nested calls), tight enough to surface
+    # accidental fan-out before it eats wall-clock or token budget.
+    # Per-call timeouts ride on top of this via asyncio.wait_for.
+    agent_call_max_depth: int = 5
+    agent_call_timeout_seconds: float = 30.0
+
+    # Webhook secrets for the proactive primitive (D6).
+    #
+    # `github_webhook_secret` is distinct from `github_token` (a PAT
+    # used for API reads). Webhook secret is set inside GitHub's
+    # repo / org webhook UI; payloads are signed with HMAC-SHA256
+    # and we verify before routing. Empty = signature verification
+    # rejects all requests, which is the safe default for an
+    # unconfigured environment.
+    github_webhook_secret: str = ""
+
     # Celery — default to the same Redis as the app (host-aware) so docker
     # and local runs don't silently point the worker at localhost. Any env
     # override of celery_broker_url / celery_result_backend still wins.
