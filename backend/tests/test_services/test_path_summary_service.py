@@ -22,9 +22,9 @@ from app.models.student_progress import StudentProgress
 from app.models.user import User
 from app.models.user_skill_state import UserSkillState
 from app.services.path_summary_service import (
+    ROLE_LADDER,
     _duration_minutes_for_exercise,
     _duration_minutes_for_lesson,
-    _mastery_to_state,
     _split_label,
     _truncate_goal,
     build_path_summary,
@@ -57,11 +57,18 @@ def test_truncate_goal_caps_at_three_words() -> None:
     assert "grade" not in out
 
 
-def test_mastery_to_state_mapping() -> None:
-    assert _mastery_to_state("mastered") == "done"
-    assert _mastery_to_state("proficient") == "current"
-    assert _mastery_to_state("novice") == "upcoming"
-    assert _mastery_to_state(None) == "upcoming"
+def test_role_ladder_is_career_arc() -> None:
+    """The constellation labels are a fixed role progression — not course
+    names. Guard the order so future edits don't accidentally surface the
+    course catalogue here again."""
+    names = [name for name, _ in ROLE_LADDER]
+    assert names == [
+        "Python Developer",
+        "Data Analyst",
+        "Data Scientist",
+        "ML Engineer",
+        "GenAI Engineer",
+    ]
 
 
 def test_duration_minutes_for_lesson_uses_seconds() -> None:
@@ -269,11 +276,21 @@ async def test_path_summary_returns_full_payload(db_session: AsyncSession) -> No
 
     summary = await build_path_summary(db_session, user=user)
 
-    # Constellation: 5 ordered skill stars + 1 goal star = 6 total.
+    # Constellation: 5 role-ladder stars + 1 goal star = 6 total.
     assert len(summary.constellation) == 6
     assert summary.constellation[-1].state == "goal"
-    # First star reflects mastered Python Foundations.
-    assert summary.constellation[0].state == "done"
+    # The constellation is the career arc, not a course list.
+    role_labels = [s.label.replace("\n", " ") for s in summary.constellation[:5]]
+    assert role_labels == [
+        "Python Developer",
+        "Data Analyst",
+        "Data Scientist",
+        "ML Engineer",
+        "GenAI Engineer",
+    ]
+    # Exactly one rung is "current"; the rest are done/upcoming.
+    states = [s.state for s in summary.constellation[:5]]
+    assert states.count("current") == 1
     # Goal star pulls from goal contract's target_role.
     assert "Senior" in summary.constellation[-1].label
 
@@ -322,6 +339,11 @@ async def test_path_summary_empty_user_uses_editorial_fallbacks(
 
     assert len(summary.constellation) == 6
     assert summary.constellation[-1].state == "goal"
+    # Brand-new user → on the first rung, never demoralized with all-upcoming.
+    assert summary.constellation[0].state == "current"
+    assert summary.constellation[0].label.replace("\n", " ") == "Python Developer"
+    # Default goal star copy when no contract exists.
+    assert "GenAI" in summary.constellation[-1].label
     # No active course → only the goal rung.
     assert len(summary.levels) >= 1
     assert summary.levels[-1].state == "goal"

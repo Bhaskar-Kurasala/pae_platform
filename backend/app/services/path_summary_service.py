@@ -22,10 +22,7 @@ from app.models.enrollment import Enrollment
 from app.models.exercise import Exercise
 from app.models.exercise_submission import ExerciseSubmission
 from app.models.lesson import Lesson
-from app.models.skill import Skill
-from app.models.student_progress import StudentProgress
 from app.models.user import User
-from app.models.user_skill_state import UserSkillState
 from app.schemas.path_summary import (
     PathLab,
     PathLesson,
@@ -36,21 +33,19 @@ from app.schemas.path_summary import (
 )
 from app.services.goal_contract_service import GoalContractService
 from app.services.progress_service import ProgressService
-from app.services.skill_path_service import (
-    get_saved_skill_path,
-)
 
-# Editorial fallbacks for the constellation when the user has no goal
-# contract or skill path saved yet. The roles climb difficulty so the
-# constellation reads as a believable career arc even on a fresh account.
-DEFAULT_ROLE_LADDER = (
-    ("Python Developer", "Current base"),
-    ("Data Analyst", "58 days"),
-    ("Data Scientist", "Next arc"),
-    ("ML Engineer", "Later"),
-    ("GenAI Engineer", "Advanced"),
+# The constellation always renders the same career-arc — five stepping-stone
+# roles climbing toward the destination role. Course progress determines
+# *which* rung the student has reached; the labels themselves are fixed so
+# the screen reads as a role progression, not a course catalogue.
+ROLE_LADDER: tuple[tuple[str, str], ...] = (
+    ("Python Developer", "Foundations"),
+    ("Data Analyst", "Pipelines"),
+    ("Data Scientist", "Modeling"),
+    ("ML Engineer", "Productionization"),
+    ("GenAI Engineer", "Agentic systems"),
 )
-DEFAULT_GOAL_LABEL = "Senior\nGenAI Eng."
+DEFAULT_GOAL_LABEL = "Senior\nGenAI Engineer"
 
 
 def _split_label(name: str) -> str:
@@ -69,15 +64,6 @@ def _truncate_goal(s: str) -> str:
         return " ".join(words)
     half = (len(words) + 1) // 2
     return f"{' '.join(words[:half])}\n{' '.join(words[half:])}"
-
-
-def _mastery_to_state(level: str | None) -> str:
-    """Map UserSkillState.mastery_level → constellation star state."""
-    if level == "mastered":
-        return "done"
-    if level == "proficient":
-        return "current"
-    return "upcoming"
 
 
 def _duration_minutes_for_lesson(lesson: Lesson) -> int:
@@ -136,88 +122,54 @@ async def _build_constellation(
     *,
     user: User,
 ) -> list[PathStar]:
-    """Pick 5 ordered skills (saved path → fall back to lowest-difficulty 5)
-    and append the goal star.
+    """Render the fixed 5-role career arc + goal star.
 
-    Each star's state derives from the user's mastery on that skill.
+    The labels themselves are stable (Python Developer → Senior GenAI
+    Engineer). The user's overall course progress maps to a single rung
+    on the ladder: earlier rungs are `done`, that rung is `current`, the
+    rest are `upcoming`. The destination star is overridden by the
+    student's goal contract when one is set.
     """
-    # Parallel reads.
-    skills_task = db.execute(select(Skill))
-    states_task = db.execute(
-        select(UserSkillState).where(UserSkillState.user_id == user.id)
+    progress, goal = await asyncio.gather(
+        ProgressService(db).get_student_progress(user),
+        GoalContractService(db).get_for_user(user),
     )
-    saved_task = get_saved_skill_path(db, user_id=user.id)
-    goal_task = GoalContractService(db).get_for_user(user)
+    overall = max(0.0, min(100.0, float(progress.overall_progress)))
 
-    skills_res, states_res, saved, goal = await asyncio.gather(
-        skills_task, states_task, saved_task, goal_task
-    )
-    all_skills: list[Skill] = list(skills_res.scalars().all())
-    states: list[UserSkillState] = list(states_res.scalars().all())
-
-    state_by_skill = {s.skill_id: s.mastery_level for s in states}
-    by_id: dict[uuid.UUID, Skill] = {s.id: s for s in all_skills}
-
-    ordered: list[Skill] = []
-    if saved is not None and saved.skill_ids:
-        ordered = [by_id[sid] for sid in saved.skill_ids if sid in by_id][:5]
-
-    if len(ordered) < 5 and all_skills:
-        # Fill remaining slots with lowest-difficulty skills not already chosen.
-        chosen = {s.id for s in ordered}
-        remainder = sorted(
-            (s for s in all_skills if s.id not in chosen),
-            key=lambda s: s.difficulty,
-        )
-        ordered.extend(remainder[: 5 - len(ordered)])
+    # 5 rungs split the 0–100 progress band into equal arcs. The rung the
+    # student is *working through* is `current`; everything earlier is
+    # `done`. A fresh student (0%) lands on rung 0 (Python Developer) as
+    # current — never on `upcoming`-only, which would feel demotivating.
+    rung_count = len(ROLE_LADDER)
+    if overall >= 100.0:
+        current_rung = rung_count - 1  # working the final rung
+    else:
+        current_rung = min(rung_count - 1, int(overall // (100.0 / rung_count)))
 
     stars: list[PathStar] = []
-    if ordered:
-        for idx, skill in enumerate(ordered[:5]):
-            state = _mastery_to_state(state_by_skill.get(skill.id))
-            stars.append(
-                PathStar(
-                    label=_split_label(skill.name),
-                    sub=(
-                        "Mastered"
-                        if state == "done"
-                        else "In progress"
-                        if state == "current"
-                        else "Upcoming"
-                    ),
-                    state=state,  # type: ignore[arg-type]
-                    badge=str(idx + 1),
-                )
-            )
-    else:
-        for idx, (name, sub) in enumerate(DEFAULT_ROLE_LADDER):
-            stars.append(
-                PathStar(
-                    label=_split_label(name),
-                    sub=sub,
-                    state="done" if idx == 0 else "current" if idx == 1 else "upcoming",
-                    badge=str(idx + 1),
-                )
-            )
-
-    while len(stars) < 5:
-        idx = len(stars)
-        name, sub = DEFAULT_ROLE_LADDER[idx % len(DEFAULT_ROLE_LADDER)]
+    for idx, (name, sub) in enumerate(ROLE_LADDER):
+        if idx < current_rung:
+            state = "done"
+            sub_text = "Earned"
+        elif idx == current_rung:
+            state = "current"
+            sub_text = "In progress"
+        else:
+            state = "upcoming"
+            sub_text = sub
         stars.append(
             PathStar(
                 label=_split_label(name),
-                sub=sub,
-                state="upcoming",
+                sub=sub_text,
+                state=state,  # type: ignore[arg-type]
                 badge=str(idx + 1),
             )
         )
 
-    # Append the goal star.
+    # Goal star — student's target role wins; otherwise the editorial default.
     goal_label = (
         _truncate_goal(goal.target_role)
         if goal and goal.target_role
-        else _truncate_goal(goal.success_statement)
-        if goal and goal.success_statement
         else DEFAULT_GOAL_LABEL
     )
     stars.append(
