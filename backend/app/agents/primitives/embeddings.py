@@ -103,6 +103,11 @@ def _hash_fallback_vector(text: str) -> list[float]:
 def _pad_to_target_dim(vector: Sequence[float], target: int) -> list[float]:
     """Zero-pad (or truncate) to the target dim.
 
+    Padded vectors are only directly comparable to other padded
+    vectors of the same source model. Mixing native-1536 and
+    padded-1024 embeddings in the same recall call is unsupported
+    and will silently degrade recall quality.
+
     Cosine similarity between two padded-from-the-same-native-dim
     vectors is identity-invariant: sum(a_i * b_i) is unchanged because
     the padded tail is zero on both sides.
