@@ -21,8 +21,9 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -409,39 +410,133 @@ async def test_eval_treats_agent_exception_as_failed_attempt(
 
 
 # ── EscalationLimiter unit tests ────────────────────────────────────
+#
+# Track 2 — every limiter test runs against BOTH backends:
+#   • EscalationLimiter         (in-memory deque, process-local)
+#   • RedisEscalationLimiter    (Redis sorted set, multi-process safe)
+#
+# The `limiter_factory` fixture parametrizes over both. Each backend
+# returns a builder that closes over the live Redis client (when
+# applicable) so per-test isolation is via unique agent names rather
+# than client teardown — Redis cleanup is best-effort because the
+# fixture lifecycle isn't a guaranteed window for `DEL`.
+#
+# Tests that need a custom clock (the sliding-window test) use the
+# in-memory backend only — Redis scores are wall-clock epoch
+# seconds; you can't fake `time.time()` for ZADD without
+# monkeypatching the Redis server, which would defeat the test.
+# The dedicated `test_redis_limiter_sliding_window` covers the
+# Redis path with a real-time short window.
+
+
+def _redis_available() -> bool:
+    """Cheap probe — does the dev/test Redis instance answer PING?
+
+    Returns False on any failure, so test environments without Redis
+    skip the Redis-backed parameter cleanly rather than erroring.
+    """
+    try:
+        import redis as redis_lib
+
+        from app.core.config import settings
+
+        client = redis_lib.Redis.from_url(
+            settings.redis_url,
+            socket_connect_timeout=1.0,
+            socket_timeout=1.0,
+            decode_responses=True,
+        )
+        client.ping()
+        return True
+    except Exception:
+        return False
+
+
+_BACKENDS_AVAILABLE: list[str] = ["in_memory"]
+if _redis_available():
+    _BACKENDS_AVAILABLE.append("redis")
+
+
+@pytest.fixture(params=_BACKENDS_AVAILABLE)
+def limiter_factory(request: pytest.FixtureRequest) -> Callable[..., Any]:
+    """Returns a builder `(limit, window) -> Limiter` for the
+    parametrized backend. Each test gets a fresh agent-name prefix
+    so Redis cleanup leakage doesn't poison neighbouring runs."""
+    from app.agents.primitives import EscalationLimiter, RedisEscalationLimiter
+
+    backend = request.param
+
+    def _build(
+        limit_per_agent: int,
+        window_seconds: int = 60,
+    ) -> Any:
+        if backend == "redis":
+            return RedisEscalationLimiter(
+                limit_per_agent=limit_per_agent,
+                window_seconds=window_seconds,
+            )
+        return EscalationLimiter(
+            limit_per_agent=limit_per_agent,
+            window_seconds=window_seconds,
+        )
+
+    return _build
+
+
+def _agent(prefix: str) -> str:
+    """Unique agent name per test invocation so Redis state doesn't
+    cross-contaminate across the parametrized runs."""
+    return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
 
 # Limiter unit tests don't need async — they're pure. Marked with
-# the module's pytestmark for consistency with the rest of the file;
-# pytest-asyncio in `auto` mode dispatches them without needing them
-# to actually await anything.
-async def test_limiter_admits_under_budget() -> None:
-    limiter = EscalationLimiter(limit_per_agent=3, window_seconds=60)
-    assert limiter.should_notify("a") is True
-    assert limiter.should_notify("a") is True
-    assert limiter.should_notify("a") is True
+# the module's pytestmark for consistency with the rest of the file.
+async def test_limiter_admits_under_budget(
+    limiter_factory: Callable[..., Any],
+) -> None:
+    limiter = limiter_factory(limit_per_agent=3, window_seconds=60)
+    a = _agent("admit")
+    assert limiter.should_notify(a) is True
+    assert limiter.should_notify(a) is True
+    assert limiter.should_notify(a) is True
 
 
-async def test_limiter_blocks_over_budget() -> None:
-    limiter = EscalationLimiter(limit_per_agent=2, window_seconds=60)
-    assert limiter.should_notify("a") is True
-    assert limiter.should_notify("a") is True
-    assert limiter.should_notify("a") is False
-    assert limiter.should_notify("a") is False
+async def test_limiter_blocks_over_budget(
+    limiter_factory: Callable[..., Any],
+) -> None:
+    limiter = limiter_factory(limit_per_agent=2, window_seconds=60)
+    a = _agent("block")
+    assert limiter.should_notify(a) is True
+    assert limiter.should_notify(a) is True
+    assert limiter.should_notify(a) is False
+    assert limiter.should_notify(a) is False
 
 
-async def test_limiter_segments_by_agent() -> None:
+async def test_limiter_segments_by_agent(
+    limiter_factory: Callable[..., Any],
+) -> None:
     """Agent A's quota does not deplete agent B's quota."""
-    limiter = EscalationLimiter(limit_per_agent=1, window_seconds=60)
-    assert limiter.should_notify("a") is True
-    assert limiter.should_notify("b") is True
-    assert limiter.should_notify("a") is False
-    assert limiter.should_notify("b") is False
+    limiter = limiter_factory(limit_per_agent=1, window_seconds=60)
+    a = _agent("segA")
+    b = _agent("segB")
+    assert limiter.should_notify(a) is True
+    assert limiter.should_notify(b) is True
+    assert limiter.should_notify(a) is False
+    assert limiter.should_notify(b) is False
 
 
-async def test_limiter_window_slides() -> None:
-    """Old entries fall out of the window. Use an injectable clock so
-    the test runs in microseconds, not minutes."""
+async def test_limiter_window_slides_in_memory_only() -> None:
+    """Old entries fall out of the window.
+
+    In-memory backend ONLY — RedisEscalationLimiter scores are
+    wall-clock epoch seconds (per the time-math contract documented
+    on the class) and faking the clock here would diverge from
+    Redis-side ZADD scores. The Redis sliding-window correctness
+    test (`test_redis_limiter_sliding_window`) below uses a short
+    real-time window with `time.sleep` instead.
+    """
+    from app.agents.primitives import EscalationLimiter
+
     fake_now = [0.0]
 
     def clock() -> float:
@@ -450,20 +545,132 @@ async def test_limiter_window_slides() -> None:
     limiter = EscalationLimiter(
         limit_per_agent=2, window_seconds=10, clock=clock
     )
-    assert limiter.should_notify("a") is True   # t=0, count=1
-    assert limiter.should_notify("a") is True   # t=0, count=2
-    assert limiter.should_notify("a") is False  # over budget
+    a = _agent("slide")
+    assert limiter.should_notify(a) is True   # t=0, count=1
+    assert limiter.should_notify(a) is True   # t=0, count=2
+    assert limiter.should_notify(a) is False  # over budget
 
     fake_now[0] = 11.0  # advance past the window
-    assert limiter.should_notify("a") is True   # bucket cleared
+    assert limiter.should_notify(a) is True   # bucket cleared
 
 
-async def test_limiter_zero_budget_never_notifies() -> None:
+async def test_limiter_zero_budget_never_notifies(
+    limiter_factory: Callable[..., Any],
+) -> None:
     """A limit of 0 disables notifications entirely (e.g. a quiet
     deployment that shouldn't page on anything)."""
-    limiter = EscalationLimiter(limit_per_agent=0, window_seconds=60)
-    assert limiter.should_notify("a") is False
-    assert limiter.should_notify("a") is False
+    limiter = limiter_factory(limit_per_agent=0, window_seconds=60)
+    a = _agent("zero")
+    assert limiter.should_notify(a) is False
+    assert limiter.should_notify(a) is False
+
+
+# ── Redis-specific tests (T2.6 — three new tests) ──────────────────
+
+
+@pytest.mark.skipif(
+    "redis" not in _BACKENDS_AVAILABLE,
+    reason="Redis is not reachable in this test environment",
+)
+async def test_redis_limiter_shares_state_across_instances() -> None:
+    """Multi-process simulation: instance A and instance B both
+    talk to the same Redis. Increment via A → instance B sees the
+    count. This is the actual point of the Track 2 swap; the
+    in-memory backend would over-grant by 2x for the same
+    sequence."""
+    from app.agents.primitives import RedisEscalationLimiter
+
+    a = _agent("shared")
+    instance_a = RedisEscalationLimiter(limit_per_agent=2, window_seconds=60)
+    instance_b = RedisEscalationLimiter(limit_per_agent=2, window_seconds=60)
+    instance_a.reset(a)
+
+    # Instance A consumes both slots.
+    assert instance_a.should_notify(a) is True
+    assert instance_a.should_notify(a) is True
+    # Instance B sees the bucket is full and refuses — proves the
+    # sorted set is shared, not local-deque.
+    assert instance_b.should_notify(a) is False
+    instance_a.reset(a)
+
+
+@pytest.mark.skipif(
+    "redis" not in _BACKENDS_AVAILABLE,
+    reason="Redis is not reachable in this test environment",
+)
+async def test_redis_limiter_sliding_window() -> None:
+    """Sliding-window correctness on a live Redis with a short
+    real-time window.
+
+    Window = 1 second so the test runs in ~1.2 seconds total. We
+    insert 2 entries at t≈0, sleep 1.1s past the window cutoff,
+    insert another → only that newest entry should remain.
+
+    The brief calls for "t=0, t=30min, t=61min, prove only 2
+    remain after the third arrives." We compress the same
+    semantic to second-scale to keep CI fast; the ZREMRANGEBYSCORE
+    cutoff math is dimension-independent (cutoff = now - window in
+    whatever units `time.time()` returns).
+    """
+    import time as _time
+
+    from app.agents.primitives import RedisEscalationLimiter
+
+    a = _agent("slide_redis")
+    limiter = RedisEscalationLimiter(limit_per_agent=10, window_seconds=1)
+    limiter.reset(a)
+
+    # t≈0 — two entries.
+    assert limiter.should_notify(a) is True
+    assert limiter.should_notify(a) is True
+
+    # Sleep past the window so the first two should evict.
+    _time.sleep(1.2)
+
+    # New insert. ZREMRANGEBYSCORE drops the previous two before
+    # ZCARD; with limit=10 we admit; ZCARD should be 1 after the
+    # ZADD because everything else fell off the back.
+    assert limiter.should_notify(a) is True
+    raw = limiter.redis.zcard(limiter._key(a))
+    assert raw == 1, (
+        f"expected exactly 1 entry after sliding-window eviction, got {raw}"
+    )
+    limiter.reset(a)
+
+
+async def test_redis_limiter_fail_open_when_redis_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Load-bearing fail-open contract: when Redis raises, the
+    limiter MUST return True (escalate everything) with a loud
+    warning, NOT False. Suppressing during a Redis incident is
+    the unsafe choice — that's exactly when notifications matter
+    most.
+
+    We simulate the failure by injecting a client whose pipeline
+    raises. Any redis exception inside `should_notify` should
+    surface as fail-open (return True) plus an
+    `escalation_limiter.redis_failure` log line.
+    """
+    from app.agents.primitives import RedisEscalationLimiter
+
+    class _BrokenClient:
+        def pipeline(self, *args: Any, **kwargs: Any) -> Any:
+            raise ConnectionError("simulated Redis outage")
+
+    limiter = RedisEscalationLimiter(
+        limit_per_agent=2,
+        window_seconds=60,
+        redis_client=_BrokenClient(),
+    )
+    # Even after exhausting the budget would normally suppress
+    # under healthy Redis, the broken client → fail-open → all
+    # calls return True.
+    a = _agent("failopen")
+    assert limiter.should_notify(a) is True
+    assert limiter.should_notify(a) is True
+    assert limiter.should_notify(a) is True
+    assert limiter.should_notify(a) is True
 
 
 # ── escalation rate limit: integration ─────────────────────────────

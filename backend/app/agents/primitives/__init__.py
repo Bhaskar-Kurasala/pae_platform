@@ -50,7 +50,9 @@ from app.agents.primitives.evaluation import (
     CriticResult,
     CriticVerdict,
     EscalationLimiter,
+    RedisEscalationLimiter,
     escalation_limiter,
+    make_escalation_limiter,
     evaluate_with_retry,
 )
 from app.agents.primitives.memory import (
@@ -120,6 +122,8 @@ __all__ = [
     "EMBEDDING_DIM",
     "EmbeddingError",
     "EscalationLimiter",
+    "RedisEscalationLimiter",
+    "make_escalation_limiter",
     "MemoryRow",
     "MemoryStore",
     "MemoryWrite",

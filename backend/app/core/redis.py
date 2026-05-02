@@ -16,6 +16,11 @@ _KEY_CATEGORIES = frozenset(
         "interview",  # mock-interview session store
         "quiz",  # pre-generated quiz versions keyed by message_id
         "notebook",  # P-Today2: bookmark summarization cache by message_id
+        # Track 2 — Agentic OS escalation limiter. Per-agent
+        # sorted set, scored by epoch seconds, ZREMRANGEBYSCORE
+        # window of 3600s. See evaluation.RedisEscalationLimiter
+        # for the full key shape.
+        "escalation",
     }
 )
 

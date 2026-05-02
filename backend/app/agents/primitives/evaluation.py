@@ -50,6 +50,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.primitives import metrics
+from app.core.config import settings
 from app.models.agent_escalation import AgentEscalation
 from app.models.agent_evaluation import AgentEvaluation
 
@@ -364,10 +365,13 @@ class EscalationLimiter:
     """Per-agent sliding-window rate limit on admin notifications.
 
     Process-local in-memory implementation. A multi-worker deploy
-    will see slightly higher effective limits (each worker carries
-    its own deque), but the hard cap on notifications is still tight
-    enough to prevent a flood. A redis-backed implementation is a
-    future swap behind the same API.
+    will see effective limits N×higher (each worker carries its own
+    deque) — that's why Track 2 introduced `RedisEscalationLimiter`
+    as the production default. This in-memory class is kept for:
+      • Tests that want isolation per case
+      • Dev environments without Redis
+      • The fail-open destination when Redis is unreachable at
+        runtime (see `make_escalation_limiter`)
 
     The limiter ONLY governs the `notified_admin` flag. Escalation
     rows themselves are written unconditionally — they're the audit
@@ -418,10 +422,236 @@ class EscalationLimiter:
             self._buckets.pop(agent_name, None)
 
 
-# Process-local singleton. The limiter is stateful and per-process;
-# AgenticBaseAgent (D7) reads from this. Tests can monkeypatch the
-# module attribute or call `.reset()`.
-escalation_limiter = EscalationLimiter()
+class RedisEscalationLimiter:
+    """Per-agent sliding-window rate limit, multi-process safe.
+
+    Sorted set per agent, scored by epoch seconds. ZREMRANGEBYSCORE
+    evicts entries older than `now - window` before every count
+    check, so the window is sliding (not fixed-bucket). All Celery
+    workers + FastAPI workers + beat process share the same bucket
+    — `limit_per_agent` is the actual ceiling on notifications.
+
+    Time-math units (called out per Track 2 brief):
+      • Window default = 3600 seconds (1 hour).
+      • All scores written and read as EPOCH SECONDS via
+        `time.time()` — never milliseconds. Mixing the two would
+        make the window 1000× too narrow on read or too wide on
+        write, and the bug would only surface under load.
+      • The cutoff in ZREMRANGEBYSCORE is `now - window_seconds`,
+        all in seconds.
+      • TTL on the key = 2 × window_seconds, so abandoned-agent
+        keys clean themselves up rather than leaking forever.
+
+    Fail-open contract (load-bearing): if Redis raises (connection
+    drop, timeout, command failure), `should_notify` returns True
+    and logs a warning. The instinct on infrastructure failure is
+    "be safe, refuse to act" — but in this case refusing means
+    suppressing admin notifications during a Redis incident, which
+    is exactly when those notifications matter most. Permissive
+    behavior under failure is the correct default.
+
+    Construct via `make_escalation_limiter(...)` — the module-level
+    factory probes Redis once, falls back to in-memory if
+    unreachable, and returns whichever is appropriate. Direct
+    construction works too for tests that bring their own client.
+    """
+
+    # Per-agent key shape:
+    #   pae:{environment}:escalation:{agent_name}
+    # built via app.core.redis.namespaced_key("escalation", agent).
+    _KEY_CATEGORY = "escalation"
+
+    def __init__(
+        self,
+        *,
+        limit_per_agent: int = DEFAULT_ESCALATION_LIMIT_PER_AGENT,
+        window_seconds: int = DEFAULT_ESCALATION_WINDOW_SECONDS,
+        clock: Callable[[], float] = time.time,  # epoch seconds
+        redis_client: Any | None = None,
+    ) -> None:
+        self._limit = max(0, limit_per_agent)
+        self._window = int(window_seconds)
+        # IMPORTANT: epoch seconds. NOT monotonic, NOT milliseconds.
+        # Cross-process bucket sharing requires wall-clock
+        # synchronization, which `time.time()` provides; monotonic
+        # clocks are per-process. ZADD scores are floats but treated
+        # as seconds throughout.
+        self._clock = clock
+        self._redis = redis_client  # injected for tests; resolved lazily otherwise
+
+    @property
+    def redis(self) -> Any:
+        """Resolve the Redis client lazily so a Redis outage at
+        import time doesn't kill the module load. Cached on first
+        successful call."""
+        if self._redis is None:
+            import redis as redis_lib  # sync client; matches rate_limit.py
+
+            self._redis = redis_lib.Redis.from_url(
+                settings.redis_url,
+                socket_connect_timeout=1.0,
+                socket_timeout=1.0,
+                decode_responses=True,
+            )
+        return self._redis
+
+    def _key(self, agent_name: str) -> str:
+        from app.core.redis import namespaced_key
+
+        return namespaced_key(self._KEY_CATEGORY, agent_name)
+
+    def should_notify(self, agent_name: str) -> bool:
+        """Return True iff the next escalation should set
+        notified_admin=True.
+
+        Sequence (atomic via Redis pipeline):
+          1. ZREMRANGEBYSCORE key 0 (now - window_seconds) — evict
+             entries that fell off the back of the sliding window.
+             Units: seconds. now = epoch seconds (wall clock).
+          2. ZCARD key — count remaining entries.
+          3. If count >= limit, return False (no ZADD; over-quota
+             escalations do not extend their own quota).
+          4. Else ZADD key {now_seconds} "{now_seconds}:{uuid4}" and
+             return True. Score is epoch seconds; member uniqueness
+             is from the appended UUID so concurrent same-second
+             writes don't collide.
+          5. EXPIRE key (2 × window_seconds) — abandoned agents
+             don't leak keys.
+
+        Fail-open: any redis exception → log loud, return True.
+        """
+        if self._limit <= 0:
+            return False
+        now_seconds = self._clock()  # EPOCH SECONDS — see __init__ note
+        cutoff_seconds = now_seconds - self._window
+        key = self._key(agent_name)
+
+        try:
+            client = self.redis
+            with client.pipeline(transaction=False) as pipe:
+                pipe.zremrangebyscore(key, 0, cutoff_seconds)
+                pipe.zcard(key)
+                _, current_count = pipe.execute()
+        except Exception as exc:  # noqa: BLE001 — fail-open is the contract
+            log.warning(
+                "escalation_limiter.redis_failure",
+                error=str(exc),
+                error_type=type(exc).__name__,
+                agent=agent_name,
+                fallback="permissive",
+            )
+            return True
+
+        if current_count >= self._limit:
+            return False
+
+        member = f"{now_seconds}:{uuid.uuid4().hex}"
+        try:
+            with client.pipeline(transaction=False) as pipe:
+                pipe.zadd(key, {member: now_seconds})
+                pipe.expire(key, self._window * 2)
+                pipe.execute()
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "escalation_limiter.redis_failure",
+                error=str(exc),
+                error_type=type(exc).__name__,
+                agent=agent_name,
+                fallback="permissive",
+            )
+            return True
+        return True
+
+    def reset(self, agent_name: str | None = None) -> None:
+        """Test helper — drops the sorted set for one agent or all
+        keys under the escalation namespace.
+
+        Production code never calls this. Tests use it to isolate
+        cases against a shared Redis instance.
+        """
+        try:
+            client = self.redis
+            if agent_name is not None:
+                client.delete(self._key(agent_name))
+                return
+            from app.core.redis import namespaced_key
+
+            pattern = namespaced_key(self._KEY_CATEGORY, "*")
+            for key in client.scan_iter(match=pattern):
+                client.delete(key)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "escalation_limiter.reset_failed",
+                error=str(exc),
+                agent=agent_name,
+            )
+
+
+def make_escalation_limiter() -> EscalationLimiter | RedisEscalationLimiter:
+    """Pick the right limiter for the current environment.
+
+    Priority order:
+      1. settings.escalation_limiter_backend == "in_memory" → in-memory
+      2. settings.escalation_limiter_backend == "redis" + Redis reachable
+         → Redis-backed
+      3. settings.escalation_limiter_backend == "redis" + Redis unreachable
+         → in-memory with a loud warning (boot-time fail-open)
+
+    Probe is a single PING with a 1s timeout. If it fails, we land
+    in case 3 — the application keeps booting, the limiter is
+    permissive across workers (over-grants), and the warning fires
+    once at module import. Runtime Redis failures (after a
+    successful boot probe) are handled inside
+    `RedisEscalationLimiter.should_notify` via the same fail-open
+    pattern.
+    """
+    backend = (settings.escalation_limiter_backend or "redis").lower().strip()
+    if backend == "in_memory":
+        return EscalationLimiter()
+    if backend != "redis":
+        log.warning(
+            "escalation_limiter.unknown_backend",
+            configured=backend,
+            fallback="in_memory",
+        )
+        return EscalationLimiter()
+
+    # Backend = redis. Probe.
+    try:
+        import redis as redis_lib
+
+        client = redis_lib.Redis.from_url(
+            settings.redis_url,
+            socket_connect_timeout=1.0,
+            socket_timeout=1.0,
+            decode_responses=True,
+        )
+        client.ping()
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "escalation_limiter.redis_unreachable_at_boot",
+            error=str(exc),
+            error_type=type(exc).__name__,
+            fallback="in_memory",
+            note=(
+                "Permissive across workers — admin notifications will "
+                "over-grant by N× until Redis returns. Restore Redis to "
+                "re-enable the cross-worker cap."
+            ),
+        )
+        return EscalationLimiter()
+
+    return RedisEscalationLimiter(redis_client=client)
+
+
+# Process-level limiter chosen at import time. The boot-time probe
+# inside `make_escalation_limiter` decides Redis vs in-memory; once
+# chosen, the instance lives for the worker's lifetime. Tests
+# replace this via the `evaluate_with_retry(limiter=...)` parameter
+# so the singleton's choice doesn't leak across cases.
+escalation_limiter: EscalationLimiter | RedisEscalationLimiter = (
+    make_escalation_limiter()
+)
 
 
 # ── AgentResult + retry orchestrator ───────────────────────────────
@@ -788,6 +1018,8 @@ __all__ = [
     "DEFAULT_MAX_RETRIES",
     "DEFAULT_THRESHOLD",
     "EscalationLimiter",
+    "RedisEscalationLimiter",
     "escalation_limiter",
     "evaluate_with_retry",
+    "make_escalation_limiter",
 ]

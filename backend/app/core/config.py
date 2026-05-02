@@ -199,6 +199,26 @@ class Settings(BaseSettings):
     voyage_api_key: str = ""
     embeddings_model: str = "voyage-3"
 
+    # Agentic OS — escalation limiter backend (D5+Track 2).
+    #
+    # `redis` (default): per-agent sliding-window sorted-set in Redis.
+    #   Multi-worker safe: every Celery worker / FastAPI worker
+    #   shares the same bucket so the configured limit is the
+    #   actual cap on admin notifications.
+    #
+    # `in_memory`: process-local deque. Pre-Track-2 default;
+    #   over-grants by Nx where N = worker count. Kept as the
+    #   fallback path for tests and dev environments without
+    #   Redis (and as the fail-open destination when Redis is
+    #   unreachable at runtime).
+    #
+    # Fail-open contract (load-bearing): when Redis is configured
+    # but unavailable, the limiter MUST degrade to permissive
+    # (escalate everything) with a loud warning, NOT block. A
+    # Redis incident is exactly when admins need the notification
+    # firehose; suppressing during failure is the unsafe default.
+    escalation_limiter_backend: str = "redis"
+
     # Inter-agent call depth ceiling. Hard cap that prevents an
     # agent that calls itself (or an unbounded chain) from hanging
     # the request. Default 5: enough headroom for legitimate
