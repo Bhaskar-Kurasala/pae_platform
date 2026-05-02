@@ -1,12 +1,22 @@
 # Follow-up: swap the EscalationLimiter to a redis-backed implementation
 
-**Owner:** _unassigned — pick up before D8 ships._
-**Status:** **BLOCKING** before `enable_proactive=True` lands in prod.
+**Owner:** RESOLVED 2026-05-02 by Track 2 (`feat(agentic-os): track-2`).
+**Status:** **RESOLVED** — `RedisEscalationLimiter` shipped with
+boot-time + runtime fail-open, 25/25 limiter tests passing.
 **Created:** 2026-05-02
-**Last update:** 2026-05-02 — escalation level raised after D6
-review. Proactive infra is now ready (D6); the moment a real
-proactive flow turns on (D8), the multi-worker over-grant becomes
-production behaviour, not theoretical risk.
+**Resolved:** 2026-05-02
+**Last update:** 2026-05-02 — Track 2 landed:
+  • RedisEscalationLimiter (sorted-set, sliding window, epoch-seconds)
+  • Boot-time fail-open via `make_escalation_limiter()`
+  • Runtime fail-open inside `should_notify()` — returns True
+    (escalate everything) on any Redis exception with a loud log.
+    The instinct on infra failure is "be safe by refusing"; this
+    case proves refusing IS the unsafe choice (suppressing
+    notifications during an incident).
+  • New `escalation_limiter_backend` config (redis | in_memory)
+  • Tests parameterized over both backends
+File left in place per docs/followups/README.md convention so the
+trail of resolved follow-ups is itself useful.
 
 **Do not enable proactive flows in prod until this is resolved.**
 Set `settings.enable_proactive=False` (default) until the redis-
