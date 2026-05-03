@@ -213,18 +213,41 @@ async def _load_goal_contract(
 ) -> GoalContractSummary | None:
     """Read the currently-active goal contract via raw SQL.
 
-    Raw SQL because GoalContract's schema varies by deployment (column
-    names differ slightly between dev seed scripts and prod). Fail-soft
-    on column-not-found.
+    Two-bug fix (D10 Checkpoint 2 sign-off / Commit 5):
+
+      1. The original D9 query referenced columns that don't exist:
+         `weekly_hours_committed` (real column is `weekly_hours`)
+         and `expires_at` (no such column on goal_contracts at all
+         through migration 0058). Both were architectural-intent
+         names from Pass 3b §3.1 that diverged from the existing
+         model + migrations. Now uses the real columns.
+
+      2. The original try/except caught the Python exception but
+         the asyncpg transaction was already poisoned at the
+         protocol level. The next statement on the same session
+         (typically the agent_call_chain INSERT inside call_agent)
+         hit InFailedSQLTransactionError and aborted the whole
+         dispatch path. Now we explicitly rollback inside the
+         except so the session is recoverable for downstream work.
+
+    See docs/followups/goal-contracts-schema-divergence.md for the
+    full classification + recommended D12 follow-up that adds the
+    architecturally-intended columns properly.
+
+    Fail-soft contract preserved: any SQL failure (the synthetic
+    test fires this path on purpose — see
+    tests/test_services/test_snapshot_service_rollback.py) returns
+    None to the caller after rolling back the session. Rollback
+    failure is itself caught + logged so it never shadows the
+    original error in observability.
     """
     try:
         result = await db.execute(
             text(
                 """
-                SELECT weekly_hours_committed, target_role, expires_at
+                SELECT weekly_hours, target_role
                 FROM goal_contracts
                 WHERE user_id = :uid
-                  AND (expires_at IS NULL OR expires_at > now())
                 ORDER BY created_at DESC
                 LIMIT 1
                 """
@@ -234,17 +257,35 @@ async def _load_goal_contract(
         row = result.first()
         if row is None:
             return None
+        # weekly_hours is a string bucket ("3-5", "6-10", "11+") per
+        # the model's String(16) column — no float coercion. expires_at
+        # stays None as a forward-looking schema field; the column
+        # doesn't exist yet (see followup doc).
         return GoalContractSummary(
-            weekly_hours_committed=float(row[0]) if row[0] is not None else None,
+            weekly_hours=row[0],
             target_role=row[1],
-            expires_at=row[2],
+            expires_at=None,
         )
     except Exception as exc:  # noqa: BLE001
-        log.debug(
-            "snapshot.goal_contract_unavailable",
+        log.warning(
+            "snapshot.goal_contract.load_failed",
             error=str(exc),
             user_id=str(user_id),
         )
+        # Recover the asyncpg transaction so downstream INSERTs on
+        # this session don't trip InFailedSQLTransactionError. Wrap
+        # in its own try/except so a rollback failure never shadows
+        # the original error — both errors get structured fields so
+        # observability can correlate them.
+        try:
+            await db.rollback()
+        except Exception as rollback_exc:  # noqa: BLE001
+            log.error(
+                "snapshot.goal_contract.rollback_failed",
+                original_error=str(exc),
+                rollback_error=str(rollback_exc),
+                user_id=str(user_id),
+            )
         return None
 
 

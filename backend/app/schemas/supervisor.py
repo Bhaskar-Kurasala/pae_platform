@@ -96,8 +96,24 @@ class ProgressSummary(BaseModel):
 
 
 class GoalContractSummary(BaseModel):
-    weekly_hours_committed: float | None = None
+    # weekly_hours is a bucket string per the existing schema:
+    # Literal["3-5", "6-10", "11+"] (see app/schemas/goal_contract.py
+    # WeeklyHours). The snapshot consumer treats it as opaque and
+    # passes it through to the Supervisor's prose-builder, which
+    # currently reads only target_role anyway.
+    #
+    # D10 Checkpoint 2 sign-off / Commit 5: this field was renamed
+    # from `weekly_hours_committed: float` to match the model +
+    # migrations. See docs/followups/goal-contracts-schema-divergence.md
+    # for the full story; the float-typed name was a D9 invention
+    # that diverged from the actual schema.
+    weekly_hours: str | None = None
     target_role: str | None = None
+    # expires_at is a forward-looking field — the goal_contracts
+    # table currently has no expires_at column. The snapshot service
+    # never populates this field; it stays None until/unless a
+    # future deliverable (Pass 3c E4 / D12 study_planner is the
+    # natural home) adds the column via a proper migration.
     expires_at: datetime | None = None
 
 

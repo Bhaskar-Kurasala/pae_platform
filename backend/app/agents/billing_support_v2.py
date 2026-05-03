@@ -183,7 +183,17 @@ class BillingSupportAgent(AgenticBaseAgent[BillingSupportInput]):
         )
 
         # Stash the interaction. Best-effort — failure to write
-        # memory must not fail the user-facing response.
+        # memory must not fail the user-facing response. Same
+        # asyncpg-recovery discipline as
+        # agentic_snapshot_service._load_goal_contract: catching the
+        # Python exception isn't enough — asyncpg poisons the
+        # transaction at the protocol level, so the next statement
+        # on the same session (typically the agent_call_chain INSERT
+        # inside call_agent) trips PendingRollbackError unless we
+        # explicitly rollback. The rollback itself is wrapped so a
+        # rollback failure never shadows the original error.
+        # See docs/followups/goal-contracts-schema-divergence.md for
+        # the canonical write-up of this asyncpg gotcha.
         try:
             await self._record_interaction(input, answer_payload, ctx)
         except Exception as exc:  # noqa: BLE001
@@ -192,6 +202,15 @@ class BillingSupportAgent(AgenticBaseAgent[BillingSupportInput]):
                 error=str(exc),
                 user_id=str(ctx.user_id) if ctx.user_id else None,
             )
+            try:
+                await ctx.session.rollback()
+            except Exception as rollback_exc:  # noqa: BLE001
+                log.error(
+                    "billing_support_v2.memory_write_rollback_failed",
+                    original_error=str(exc),
+                    rollback_error=str(rollback_exc),
+                    user_id=str(ctx.user_id) if ctx.user_id else None,
+                )
 
         return answer_payload
 
