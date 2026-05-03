@@ -25,6 +25,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import DateTime, ForeignKey, Text, func
+from sqlalchemy import text as sa_text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -58,11 +59,24 @@ class StudentInbox(Base, UUIDMixin):
     # Renamed to `metadata_` in Python because SQLAlchemy reserves
     # `metadata` on the declarative base. Column name in the DB stays
     # `metadata` for query ergonomics.
+    #
+    # server_default uses sa.text("'{}'") rather than the more
+    # explicit func.cast("{}", JSONB). Reason: D10 Checkpoint 1
+    # discovered that func.cast(<literal>, JSONB) needs a literal-value
+    # renderer for the JSONB target type at DDL emit time, which the
+    # @compiles(JSONB, "sqlite") shim in tests/conftest.py doesn't
+    # provide ("No literal value renderer is available for literal
+    # value '{}' with datatype JSONB"). Postgres still infers JSONB
+    # from the column type at INSERT time (text '{}' auto-casts to
+    # the JSONB column), and SQLite renders the default as a plain
+    # TEXT literal. The production migration (0054) uses
+    # sa.text("'{}'::jsonb") explicitly which Postgres accepts; the
+    # model-side default is the cross-backend equivalent.
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata",
         JSONB,
         nullable=False,
-        server_default=func.cast("{}", JSONB),
+        server_default=sa_text("'{}'"),
     )
     idempotency_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
