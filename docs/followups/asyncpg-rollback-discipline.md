@@ -165,3 +165,198 @@ D17 cleanup per the Pass 3j scope, or earlier opportunistically as
 related code is touched (e.g., D11 senior_engineer migration may
 naturally surface more instances if it runs into transaction
 poisoning during sandbox execution paths).
+
+---
+
+# Three sibling patterns (added during D10 Checkpoint 3 sign-off)
+
+The D10 Checkpoint 3 in-flight discoveries surfaced three more
+patterns of "implicit-state assumption that the code makes about
+its environment." All three share the meta-pattern: **the code
+silently assumes a setup step has happened, and works in test or
+dev because the assumption happens to hold there, but breaks (or
+nearly breaks) in a different setup.** The asyncpg-rollback gap
+above is the headline instance; these three are siblings worth
+tracking together so a future D17 audit can sweep all four classes
+at once.
+
+## Sibling 1: JSONB-cast in raw SQL strings
+
+**The pattern.** SQL strings written against JSONB columns
+sometimes include explicit `::jsonb` casts (e.g., `INSERT INTO
+student_inbox (..., metadata, ...) VALUES (..., :meta::jsonb, ...)`).
+asyncpg's parameter parser sees `:meta::jsonb` as the parameter
+`meta:` followed by literal `:jsonb` — but `:` after a
+parameter name isn't valid syntax, so the whole statement raises
+`PostgresSyntaxError: syntax error at or near ":"`.
+
+**The fix in every case.** Drop the `::jsonb` cast. Postgres
+auto-casts the bound text value to the column's declared type
+(JSONB) at INSERT time because the column type is JSONB; the cast
+is redundant on the bind. Pass the JSON as a string via
+`json.dumps(...)`.
+
+**Three known instances fixed during D10.** All three share the
+exact same shape:
+
+1. `student_inbox.metadata_` server_default
+   ([commit 21ff4f6](../../backend/app/models/student_inbox.py))
+   — fixed in Commit 5 by swapping `func.cast("{}", JSONB)` →
+   `sa_text("'{}'")`. SQLAlchemy-side cast, not a raw SQL bug
+   per se, but same principle: drop the explicit cast, let the
+   column type do the work.
+2. `escalate_to_human` INSERT
+   ([commit 2032f69](../../backend/app/agents/tools/agent_specific/billing_support/escalate_to_human.py))
+   — fixed in Commit 6 by dropping `:meta::jsonb` from the
+   INSERT statement. Caught immediately by the Checkpoint 3
+   escalation smoke; would have surfaced at first real
+   escalation in production otherwise.
+3. `entitlement_service.grant_signup_grace` and
+   `grant_placement_quiz_session`
+   ([entitlement_service.py:639,694](../../backend/app/services/entitlement_service.py#L639))
+   — also use `:meta::jsonb`, but currently work because the
+   D9 implementer happened to test only the unit path that
+   dispatches them (which goes through pg_session). **Production
+   path may or may not have hit them yet.** Worth fixing
+   prophylactically as part of the D17 audit since the pattern
+   will eventually fire identically.
+
+**How to audit.** Grep for `::jsonb` in raw SQL strings across the
+codebase:
+
+```bash
+# All raw-SQL ::jsonb casts
+grep -rn '::jsonb' backend/app/
+
+# More targeted: ::jsonb inside text(...) blocks
+grep -rB2 -A2 'text(' backend/app/ | grep '::jsonb'
+```
+
+For each hit, decide:
+- **Drop the cast** if the column is declared JSONB at the
+  schema level (most cases). Postgres infers from the column type.
+- **Keep the cast** only if the value is being inserted into a
+  non-JSONB column where Postgres needs the explicit type
+  conversion (rare — usually a sign of a different design bug).
+
+## Sibling 2: Registration-on-import patterns
+
+**The pattern.** Several modules in the codebase use the "import
+the module → side-effect-register something in a global registry"
+pattern. The agentic OS uses this in three places:
+
+1. **Agent classes** auto-register via `AgenticBaseAgent.__init_subclass__`
+   when their module is imported. The
+   `_agentic_loader._AGENTIC_AGENT_MODULES` list + the
+   `load_agentic_agents()` call in FastAPI lifespan cover this.
+2. **Tool decorators** (`@tool(...)`) register with the
+   `tool_registry` when their module is imported. Imports are
+   chained through `app.agents.tools.__init__` (themed modules)
+   + `app.agents.tools.universal.__init__` + `app.agents.tools.agent_specific.__init__`.
+3. **Proactive triggers** (`@proactive`, `@on_event`) register
+   schedules + webhook subscriptions at decorator-fire time.
+
+The trap: **calling the loader in tests doesn't always cover the
+production path.** `tests/conftest.py` and many test fixtures
+import the agent + tool modules implicitly during their own setup
+(via the `client` fixture, the `db_session` fixture, etc.). So
+tests pass even when the production app has no equivalent import
+trigger. The dev-vs-prod divergence is invisible from inside
+the test suite.
+
+**Known instance.** `ensure_tools_loaded()` was not called in
+`app/main.py` lifespan as of D10 Checkpoint 3
+([commit 2032f69](../../backend/app/main.py)). The agent-specific
+billing tools never registered in the FastAPI process; the first
+real escalation request would have failed with
+`Tool 'escalate_to_human' not registered`. The Checkpoint 3
+smoke caught it; production would have failed silently for the
+"phantom escalation" cohort until the inbox went unanswered.
+
+**How to audit.** For each side-effecting import in the codebase:
+
+```bash
+# Find side-effect-only imports (the "noqa: F401" tag)
+grep -rn 'noqa: F401' backend/app/
+
+# Find decorator-based registrations
+grep -rE '^@(tool|register|on_event|proactive)' backend/app/
+
+# Cross-reference: is each registration source loaded at app
+# startup? lifespan in main.py + celery_app boot are the two
+# entry points.
+grep -nE 'import|load_|ensure_' backend/app/main.py backend/app/core/celery_app.py
+```
+
+For each registration source, verify it has at least one
+production code path that triggers the import. A registration
+that only fires from a test fixture is a bug.
+
+**Recommended generalization (if the audit finds more gaps):** add
+a `register_all_at_startup()` helper in `app/agents/__init__.py`
+(or similar) that calls every loader explicitly. Lifespan calls
+that one helper; nothing depends on import-graph coincidence.
+
+## Sibling 3: Test isolation around clear-able registries
+
+**The pattern.** Tests that depend on a process-local registry
+state (the agentic registry, the tool registry, structlog
+processors, etc.) need either per-test restoration of that state
+OR direct construction that doesn't go through the registry at
+all. Some test fixtures call `clear_X_registry()` between tests
+for isolation; downstream tests that expect the registry to be
+populated then fail with `KeyError` or "not registered" errors
+that have nothing to do with the test's actual purpose.
+
+**Known instance.** D10 Checkpoint 3's three phantom-escalation
+pin tests at
+[tests/test_agents/test_billing_support_v2.py](../../backend/tests/test_agents/test_billing_support_v2.py)
+originally fetched `BillingSupportAgent` from `_agentic_registry`.
+Tests in `tests/test_agents/primitives/` call
+`clear_agentic_registry()` per test (legitimately — they're
+exercising the registry). When pytest collected both files in
+the full regression, the primitives tests ran first
+(alphabetical), cleared the registry, and the pin tests ran
+later with an empty registry → `KeyError: 'billing_support'`.
+Tests pass in isolation; fail in the full regression. Confusing.
+
+**The fix.** Pin tests now construct `BillingSupportAgent()`
+directly instead of going through `_agentic_registry`. Same
+class, no implicit-state assumption.
+
+**How to avoid in future tests.** When writing a test that needs
+an agent (or a tool, or any registered singleton):
+
+- **Prefer direct construction.** `MyAgent()` is honest about
+  what's being tested.
+- **If the test must go through the registry** (e.g., it's
+  testing the registry itself), restore registry state in a
+  per-test fixture: save the dict before the test, replace its
+  contents at teardown.
+- **Never assume "the registry is populated because some other
+  test already imported the module."** That's the trap that
+  causes test ordering to matter.
+
+This will bite again as D11+ adds more agent tests. The
+recommendation should land in the test-writing guide whenever
+that doc gets written.
+
+## Meta-pattern across all four
+
+The asyncpg rollback, JSONB cast, registration-on-import, and
+test-isolation patterns share one shape: **code that works
+because some unstated environmental assumption happens to hold,
+and breaks (or silently misbehaves) when the assumption changes.**
+Each instance was discovered the same way: an end-to-end
+verification path (smoke test, full regression, manual
+verification) hit the failure mode, and the in-isolation tests
+that should have caught it didn't because they shared the same
+environmental assumption.
+
+The systemic mitigation: **end-to-end verification is not
+optional.** Pin-tests in isolation catch logic bugs but miss
+integration bugs. Smoke + E2E catch integration bugs. Both are
+necessary. The D10 Checkpoint discipline — every checkpoint
+ends with both a regression sweep AND a smoke verification —
+caught all four of these patterns. D11+ should preserve the
+same discipline.
