@@ -176,10 +176,27 @@ class TestCapabilityRegistry:
         assert "supervisor" in names_available
         assert "learning_coach" in names_available
 
-    def test_other_specialists_not_yet_available(self) -> None:
+    def test_billing_support_available_now_after_d10(self) -> None:
+        """D10 flipped billing_support to available_now=True.
+
+        Pinned here so a future revert (or accidental re-flip back to
+        False) is loud. The full migration sequence is in
+        docs/architecture/pass-3kl-implementation-roadmap.md §A.1.
+        """
         caps = list_capabilities()
+        names_available = {c.name for c in caps if c.available_now}
+        assert "billing_support" in names_available
+
+    def test_other_specialists_not_yet_available(self) -> None:
+        """Specialists awaiting their own migration deliverable
+        stay available_now=False. D10 flipped billing_support; the
+        rest (senior_engineer, mock_interview, career bundle, etc.)
+        flip when D11/D12/D13/D14/D16 ship."""
+        caps = list_capabilities()
+        # As of D10: supervisor (D9), learning_coach (D8), billing_support (D10).
+        migrated = {"supervisor", "learning_coach", "billing_support"}
         for c in caps:
-            if c.name in ("supervisor", "learning_coach"):
+            if c.name in migrated:
                 continue
             assert c.available_now is False, (
                 f"{c.name} should be available_now=False until its migration"
@@ -243,12 +260,14 @@ class TestCapabilityFiltering:
         all_caps = list_capabilities()
         available = filter_capabilities_for_user(all_caps, ctx)
         names = {c.name for c in available}
-        # Free-tier user with no paid entitlement: only supervisor +
-        # billing_support are reachable. billing_support is NOT
-        # available_now in D9 (awaits D10), so only supervisor remains.
-        # That matches the registry inventory.
+        # Free-tier user with no paid entitlement: supervisor +
+        # billing_support are reachable. As of D10, billing_support is
+        # available_now=True (D9 had it as False until its migration).
+        # learning_coach is standard-tier-only and never reachable from
+        # free tier even when available_now.
         assert "learning_coach" not in names
         assert "supervisor" in names
+        assert "billing_support" in names
 
     def test_unavailable_now_filtered_out(self) -> None:
         ctx = _entitled_ctx(uuid.uuid4())

@@ -313,7 +313,7 @@ def _install_passing_tool_stubs() -> None:
     The autouse fixture's reload runs the production stubs first;
     we clear the three names we're about to redeclare so the
     @tool decorator's duplicate-name guard doesn't trip. Other
-    tools (recall_memory, run_ruff, …) stay as their production
+    tools (run_ruff, search_jobs, …) stay as their production
     stubs — the agent doesn't call them, so it doesn't matter."""
     for name in ("get_student_state", "search_course_content", "send_student_message"):
         tool_registry._tools.pop(name, None)

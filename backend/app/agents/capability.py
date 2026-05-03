@@ -274,7 +274,7 @@ _CAPABILITIES: Final[list[AgentCapability]] = [
         typical_cost_inr=Decimal("0.80"),
         requires_entitlement=True,  # gated, but minimum_tier=free includes it
         minimum_tier="free",  # available to expired-subscription students
-        available_now=False,  # awaits D10
+        available_now=True,  # MIGRATED in D10
         handoff_targets=[],
     ),
 ]

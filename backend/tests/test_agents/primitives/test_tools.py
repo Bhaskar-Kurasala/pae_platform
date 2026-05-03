@@ -86,8 +86,25 @@ async def _reset_registry() -> AsyncGenerator[None, None]:
     import app.agents.tools.code_tools as code_tools
     import app.agents.tools.content_tools as content_tools
     import app.agents.tools.github_tools as github_tools
-    import app.agents.tools.memory_tools as memory_tools
     import app.agents.tools.student_tools as student_tools
+
+    # D10: memory_tools (which contained the retired D3 stubs
+    # recall_memory + store_memory) is NO LONGER reloaded here. Its
+    # stubs were superseded by the universal tools at
+    # app/agents/tools/universal/. Reloading memory_tools would
+    # re-register the stubs and mask the retirement.
+    #
+    # D10: universal tools are NOT reloaded explicitly either.
+    # importlib.reload on a sub-tool module reinstantiates its pydantic
+    # model classes, which breaks `isinstance` checks in tests that
+    # imported those classes at module-load time. The package reload
+    # below re-executes `from app.agents.tools import universal`, which
+    # imports the EXISTING universal module from sys.modules without
+    # re-executing it — so the universal tools' @tool decorators don't
+    # re-fire and their model classes stay stable. This is sufficient
+    # for the test_tools fixture's purpose (re-populating the D3 stub
+    # roster); tests that exercise universal tools live in their own
+    # subdirectory and don't need this fixture's reset cycle.
 
     def _reload_all() -> None:
         tool_registry.clear()
@@ -97,7 +114,6 @@ async def _reset_registry() -> AsyncGenerator[None, None]:
 
         tools_mod._DISCOVERED = False
         for mod in (
-            memory_tools,
             student_tools,
             content_tools,
             code_tools,
@@ -479,12 +495,13 @@ async def test_to_dict_handles_pydantic_with_uuid() -> None:
 
 
 async def test_all_stubs_loaded() -> None:
-    """11 stubs registered: 2 memory + 4 student + 1 content + 1 code
-    + 1 github + 2 career."""
+    """Stubs still registered after D10: 4 student + 1 content + 1 code
+    + 1 github + 2 career = 9. The D3 memory stubs (recall_memory,
+    store_memory) were retired in D10 and replaced by the universal
+    tools memory_recall / memory_write at app/agents/tools/universal/.
+    See docs/architecture/pass-3d-tool-implementations.md §D."""
     ensure_tools_loaded()
     expected = {
-        "recall_memory",
-        "store_memory",
         "get_student_state",
         "update_mastery",
         "send_student_message",
@@ -503,14 +520,34 @@ async def test_all_stubs_loaded() -> None:
         assert spec.is_stub is True, f"{name} should be marked is_stub=True"
 
 
+async def test_d10_retired_d3_memory_stubs() -> None:
+    """Pin the D10 retirement so a future revert is loud.
+
+    The D3 stubs `recall_memory` and `store_memory` were superseded by
+    the universal tools `memory_recall` and `memory_write` in D10
+    (Pass 3d §D, §A.1). The package's import block in
+    app/agents/tools/__init__.py no longer imports memory_tools, so
+    the stubs do not register at all. Re-introducing them creates
+    dead NotImplementedError-raisers competing with the real tools.
+    """
+    ensure_tools_loaded()
+    have = set(tool_registry.names())
+    assert "recall_memory" not in have, (
+        "D3 stub 'recall_memory' should be retired by D10. The "
+        "replacement is 'memory_recall' from app/agents/tools/universal/."
+    )
+    assert "store_memory" not in have, (
+        "D3 stub 'store_memory' should be retired by D10. The "
+        "replacement is 'memory_write' from app/agents/tools/universal/."
+    )
+
+
 @pytest.mark.parametrize(
     "tool_name,bad_args",
     [
-        ("recall_memory", {}),  # missing required 'query'
-        ("recall_memory", {"query": "", "k": 5}),  # query min_length=1
-        ("recall_memory", {"query": "x", "k": 0}),  # k ge=1
-        ("store_memory", {"agent_name": "a"}),  # missing key + value
-        ("store_memory", {"agent_name": "", "key": "k", "value": {}}),  # empty agent_name
+        # D10: D3 memory stubs (recall_memory, store_memory) retired. Their
+        # successors (memory_recall, memory_write) get their own schema-
+        # validation tests at tests/test_agents/tools/universal/.
         ("get_student_state", {}),  # missing user_id
         ("get_student_state", {"user_id": "not-a-uuid"}),  # bad UUID
         ("update_mastery", {"user_id": str(uuid.uuid4())}),  # missing skill_id
@@ -561,15 +598,8 @@ async def test_stub_schemas_reject_bad_args(
 @pytest.mark.parametrize(
     "tool_name,good_args",
     [
-        ("recall_memory", {"query": "what role does priya want?"}),
-        (
-            "store_memory",
-            {
-                "agent_name": "learning_coach",
-                "key": "preference",
-                "value": {"hours_per_week": 10},
-            },
-        ),
+        # D10: D3 memory stubs (recall_memory, store_memory) retired —
+        # see test_d10_retired_d3_memory_stubs above.
         ("get_student_state", {"user_id": str(uuid.uuid4())}),
         (
             "update_mastery",
