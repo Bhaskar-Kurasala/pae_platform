@@ -1,0 +1,55 @@
+{
+  "version": "v1.0",
+  "updated": "2026-05-02",
+  "_comment": "Initial pattern bank from Pass 3g §B.2.1. Each entry is a known prompt-injection pattern. The file is loaded at boot by prompt_injection.py; updates are versioned (bump the suffix on the filename and load the newest available). Patterns are case-insensitive at match time via the (?i) prefix.",
+  "patterns": [
+    {
+      "id": "ignore_previous",
+      "regex": "(?i)\\b(ignore|disregard|forget)\\s+(previous|all|the\\s+above|prior|earlier)\\s+(instructions|directions|rules|prompts)\\b",
+      "severity": "high",
+      "rationale": "classic jailbreak: 'ignore previous instructions and...'"
+    },
+    {
+      "id": "role_confusion_admin",
+      "regex": "(?i)\\b(you are now|act as|pretend to be|roleplay as)\\s+(an?\\s+)?(admin|administrator|root|developer|engineer|owner)\\b",
+      "severity": "high",
+      "rationale": "role escalation attempt"
+    },
+    {
+      "id": "system_prompt_extraction",
+      "regex": "(?i)\\b(reveal|show|print|repeat|output|leak|dump)\\s+(your|the)\\s+(system|initial|original|hidden)?\\s*(prompt|instructions|directions)",
+      "severity": "high",
+      "rationale": "prompt extraction attempt"
+    },
+    {
+      "id": "delimiter_injection",
+      "regex": "(?i)(<\\|im_start\\||<\\|im_end\\||\\[INST\\]|\\[/INST\\])",
+      "severity": "medium",
+      "rationale": "model-specific delimiter injection"
+    },
+    {
+      "id": "developer_mode",
+      "regex": "(?i)\\b(developer|dev|debug|test)\\s+mode\\b",
+      "severity": "medium",
+      "rationale": "developer-mode jailbreak attempt"
+    },
+    {
+      "id": "hypothetical_framing",
+      "regex": "(?i)\\b(hypothetically|in\\s+a\\s+fictional\\s+scenario|imagine\\s+(if|that))\\b.*(\\b(no\\s+rules|no\\s+restrictions|no\\s+filter|no\\s+guidelines)\\b)",
+      "severity": "medium",
+      "rationale": "hypothetical-framing jailbreak"
+    },
+    {
+      "id": "encoded_instruction_marker",
+      "regex": "(?i)\\b(base64|hex|rot13)\\s+(decoded|of)\\s",
+      "severity": "low",
+      "rationale": "encoded-payload signal — flag for review"
+    },
+    {
+      "id": "DAN_jailbreak",
+      "regex": "(?i)\\b(DAN|do\\s+anything\\s+now|jailbroken|unlocked\\s+mode)\\b",
+      "severity": "critical",
+      "rationale": "DAN-family jailbreak attempt"
+    }
+  ]
+}

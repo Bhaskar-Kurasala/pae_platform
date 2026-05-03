@@ -89,14 +89,41 @@ kill_timeout = "30s"
   type = "http"
 
 # ─── VM sizing ──────────────────────────────────────────────────────
-# `shared-cpu-1x` w/ 512MB matches our PR2 measurements: gunicorn + 4
-# uvicorn workers + the langgraph state graph fit comfortably under
-# 400MB at idle, peaks ~480MB under chat load. Bump memory before CPU
-# — this is an I/O-bound workload (LLM HTTP, DB, Redis), not compute.
+# 4096MB + 1 gunicorn worker. NOT 512MB + 4 workers (the previous
+# baseline). Read this block before "optimizing" either knob.
+#
+# Why the bump (D9 / Pass 3g):
+#   The safety primitive (Pass 3g §B.3) loads Microsoft Presidio with
+#   spaCy's en_core_web_lg model for PII NER. Per Pass 3g §H.3, that
+#   model takes ~750MB of resident memory PER Python process that
+#   imports it. With the prior workers=4 config, that's ~3GB of safety
+#   memory alone before the application has done anything.
+#
+# Why a single worker (Pass 3i §D):
+#   The workload is I/O-bound — LLM HTTP, Postgres asyncpg, Redis.
+#   The uvicorn event loop async-saturates a shared CPU long before it
+#   saturates compute. Horizontal scale (Fly auto_start_machines on
+#   the http_service.concurrency limit) beats vertical worker count
+#   for this workload. The Dockerfile CMD enforces workers=1; comment
+#   block there explains the tradeoff in detail.
+#
+# Why 4096 specifically (not 2048, which would also work):
+#   Realistic per-machine resident under load:
+#     ~750MB Presidio + ~150MB Python interpreter + ~100MB app code
+#     + transient request memory + asyncpg/Redis pools = 1.2-1.6GB.
+#   At 2048MB headroom is 25-40% — thin enough that a traffic spike
+#   could OOM during the post-launch tuning period when we don't
+#   yet know the real memory profile. 4096MB gives 60%+ headroom.
+#   The cost delta (~$5-10 USD/month) is negligible against Pass 3i's
+#   ~8.4k INR/month hosting projection. Tighten back to 2GB later
+#   when there's real production memory data to act on.
+#
+# CPU stays shared-cpu-1x: this is I/O-bound; bumping CPU before
+# memory is the wrong knob.
 [[vm]]
   cpu_kind = "shared"
   cpus = 1
-  memory_mb = 512
+  memory_mb = 4096
 
 # ─── Process definitions ────────────────────────────────────────────
 # Single "app" process inherits the Dockerfile CMD (gunicorn). The
@@ -104,5 +131,13 @@ kill_timeout = "30s"
 # task can't starve the API. (Apps: pae-platform-worker, pae-platform-beat —
 # their fly.toml configs land in a follow-up infra-PR; until then the
 # Celery side runs from docker-compose locally.)
+#
+# IMPORTANT — when those Celery fly.toml files land, they MUST mirror
+# this VM block's memory_mb=4096 + worker concurrency cap. Same reason
+# as the API side: any agent invoked from a Celery task imports the
+# Pass 3g safety primitive (Presidio + spaCy en_core_web_lg, ~750MB
+# resident per process). A default 512MB Celery app OOMs on the first
+# proactive run. Launch-blocker for D16 (interrupt_agent). Detailed
+# math + remediation: docs/followups/celery-safety-memory-bump.md
 [processes]
   app = ""    # empty = use Dockerfile CMD

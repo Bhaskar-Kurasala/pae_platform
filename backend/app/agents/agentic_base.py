@@ -243,8 +243,49 @@ class AgenticBaseAgent(Generic[_InputT]):
         validated: _InputT = self._validate_input(input)
         request_str = self._request_for_eval(validated)
 
+        # ── D9 / Pass 3g §A.5 — input safety scan ──────────────────
+        # The gate wraps run(). The orchestrator scans the canonical
+        # `user_message` before the Supervisor runs (see
+        # agentic_orchestrator.py); that's the OUTER scan. This
+        # INNER scan covers specialist invocations from non-orchestrator
+        # paths: webhook-triggered agents, cron-triggered agents,
+        # admin tools that bypass the orchestrator.
+        #
+        # The Supervisor itself is exempt from the inner scan
+        # because the orchestrator already scanned its input. Per
+        # Pass 3g §A.5: "the wrapping is part of AgenticBaseAgent.run()".
+        input_verdict = await _maybe_safety_scan_input(self, validated, ctx)
+        if input_verdict is not None and input_verdict.decision == "block":
+            return AgentResult(
+                output={
+                    "blocked": True,
+                    "block_reason": input_verdict.user_facing_message
+                    or "Input failed safety checks.",
+                },
+                score=None,
+                reasoning="safety_input_block",
+                retry_count=0,
+                escalated=False,
+            )
+        # If redacted, the gate populated redacted_text but the
+        # specialist's input schema doesn't have a generic "text"
+        # field we can swap. The redacted text lives in
+        # ctx.extra['safety_redacted_text'] for agents that opt in to
+        # consuming it; a future agent-by-agent migration can wire it
+        # into specific input fields.
+        if input_verdict is not None and input_verdict.decision == "redact":
+            ctx = ctx.model_copy(
+                update={
+                    "extra": {
+                        **ctx.extra,
+                        "safety_redacted_text": input_verdict.redacted_text,
+                    }
+                }
+            )
+
         if not self.uses_self_eval:
             output = await self.run(validated, ctx)
+            output = await _maybe_safety_scan_output(self, output, ctx, input_verdict)
             return AgentResult(
                 output=output,
                 score=None,
@@ -265,7 +306,7 @@ class AgenticBaseAgent(Generic[_InputT]):
             )
             return await self.run(validated, attempt_ctx)
 
-        return await evaluate_with_retry(
+        result = await evaluate_with_retry(
             agent_name=self.name,
             request=request_str,
             coro_factory=_factory,
@@ -277,6 +318,13 @@ class AgenticBaseAgent(Generic[_InputT]):
             call_chain_id=ctx.chain.root_id,
             limiter=self._limiter(),
         )
+        # Output scan even on the eval-with-retry path. The eval loop
+        # produces a single best output (after retries); we scan that
+        # one before handing back to the caller.
+        result.output = await _maybe_safety_scan_output(
+            self, result.output, ctx, input_verdict
+        )
+        return result
 
     # ── AgenticCallee protocol (used by call_agent) ───────────────
 
@@ -439,6 +487,136 @@ class AgenticBaseAgent(Generic[_InputT]):
                 input.model_dump()
             )
         return self.input_schema.model_validate(input)  # type: ignore[return-value]
+
+
+# ── Safety scanning helpers (Pass 3g §A.5 integration) ──────────────
+
+
+# Agents whose execute() does NOT need an inner safety scan because
+# the orchestrator already scanned upstream. Add to this set with
+# care — it should remain very small (only the Supervisor in v1).
+_SAFETY_SCAN_EXEMPT_AGENTS = frozenset({"supervisor"})
+
+
+async def _maybe_safety_scan_input(
+    agent: "AgenticBaseAgent[Any]",
+    validated_input: BaseModel,
+    ctx: AgentContext,
+) -> Any:
+    """Run input-side safety scan if applicable.
+
+    Returns the SafetyVerdict or None. Returning None means "no scan
+    happened" (e.g. exempt agent, or no extractable text from input).
+
+    Lazy imports of the safety primitive so this module stays light
+    when safety isn't in play (pure unit tests of memory / tools etc.).
+    """
+    if agent.name in _SAFETY_SCAN_EXEMPT_AGENTS:
+        return None
+    text = _extract_input_text(validated_input)
+    if not text:
+        return None
+    try:
+        from app.agents.primitives.safety import get_default_gate
+    except Exception:  # noqa: BLE001 — Presidio not installed in this env
+        return None
+    gate = get_default_gate()
+    return await gate.scan_input(
+        text,
+        student_id=ctx.user_id,
+        agent_name=agent.name,
+    )
+
+
+async def _maybe_safety_scan_output(
+    agent: "AgenticBaseAgent[Any]",
+    output: Any,
+    ctx: AgentContext,
+    input_verdict: Any,
+) -> Any:
+    """Run output-side safety scan, redact/block if needed.
+
+    Returns the (possibly modified) output. Block replaces the output
+    with a templated block message; redact substitutes the redacted
+    text. Allow/warn pass through unchanged.
+    """
+    if agent.name in _SAFETY_SCAN_EXEMPT_AGENTS:
+        return output
+    text = _extract_output_text(output)
+    if not text:
+        return output
+    try:
+        from app.agents.primitives.safety import get_default_gate
+    except Exception:  # noqa: BLE001
+        return output
+    gate = get_default_gate()
+    # Pull input PII hits from the input verdict so the output diff
+    # logic doesn't false-positive on echoed input PII.
+    input_pii_hits = None
+    if input_verdict is not None:
+        # Findings carry evidence; we don't have the raw PiiHits here,
+        # but the diff scanner accepts None and treats it as "no input
+        # PII to compare" — generous on echo handling.
+        pass
+    output_verdict = await gate.scan_output(
+        text,
+        student_id=ctx.user_id,
+        agent_name=agent.name,
+        input_pii_hits=input_pii_hits,
+    )
+    if output_verdict.decision == "block":
+        if isinstance(output, dict):
+            output = {
+                **output,
+                "blocked": True,
+                "block_reason": "safety_output",
+                "output_text": (
+                    output_verdict.user_facing_message or "Response blocked."
+                ),
+            }
+        else:
+            output = (
+                output_verdict.user_facing_message or "Response blocked."
+            )
+    elif output_verdict.decision == "redact" and output_verdict.redacted_text:
+        if isinstance(output, dict):
+            output = {**output, "output_text": output_verdict.redacted_text}
+        else:
+            output = output_verdict.redacted_text
+    return output
+
+
+def _extract_input_text(input_obj: BaseModel) -> str | None:
+    """Best-effort string extraction from a validated input model.
+
+    Walks the model's fields looking for the first text-typed value
+    on a known key (user_message, question, message, task, prompt).
+    Falls back to None if nothing matches — caller skips the scan.
+    """
+    candidates = ("user_message", "question", "message", "task", "prompt")
+    try:
+        data = input_obj.model_dump()
+    except Exception:  # noqa: BLE001
+        return None
+    for key in candidates:
+        val = data.get(key)
+        if isinstance(val, str) and val:
+            return val
+    return None
+
+
+def _extract_output_text(output: Any) -> str | None:
+    """Best-effort string extraction from a specialist's output."""
+    if output is None:
+        return None
+    if isinstance(output, str):
+        return output
+    if isinstance(output, dict):
+        for key in ("output_text", "answer", "response", "text"):
+            val = output.get(key)
+            if isinstance(val, str) and val:
+                return val
+    return None
 
 
 __all__ = [

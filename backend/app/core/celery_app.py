@@ -15,6 +15,7 @@ celery_app = Celery(
         "app.tasks.inactivity_sweep",
         "app.tasks.risk_scoring",
         "app.tasks.outreach_automation",
+        "app.tasks.refresh_student_daily_cost",
         # Agentic OS — concrete body for the proactive primitive's
         # task name. Registered as a normal Celery task; beat
         # entries built by `register_proactive_schedules` (below)
@@ -71,6 +72,15 @@ celery_app.conf.update(
             "task": "app.tasks.outreach_automation.run_nightly_outreach",
             "schedule": crontab(minute=0, hour=9),
         },
+        # D9 / Pass 3f §D.1 — refresh per-student daily cost rollup
+        # every 60 seconds. CONCURRENTLY refresh; cost ceiling
+        # enforcement reads this view via _compute_today_cost_inr.
+        # 60s drift = ~5% over-grant max at 50 INR/day ceiling, which
+        # is acceptable for a soft cap (Pass 3f §D.1 reasoning).
+        "refresh-student-daily-cost": {
+            "task": "app.tasks.refresh_student_daily_cost.refresh",
+            "schedule": 60.0,  # seconds; Celery accepts float for sub-minute
+        },
     },
 )
 
@@ -124,3 +134,49 @@ def _boot_agentic_os() -> None:
 # agent set is worse than no agents, and we need beat to refuse to
 # start when an agent module is broken.
 _boot_agentic_os()
+
+
+# D9 / Pass 3g §H.3 — eager-load the safety primitive at WORKER process
+# init, not at module import.
+#
+# Why worker_process_init and not _boot_agentic_os: Celery forks a
+# pool of worker processes, and each fork copies module-imported state
+# but NOT lazily-initialized resources. Loading Presidio at module
+# import would burn ~750 MB × N workers in the parent process AND
+# leak that copy into every fork. Loading at worker_process_init
+# means each worker pays the cost once, in its own address space,
+# producing a predictable per-worker memory profile.
+#
+# The launch-blocker for D16 (interrupt_agent on Celery) requires this
+# to be wired before D16 deploys; tracked at
+# docs/followups/celery-safety-memory-bump.md.
+from celery.signals import worker_process_init  # noqa: E402
+
+
+@worker_process_init.connect
+def _eager_load_safety_in_worker(**_kwargs: object) -> None:
+    """Load Presidio + spaCy en_core_web_lg in this worker process.
+
+    Same pattern as FastAPI's lifespan: pay the load cost at startup
+    so the first task doesn't surprise an operator with a slow
+    response. Predictable memory profile > fast cold-start.
+
+    Fail-soft: a missing Presidio install logs but doesn't kill the
+    worker. The agentic_base safety helpers also fall back gracefully
+    when the gate isn't available.
+    """
+    try:
+        from app.agents.primitives.safety import get_default_gate
+
+        get_default_gate()
+    except Exception as exc:  # noqa: BLE001
+        # Worker keeps booting without the safety primitive.
+        # Production deployments should have Presidio installed; dev
+        # / test environments without it just lose safety scans.
+        import structlog
+
+        structlog.get_logger().warning(
+            "celery.worker.safety_gate_load_failed",
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )

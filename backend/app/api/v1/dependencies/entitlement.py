@@ -31,7 +31,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
-from app.services.entitlement_service import is_entitled
+from app.schemas.entitlement import EntitlementContext
+from app.services.entitlement_service import (
+    compute_active_entitlements,
+    is_entitled,
+)
 
 
 def require_course_access(
@@ -75,3 +79,43 @@ def require_course_access(
             )
 
     return dep
+
+
+async def require_active_entitlement(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EntitlementContext:
+    """D9 / Pass 3f §A.1 — Layer 1 entitlement gate for the canonical
+    agentic endpoint.
+
+    Computes a fresh EntitlementContext for the current user. If the
+    context is empty (no paid entitlements AND no free-tier grant),
+    raises 402 Payment Required with a structured detail body.
+
+    Returns the EntitlementContext on success — the route handler
+    receives it as a dependency-injected param and threads it into
+    AgenticOrchestratorService.process_request so Layer 2 + 3 don't
+    re-fetch.
+
+    Mounted on POST /api/v1/agentic/{flow}/chat (the canonical
+    endpoint). Other routes — billing, course detail, etc. — use the
+    coarser require_course_access(course_id_param=...) instead.
+    """
+    ctx = await compute_active_entitlements(db, current_user.id)
+
+    if ctx.is_empty():
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "error_code": "no_active_entitlement",
+                "message": (
+                    "Your AICareerOS subscription has expired or you "
+                    "haven't purchased a course yet. Browse available "
+                    "courses to continue."
+                ),
+                "next_action": "browse_catalog",
+                "next_url": "/catalog",
+            },
+        )
+
+    return ctx

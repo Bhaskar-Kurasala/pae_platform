@@ -28,7 +28,69 @@ log = structlog.get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Initialize heavy resources before accepting traffic.
+
+    Order matters:
+      1. Sentry already init'd at module import (above)
+      2. Agentic loader (PG-1 fix) — registers @on_event subscribers
+         and proactive schedules in THIS process. Must happen before
+         any webhook handler can fire.
+      3. Safety primitive eager-load — Presidio + spaCy en_core_web_lg
+         (~750 MB resident, ~4 s load). Done at startup so the first
+         student request doesn't pay the cold-start penalty. The
+         `memory_mb=4096` sizing in fly.toml accounts for this.
+
+    Combined startup overhead per Pass 3g §H.3 + the Checkpoint 1
+    fly.toml comment block: ~8-9 s. Fly's `grace_period = "20s"` in
+    [http_service.checks] accommodates this comfortably; if startup
+    ever exceeds the grace window, that's signal something else has
+    bloated, not signal to defer initialization.
+    """
     log.info("app.startup", environment=settings.environment)
+
+    # PG-1 fix: import agentic agent modules so @on_event subscribers
+    # register in the FastAPI process. Without this, webhooks land
+    # against an empty subscription registry and silently no-op. The
+    # exact same call lives in core/celery_app.py — we mirror it here
+    # so both processes have the same registration state.
+    try:
+        from app.agents._agentic_loader import load_agentic_agents
+
+        loaded = load_agentic_agents()
+        log.info("app.startup.agentic_loader", loaded=loaded)
+    except Exception as exc:  # noqa: BLE001
+        # Loud-fail per the loader's contract: a partial agent set is
+        # worse than no agents. The exception propagates and
+        # uvicorn/gunicorn refuses to bring the worker up.
+        log.error(
+            "app.startup.agentic_loader_failed",
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        raise
+
+    # Safety primitive eager-load. The first call to get_default_gate
+    # triggers Presidio + spaCy load; from this point onward every
+    # AgenticBaseAgent.execute() and the orchestrator scan_input/
+    # scan_output get a warm singleton.
+    try:
+        from app.agents.primitives.safety import get_default_gate
+
+        get_default_gate()
+        log.info("app.startup.safety_gate_ready")
+    except Exception as exc:  # noqa: BLE001
+        # Don't take the whole app down if Presidio is missing — log
+        # loudly and continue. The fail-soft path inside the gate
+        # already handles "no Presidio" environments by treating the
+        # PII detector as a no-op (the import error inside
+        # get_default_gate is caught upstream in agentic_base helpers).
+        log.error(
+            "app.startup.safety_gate_load_failed",
+            error=str(exc),
+            error_type=type(exc).__name__,
+            note="Continuing without safety primitive; check Presidio install",
+        )
+
     yield
     log.info("app.shutdown")
 
@@ -176,6 +238,9 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.promotion_summary import router as promotion_summary_router
     from app.api.v1.routes.webhooks import router as webhooks_router
     from app.api.v1.routes.agentic_webhooks import router as agentic_webhooks_router
+    # D9 — canonical agentic chat + admin trace endpoints
+    from app.api.v1.routes.agentic import router as agentic_router
+    from app.api.v1.routes.admin_journey import router as admin_journey_router
     from app.api.v1.routes.feedback import router as feedback_router
     from app.api.v1.routes.mock_interview import router as mock_interview_router
     from app.api.v1.routes.tailored_resume import router as tailored_resume_router
@@ -242,6 +307,9 @@ def create_app() -> FastAPI:
         application_kit_router,
         resources_router,
         practice_router,
+        # D9 — canonical agentic + admin trace
+        agentic_router,
+        admin_journey_router,
     ]
     for r in api_routers:
         app.include_router(r, prefix="/api/v1")

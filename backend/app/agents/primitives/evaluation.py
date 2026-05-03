@@ -586,6 +586,101 @@ class RedisEscalationLimiter:
                 agent=agent_name,
             )
 
+    async def recover_from_db(self, session: Any) -> dict[str, int]:
+        """D9 — replay recent `agent_escalations` rows into the limiter.
+
+        After a Redis outage, the limiter's sorted-sets are empty but
+        the *true* notification history is preserved in
+        agent_escalations. Recovery: read every row with
+        notified_admin=TRUE from the last `window_seconds`, and ZADD
+        it back into the per-agent set.
+
+        Returns {agent_name: count_replayed} so the caller can log
+        what was recovered. Idempotent — calling twice replays the
+        same rows but ZADD on the same (member, score) is a no-op.
+
+        Pass 3b §7.1 Failure Class E: storage layer comes back; we
+        re-establish the rate-limit invariant rather than letting
+        a Redis flap reset everyone's notification budget.
+
+        The session is typed as Any so this method works with both
+        AsyncSession (FastAPI path) and the sync session shape Celery
+        sometimes passes — recover code shouldn't be coupled to which
+        process triggered it.
+        """
+        from app.core.redis import namespaced_key  # noqa: PLC0415
+        import datetime as _dt
+
+        recovered: dict[str, int] = {}
+        cutoff = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(
+            seconds=self._window
+        )
+
+        try:
+            # AsyncSession path (the canonical one in this codebase).
+            from sqlalchemy import text as _text
+
+            result = await session.execute(
+                _text(
+                    """
+                    SELECT agent_name, created_at
+                    FROM agent_escalations
+                    WHERE notified_admin = TRUE
+                      AND created_at >= :cutoff
+                    ORDER BY created_at ASC
+                    """
+                ),
+                {"cutoff": cutoff},
+            )
+            rows = list(result.all())
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "escalation_limiter.recovery_db_read_failed",
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
+            return recovered
+
+        try:
+            client = self.redis
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "escalation_limiter.recovery_redis_unreachable",
+                error=str(exc),
+            )
+            return recovered
+
+        for row in rows:
+            agent_name = row[0]
+            created_at = row[1]
+            # Convert to epoch seconds — the score format every other
+            # method uses.
+            if hasattr(created_at, "timestamp"):
+                score = float(created_at.timestamp())
+            else:
+                # Defensive: shouldn't happen with timestamptz column.
+                continue
+            key = namespaced_key(self._KEY_CATEGORY, agent_name)
+            member = f"replay:{score}:{uuid.uuid4().hex}"
+            try:
+                client.zadd(key, {member: score})
+                client.expire(key, self._window * 2)
+                recovered[agent_name] = recovered.get(agent_name, 0) + 1
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "escalation_limiter.recovery_zadd_failed",
+                    error=str(exc),
+                    agent=agent_name,
+                )
+
+        if recovered:
+            log.info(
+                "escalation_limiter.recovery_complete",
+                replayed=recovered,
+                window_seconds=self._window,
+            )
+        return recovered
+
 
 def make_escalation_limiter() -> EscalationLimiter | RedisEscalationLimiter:
     """Pick the right limiter for the current environment.

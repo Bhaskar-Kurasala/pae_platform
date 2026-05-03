@@ -20,14 +20,21 @@ Design notes:
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import structlog
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.tiers import (
+    DEFAULT_TIER,
+    TierName,
+    get_tier,
+    tier_meets_minimum,
+)
 from app.models.course import Course
 from app.models.course_bundle import CourseBundle
 from app.models.course_entitlement import (
@@ -37,6 +44,12 @@ from app.models.course_entitlement import (
     ENTITLEMENT_SOURCES,
     CourseEntitlement,
 )
+from app.schemas.entitlement import (
+    ActiveEntitlement,
+    EntitlementContext,
+    FreeTierState,
+)
+from app.schemas.supervisor import RateLimitState
 
 log = structlog.get_logger()
 
@@ -342,3 +355,369 @@ async def expand_bundle(
             )
             continue
     return out
+
+
+# ---------------------------------------------------------------------------
+# D9 / Pass 3f — EntitlementContext computation
+#
+# This is the single read path Layer 1, Layer 2, and Layer 3 share.
+# Layer 1 (the route dependency) calls compute_active_entitlements once
+# and stashes the result on request state. Layer 2 (Supervisor) reads a
+# trimmed projection from SupervisorContext.entitlements. Layer 3
+# (dispatch) re-fetches a fresh EntitlementContext to catch races.
+#
+# All three call this same function — the layered defense relies on
+# them seeing the same data shape.
+# ---------------------------------------------------------------------------
+
+
+async def _compute_today_cost_inr(
+    db: AsyncSession, user_id: uuid.UUID
+) -> Decimal:
+    """Look up today's accumulated agent-call cost from the materialized view.
+
+    Reads `mv_student_daily_cost` (refreshed every 60s via Celery beat).
+    Pass 3f §D acknowledges up to 60s of staleness as the cost of the
+    cheap per-request lookup; the alternative is an O(N) scan of
+    agent_actions per request which doesn't scale.
+
+    Returns 0 if the view has no row for today (new user, fresh start).
+    """
+    today_utc = datetime.now(UTC).date()
+    result = await db.execute(
+        text(
+            "SELECT cost_inr_total FROM mv_student_daily_cost "
+            "WHERE user_id = :uid AND day_utc = :day"
+        ),
+        {"uid": user_id, "day": today_utc},
+    )
+    row = result.first()
+    if row is None or row[0] is None:
+        return Decimal("0")
+    return Decimal(row[0])
+
+
+async def _active_free_tier_grant(
+    db: AsyncSession, user_id: uuid.UUID
+) -> FreeTierState | None:
+    """Find the longest-lived active free-tier grant for a user.
+
+    Pass 3f §C.4: at most one active grant per (user, type) by design,
+    but defensive against races — pick the one expiring latest.
+
+    Returns None if no active grant exists.
+    """
+    now = datetime.now(UTC)
+    result = await db.execute(
+        text(
+            "SELECT id, grant_type, granted_at, expires_at, metadata "
+            "FROM free_tier_grants "
+            "WHERE user_id = :uid "
+            "  AND revoked_at IS NULL "
+            "  AND expires_at > :now "
+            "ORDER BY expires_at DESC "
+            "LIMIT 1"
+        ),
+        {"uid": user_id, "now": now},
+    )
+    row = result.first()
+    if row is None:
+        return None
+    free_tier_config = get_tier("free")
+    return FreeTierState(
+        grant_id=row[0],
+        grant_type=row[1],
+        granted_at=row[2],
+        expires_at=row[3],
+        # Materialize the agent allow-list at construction time so
+        # downstream consumers don't have to import core.tiers.
+        allowed_agents=set(free_tier_config.allowed_agents),
+    )
+
+
+async def _active_paid_entitlements_full(
+    db: AsyncSession, user_id: uuid.UUID
+) -> list[ActiveEntitlement]:
+    """Return ActiveEntitlement projections for the user's active paid rows.
+
+    Joins course_entitlements → courses to get the course slug.
+    Honors the 'tier' and 'metadata' columns added in migration 0057.
+    """
+    now = datetime.now(UTC)
+    stmt = (
+        select(
+            CourseEntitlement.id,
+            CourseEntitlement.user_id,
+            CourseEntitlement.course_id,
+            Course.slug,
+            CourseEntitlement.source,
+            CourseEntitlement.granted_at,
+            CourseEntitlement.expires_at,
+            CourseEntitlement.revoked_at,
+            # The tier + metadata columns added in 0057. SQLAlchemy
+            # reads them as raw column expressions (not on the ORM
+            # model) until a follow-up adds them to the
+            # CourseEntitlement model — keeps this PR focused on the
+            # service layer without a model migration.
+            text("course_entitlements.tier"),
+            text("course_entitlements.metadata"),
+        )
+        .select_from(CourseEntitlement)
+        .join(Course, Course.id == CourseEntitlement.course_id)
+        .where(
+            CourseEntitlement.user_id == user_id,
+            CourseEntitlement.revoked_at.is_(None),
+            or_(
+                CourseEntitlement.expires_at.is_(None),
+                CourseEntitlement.expires_at > now,
+            ),
+        )
+        .order_by(CourseEntitlement.granted_at.desc())
+    )
+    result = await db.execute(stmt)
+    out: list[ActiveEntitlement] = []
+    for row in result.all():
+        out.append(
+            ActiveEntitlement(
+                entitlement_id=row[0],
+                user_id=row[1],
+                course_id=row[2],
+                course_slug=row[3] or "",
+                tier=row[8] or DEFAULT_TIER,
+                source=row[4],
+                granted_at=row[5],
+                expires_at=row[6],
+                revoked_at=row[7],
+                metadata=row[9] or {},
+            )
+        )
+    return out
+
+
+def _resolve_effective_tier(
+    paid: list[ActiveEntitlement], free: FreeTierState | None
+) -> TierName:
+    """Effective tier = max tier across all active grants.
+
+    A user with both a free-tier grant AND a paid entitlement has
+    effective_tier = paid (paid wins). Per Pass 3f §A.1, the free
+    grant only matters for users with NO active paid entitlements.
+    """
+    if not paid and free is None:
+        # Empty context — caller should have short-circuited at
+        # Layer 1 before reaching here, but defensive default.
+        return DEFAULT_TIER
+    if not paid:
+        return "free"
+    # At least one paid row — use its tier (highest if multiple).
+    tiers = [ent.tier for ent in paid]
+    # Use tier_meets_minimum's order to pick the max.
+    if any(tier_meets_minimum(t, "premium") for t in tiers):  # type: ignore[arg-type]
+        return "premium"
+    if any(tier_meets_minimum(t, "standard") for t in tiers):  # type: ignore[arg-type]
+        return "standard"
+    return "free"
+
+
+def _resolve_cost_ceiling(
+    tier: TierName, paid: list[ActiveEntitlement]
+) -> Decimal:
+    """Cost ceiling for the user, with metadata override support.
+
+    Pass 3f §H.3: per-student override via
+    course_entitlements.metadata['cost_ceiling_inr_override']. When
+    multiple entitlements specify overrides, the largest wins (the
+    user has paid for the most generous one).
+
+    Falls back to the tier config's daily cost ceiling if no override.
+    """
+    base = get_tier(tier).daily_cost_ceiling_inr
+    overrides: list[Decimal] = []
+    for ent in paid:
+        raw = ent.metadata.get("cost_ceiling_inr_override")
+        if raw is None:
+            continue
+        try:
+            overrides.append(Decimal(str(raw)))
+        except (ValueError, TypeError, ArithmeticError):
+            # ArithmeticError covers decimal.InvalidOperation,
+            # which Decimal raises on un-parseable strings.
+            log.warning(
+                "entitlement.metadata.bad_cost_ceiling_override",
+                user_id=str(ent.user_id),
+                entitlement_id=str(ent.entitlement_id),
+                raw=raw,
+            )
+    if not overrides:
+        return base
+    return max(base, max(overrides))
+
+
+async def compute_active_entitlements(
+    db: AsyncSession, user_id: uuid.UUID
+) -> EntitlementContext:
+    """Build the EntitlementContext for a user.
+
+    Single source of truth. Read by all three enforcement layers
+    (Pass 3f §A.4) so they reason over the same data shape.
+
+    Cost: typically 3 indexed queries — paid entitlements, free-tier
+    grant, today's cost rollup. ~15ms total at 1k students.
+    """
+    paid = await _active_paid_entitlements_full(db, user_id)
+    free = await _active_free_tier_grant(db, user_id)
+    effective_tier = _resolve_effective_tier(paid, free)
+    cost_ceiling = _resolve_cost_ceiling(effective_tier, paid)
+    cost_used = await _compute_today_cost_inr(db, user_id)
+    cost_remaining = cost_ceiling - cost_used
+    if cost_remaining < 0:
+        # Negative remaining is fine to report — the dispatch layer
+        # uses it to decline. Don't clamp at zero; observability cares
+        # about how-much-over for calibration (Pass 3f §H.2).
+        pass
+
+    tier_cfg = get_tier(effective_tier)
+    # Rate-limit windows: Pass 3f §B.2 puts these in TIER_CONFIGS,
+    # not in DB. The "remaining" counters are simplified at the
+    # service-layer for D9 — full sliding-window tracking is a
+    # follow-up (the cost ceiling is the launch-blocker, rate
+    # limits at the per-call granularity are calibration territory).
+    now = datetime.now(UTC)
+    rate_state = RateLimitState(
+        burst_remaining=tier_cfg.burst_rate_limit_per_minute,
+        burst_window_resets_at=now + timedelta(minutes=1),
+        hourly_remaining=tier_cfg.hourly_rate_limit_per_hour,
+        hourly_window_resets_at=now + timedelta(hours=1),
+    )
+
+    return EntitlementContext(
+        user_id=user_id,
+        active_entitlements=paid,
+        free_tier=free,
+        effective_tier=effective_tier,
+        cost_budget_remaining_today_inr=cost_remaining,
+        cost_budget_used_today_inr=cost_used,
+        rate_limit_state=rate_state,
+    )
+
+
+async def grant_signup_grace(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    duration: timedelta = timedelta(hours=24),
+    metadata: dict[str, Any] | None = None,
+) -> uuid.UUID:
+    """Insert a 'signup_grace' free-tier grant for a freshly-signed-up user.
+
+    Pass 3f §C.1: 24-hour window from signup. Idempotent — calling
+    twice returns the existing grant ID rather than stacking grants.
+    Per Pass 3f §C.4 abuse prevention: one signup_grace per email,
+    enforced by checking for an existing grant before inserting.
+    """
+    now = datetime.now(UTC)
+    # Idempotency check: if there's already an active signup_grace,
+    # return its id. Don't extend; don't stack.
+    result = await db.execute(
+        text(
+            "SELECT id FROM free_tier_grants "
+            "WHERE user_id = :uid AND grant_type = 'signup_grace' "
+            "  AND revoked_at IS NULL AND expires_at > :now "
+            "LIMIT 1"
+        ),
+        {"uid": user_id, "now": now},
+    )
+    row = result.first()
+    if row is not None:
+        return row[0]
+
+    grant_id = uuid.uuid4()
+    await db.execute(
+        text(
+            "INSERT INTO free_tier_grants "
+            "(id, user_id, grant_type, granted_at, expires_at, metadata) "
+            "VALUES (:id, :uid, 'signup_grace', :now, :exp, :meta::jsonb)"
+        ),
+        {
+            "id": grant_id,
+            "uid": user_id,
+            "now": now,
+            "exp": now + duration,
+            "meta": _json_dumps(metadata or {}),
+        },
+    )
+    log.info(
+        "entitlement.free_tier_granted",
+        user_id=str(user_id),
+        grant_type="signup_grace",
+        grant_id=str(grant_id),
+        expires_at=(now + duration).isoformat(),
+    )
+    return grant_id
+
+
+async def grant_placement_quiz_session(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    duration: timedelta = timedelta(hours=2),
+    metadata: dict[str, Any] | None = None,
+) -> uuid.UUID:
+    """Insert a 'placement_quiz_session' free-tier grant.
+
+    Pass 3f §C.1: per-session free-tier window. 2-hour default — long
+    enough to complete a placement quiz with breaks; short enough that
+    abandoned sessions don't gate later legitimate ones.
+
+    Idempotent: returns existing grant id when an active session is
+    in flight.
+    """
+    now = datetime.now(UTC)
+    result = await db.execute(
+        text(
+            "SELECT id FROM free_tier_grants "
+            "WHERE user_id = :uid AND grant_type = 'placement_quiz_session' "
+            "  AND revoked_at IS NULL AND expires_at > :now "
+            "LIMIT 1"
+        ),
+        {"uid": user_id, "now": now},
+    )
+    row = result.first()
+    if row is not None:
+        return row[0]
+
+    grant_id = uuid.uuid4()
+    await db.execute(
+        text(
+            "INSERT INTO free_tier_grants "
+            "(id, user_id, grant_type, granted_at, expires_at, metadata) "
+            "VALUES (:id, :uid, 'placement_quiz_session', :now, :exp, :meta::jsonb)"
+        ),
+        {
+            "id": grant_id,
+            "uid": user_id,
+            "now": now,
+            "exp": now + duration,
+            "meta": _json_dumps(metadata or {}),
+        },
+    )
+    log.info(
+        "entitlement.free_tier_granted",
+        user_id=str(user_id),
+        grant_type="placement_quiz_session",
+        grant_id=str(grant_id),
+        expires_at=(now + duration).isoformat(),
+    )
+    return grant_id
+
+
+def _json_dumps(value: Any) -> str:
+    """Compact json serialization for jsonb column inserts.
+
+    Helper-only; using import json at the call site would be fine but
+    centralizing keeps the formatting consistent in case we ever want
+    to standardize timestamps or whatever.
+    """
+    import json as _json
+
+    return _json.dumps(value, separators=(",", ":"), default=str)
