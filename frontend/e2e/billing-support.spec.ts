@@ -24,7 +24,7 @@
  *     the Step 1 mv_student_daily_cost smoke against a real DB,
  *     not Playwright-observable from outside the container.
  *   • Phantom-escalation contract — pinned by 3 unit tests at
- *     tests/test_agents/test_billing_support_v2.py (Wave 1).
+ *     tests/test_agents/test_billing_support.py (Wave 1).
  *
  * Run with: `cd frontend && pnpm playwright test billing-support`.
  * Requires the docker stack to be up (nginx on :8080).
@@ -133,12 +133,12 @@ test.describe("D10 — billing_support capability registry", () => {
     // Backend exposes the capability registry via an admin endpoint
     // (D9 / admin_journey + admin agents listing). We hit the
     // public health endpoint as a sanity check that the canonical
-    // agentic stack booted with billing_support_v2 loaded — the
+    // agentic stack booted with billing_support loaded — the
     // PG-1-style gap (ensure_tools_loaded() in lifespan, fixed in
     // CP3) would manifest as missing tools at first call.
     const health = await request.get(`${API}/health/ready`);
     // /health/ready returns 200 when DB + Redis + agentic loader
-    // all completed startup. If billing_support_v2's import broke
+    // all completed startup. If billing_support's import broke
     // the loader, this would return 5xx.
     expect([200, 503]).toContain(health.status());
   });

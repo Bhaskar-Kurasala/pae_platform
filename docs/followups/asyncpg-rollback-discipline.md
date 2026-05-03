@@ -76,7 +76,7 @@ Both fixed in commit `21ff4f6`:
   query, returning None, but leaving the transaction poisoned.
   See [goal-contracts-schema-divergence.md](./goal-contracts-schema-divergence.md)
   for the full story.
-- [`billing_support_v2._record_interaction`](../../backend/app/agents/billing_support_v2.py)
+- [`billing_support_v2._record_interaction`](../../backend/app/agents/billing_support.py)
   call site (the wrapping try/except in `BillingSupportAgent.run`)
   — was catching `ForeignKeyViolationError` from a memory write,
   returning the answer payload, but leaving the transaction
@@ -146,7 +146,7 @@ For each instance found:
   — the specific incident that surfaced the pattern
 - [backend/app/services/agentic_snapshot_service.py](../../backend/app/services/agentic_snapshot_service.py#L211)
   — canonical fixed example
-- [backend/app/agents/billing_support_v2.py](../../backend/app/agents/billing_support_v2.py)
+- [backend/app/agents/billing_support.py](../../backend/app/agents/billing_support.py)
   — second fixed example
 - [backend/tests/test_services/test_snapshot_service_rollback.py](../../backend/tests/test_services/test_snapshot_service_rollback.py)
   — the pin-test pattern (synthetic always-failing query trigger
@@ -310,7 +310,7 @@ that have nothing to do with the test's actual purpose.
 
 **Known instance.** D10 Checkpoint 3's three phantom-escalation
 pin tests at
-[tests/test_agents/test_billing_support_v2.py](../../backend/tests/test_agents/test_billing_support_v2.py)
+[tests/test_agents/test_billing_support.py](../../backend/tests/test_agents/test_billing_support.py)
 originally fetched `BillingSupportAgent` from `_agentic_registry`.
 Tests in `tests/test_agents/primitives/` call
 `clear_agentic_registry()` per test (legitimately — they're

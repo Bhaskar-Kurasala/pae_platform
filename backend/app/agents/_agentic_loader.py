@@ -43,16 +43,15 @@ _AGENTIC_AGENT_MODULES: tuple[str, ...] = (
     # knowledge_graph). Demonstrates all 5 primitives across chat,
     # cron, and webhook entry points.
     "app.agents.example_learning_coach",
-    # D10 — billing_support migration. Coexists with the legacy
-    # billing_support.py during the cutover window: legacy lives in
-    # AGENT_REGISTRY (still reachable via legacy MOA endpoint),
-    # new agentic class lives in _agentic_registry (reachable via
-    # the canonical /api/v1/agentic/{flow}/chat endpoint that the
-    # Supervisor dispatches through). The two registries are
-    # separate namespaces; both keep working until Checkpoint 4
-    # deletes the legacy file and renames billing_support_v2.py
-    # → billing_support.py.
-    "app.agents.billing_support_v2",
+    # D10 — billing_support migration. Cutover landed in Checkpoint 4
+    # (commit reference TBD): legacy backend/app/agents/billing_support.py
+    # (the BaseAgent version) deleted; billing_support_v2.py renamed
+    # to billing_support.py. The class reachable through this loader
+    # is the AgenticBaseAgent version. The legacy AGENT_REGISTRY
+    # entry was removed at the same time (registry.py:38 import line
+    # dropped — the new class registers via _agentic_registry, not
+    # via the legacy @register decorator).
+    "app.agents.billing_support",
     # "app.agents.engagement_watchdog",      # future
     # "app.agents.code_mentor",              # future
 )

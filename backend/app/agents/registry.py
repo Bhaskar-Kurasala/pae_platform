@@ -35,7 +35,14 @@ def _ensure_registered() -> None:
     """Force import of all agent modules so they register themselves."""
     import app.agents.adaptive_path  # noqa: F401
     import app.agents.adaptive_quiz  # noqa: F401
-    import app.agents.billing_support  # noqa: F401
+    # billing_support — D10 cutover migrated this from BaseAgent to
+    # AgenticBaseAgent. Legacy file deleted; the new class lives at
+    # app.agents.billing_support and registers via _agentic_registry
+    # (loaded by _agentic_loader at FastAPI startup), NOT via the
+    # @register decorator that AGENT_REGISTRY consumes. The legacy
+    # MOA endpoint that this _ensure_registered serves no longer
+    # routes to billing_support — students hit it through the
+    # canonical /api/v1/agentic/{flow}/chat endpoint instead.
     import app.agents.career_coach  # noqa: F401
     import app.agents.code_review  # noqa: F401
     import app.agents.coding_assistant  # noqa: F401

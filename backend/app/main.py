@@ -74,7 +74,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # endpoint dispatches to specialists. Without this, the agent-
     # specific tools (Pass 3d §F.1+) appear "not registered" the
     # first time an agent calls them — which manifests as the
-    # billing_support_v2 fail-honest path firing on every escalation
+    # billing_support fail-honest path firing on every escalation
     # request because escalate_to_human can't be found. PG-1-style
     # gap (registration that needs to happen in the FastAPI process,
     # not just be available somewhere on disk).

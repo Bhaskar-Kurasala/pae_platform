@@ -45,7 +45,11 @@ ROUTABLE_AGENTS = [
     # WS4 new agents
     "career_coach",
     "resume_reviewer",
-    "billing_support",
+    # billing_support — D10 cutover (Checkpoint 4) migrated this to
+    # the canonical agentic endpoint. The agent class is now an
+    # AgenticBaseAgent subclass; it lives in _agentic_registry, not
+    # AGENT_REGISTRY. Legacy MOA dispatch can no longer reach it
+    # (keyword routing also dropped at L107 below).
     # Studio context-aware tutor (P1-B-3)
     "studio_tutor",
 ]
@@ -77,7 +81,6 @@ Available agents and their purposes:
 - community_celebrator: celebrations, milestones, "I finished", "I passed"
 - career_coach: career planning, "become AI engineer", skill roadmap, career transition
 - resume_reviewer: resume review, CV feedback, resume critique, before/after improvements
-- billing_support: billing questions, subscription, refund, cancel, upgrade plan
 
 Respond with ONLY the agent name. No explanation.
 
@@ -109,7 +112,11 @@ _KEYWORD_MAP: list[tuple[list[str], str]] = [
     # WS4 new agent keyword patterns
     (["career plan", "career roadmap", "become ai engineer", "what skills do i need", "career transition", "career coaching"], "career_coach"),
     (["review my resume", "resume feedback", "improve cv", "resume critique", "check my resume"], "resume_reviewer"),
-    (["billing", "subscription", "refund", "cancel subscription", "upgrade plan", "payment issue", "invoice"], "billing_support"),
+    # billing_support keyword route removed in D10 cutover
+    # (Checkpoint 4). Billing questions reach billing_support via
+    # the canonical /api/v1/agentic/{flow}/chat endpoint where the
+    # Supervisor's capability registry has the agent. Legacy MOA
+    # would have routed to a non-existent AGENT_REGISTRY entry.
 ]
 
 

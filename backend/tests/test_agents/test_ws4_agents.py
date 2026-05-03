@@ -611,86 +611,45 @@ async def test_resume_reviewer_evaluate_no_score() -> None:
 
 
 # ── billing_support ────────────────────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_billing_support_registered() -> None:
-    import app.agents.billing_support  # noqa: F401
-    from app.agents.registry import AGENT_REGISTRY
-
-    assert "billing_support" in AGENT_REGISTRY
-
-
-@pytest.mark.asyncio
-async def test_billing_support_answers_subscription_question() -> None:
-    from app.agents.billing_support import BillingSupportAgent
-
-    agent = BillingSupportAgent()
-    state = AgentState(
-        student_id="s1",
-        task="What's included in the Pro plan?",
-        context={"subscription_tier": "free"},
-    )
-    answer = (
-        "The Pro plan includes unlimited course access, priority support, and "
-        "all 20 AI agents. Contact support@pae.dev for billing questions."
-    )
-    with patch("app.agents.billing_support.settings") as mock_settings:
-        mock_settings.anthropic_api_key = "fake-key"
-        with patch.object(agent, "_build_llm", return_value=_mock_llm(answer)):
-            result = await agent.execute(state)
-
-    assert result.response == answer
+# D10 Checkpoint 4 cutover (commit reference TBD): the legacy
+# BillingSupportAgent (BaseAgent subclass) was deleted. The agent
+# now lives as an AgenticBaseAgent subclass at the same module path
+# (app.agents.billing_support) but registers via _agentic_registry,
+# not AGENT_REGISTRY. Its full coverage lives in
+# tests/test_agents/test_billing_support.py (3 phantom-escalation
+# pin tests + 6 Wave 2 tests covering Pass 3b §7.1 failure classes
+# + memory R/W + speculative-lookup integration) plus
+# tests/test_agents/tools/agent_specific/billing_support/ (35
+# per-tool tests across 4 files).
+#
+# The original ws4 tests below tested legacy-class behaviors:
+#   • test_billing_support_registered (AGENT_REGISTRY membership)
+#   • test_billing_support_answers_subscription_question (legacy
+#     execute() shape with state mutation)
+#   • test_billing_support_guardrail_no_dollar_amounts +
+#     _triggers_on_dollar_amount (legacy regex-based evaluate())
+#   • test_billing_support_fallback_refund (legacy _fallback_response
+#     static text)
+# All five removed at cutover. Keeping a retirement pin so a
+# future revert is loud.
 
 
 @pytest.mark.asyncio
-async def test_billing_support_guardrail_no_dollar_amounts() -> None:
-    """Response without dollar amounts should pass guardrail (score >= 0.7)."""
-    from app.agents.billing_support import BillingSupportAgent
+async def test_billing_support_no_longer_in_legacy_registry() -> None:
+    """D10 Checkpoint 4 cutover pin: billing_support migrated off
+    the legacy BaseAgent path. AGENT_REGISTRY no longer carries it;
+    the agent lives in _agentic_registry, reachable via the
+    canonical /api/v1/agentic/{flow}/chat endpoint.
+    """
+    from app.agents.registry import AGENT_REGISTRY, _ensure_registered
 
-    agent = BillingSupportAgent()
-    state = AgentState(
-        student_id="s1",
-        task="refund policy",
-        response=(
-            "We have a 30-day money-back guarantee. "
-            "Email support@pae.dev for direct assistance."
-        ),
+    _ensure_registered()
+    assert "billing_support" not in AGENT_REGISTRY, (
+        "billing_support is back in AGENT_REGISTRY — D10 cutover "
+        "reverted? See app/agents/registry.py:_ensure_registered + "
+        "the new class at app/agents/billing_support.py "
+        "(AgenticBaseAgent, registered via _agentic_registry)."
     )
-    evaluated = await agent.evaluate(state)
-    assert evaluated.evaluation_score >= 0.7
-
-
-@pytest.mark.asyncio
-async def test_billing_support_guardrail_triggers_on_dollar_amount() -> None:
-    """Response with a dollar amount should trigger guardrail (score = 0.2)."""
-    from app.agents.billing_support import BillingSupportAgent
-
-    agent = BillingSupportAgent()
-    state = AgentState(
-        student_id="s1",
-        task="refund",
-        response="I will refund you $29 immediately to your account.",
-    )
-    evaluated = await agent.evaluate(state)
-    assert evaluated.evaluation_score == pytest.approx(0.2)
-
-
-@pytest.mark.asyncio
-async def test_billing_support_fallback_refund() -> None:
-    from app.agents.billing_support import BillingSupportAgent
-
-    agent = BillingSupportAgent()
-    state = AgentState(
-        student_id="s1",
-        task="I want a refund",
-        context={"issue_type": "refund"},
-    )
-    with patch("app.agents.billing_support.settings") as mock_settings:
-        mock_settings.anthropic_api_key = ""
-        result = await agent.execute(state)
-
-    assert "30-day" in (result.response or "")
-    assert "support@pae.dev" in (result.response or "")
 
 
 # ── RagService ─────────────────────────────────────────────────────────────────
@@ -749,7 +708,9 @@ async def test_all_ws4_agents_registered() -> None:
     from app.agents.registry import AGENT_REGISTRY, _ensure_registered
 
     _ensure_registered()
-    new_agents = ["career_coach", "resume_reviewer", "billing_support"]
+    # billing_support removed in D10 cutover — see retirement pin
+    # at test_billing_support_no_longer_in_legacy_registry above.
+    new_agents = ["career_coach", "resume_reviewer"]
     for name in new_agents:
         assert name in AGENT_REGISTRY, f"WS4 agent '{name}' not in registry"
 
@@ -760,6 +721,10 @@ async def test_moa_keyword_routing_ws4() -> None:
 
     assert _keyword_route("I want a career plan for AI engineering") == "career_coach"
     assert _keyword_route("review my resume please") == "resume_reviewer"
-    assert _keyword_route("billing issue with my subscription") == "billing_support"
-    assert _keyword_route("cancel subscription now") == "billing_support"
+    # billing_support keyword routing removed in D10 cutover — the
+    # keyword would have routed to a non-existent AGENT_REGISTRY
+    # entry. Billing questions reach billing_support via the
+    # canonical /api/v1/agentic/{flow}/chat endpoint instead.
+    assert _keyword_route("billing issue with my subscription") is None
+    assert _keyword_route("cancel subscription now") is None
     assert _keyword_route("what skills do i need to become AI engineer") == "career_coach"

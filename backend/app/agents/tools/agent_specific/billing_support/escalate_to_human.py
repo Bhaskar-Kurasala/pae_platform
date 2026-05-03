@@ -19,7 +19,7 @@ collapses to a no-op and returns the existing row's id.
 Permissions: admin:escalation per Pass 3d §C.1. The
 billing_support agent's permission set must include this — granted
 via the agent class's `permissions` declaration (see
-billing_support_v2.py).
+billing_support.py).
 """
 
 from __future__ import annotations

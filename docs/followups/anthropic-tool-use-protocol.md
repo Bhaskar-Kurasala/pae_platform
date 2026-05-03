@@ -6,7 +6,7 @@ phantom-escalation discovery).
 **Cross-references:** Pass 3c E1 (billing_support spec — instructs
 LLM to call lookup tools), Pass 3c E2 (senior_engineer spec — D11
 deliverable that needs the proper protocol),
-[billing_support_v2.py](../../backend/app/agents/billing_support_v2.py)
+[billing_support.py](../../backend/app/agents/billing_support.py)
 (the speculative pattern), Pass 3d §F.1 (the four billing tools).
 
 ## What was shipped in D10
@@ -34,9 +34,9 @@ D10 Checkpoint 3 took a pragmatic shortcut for billing_support:
    itself, **OVERWRITES the LLM's ticket id with the real one**
    from the tool's return, and on tool failure nulls the ticket id
    + appends a support-email fallback to the answer text. See
-   `_dispatch_escalation_if_requested` in `billing_support_v2.py`
+   `_dispatch_escalation_if_requested` in `billing_support.py`
    and the regression tests in
-   [tests/test_agents/test_billing_support_v2.py](../../backend/tests/test_agents/test_billing_support_v2.py).
+   [tests/test_agents/test_billing_support.py](../../backend/tests/test_agents/test_billing_support.py).
 
 ## Why the speculative pattern works for billing_support
 
@@ -93,7 +93,7 @@ Once D11 ships the proper tool-use protocol in `AgenticBaseAgent`
 (probably as a new helper like `self.run_with_tools(messages,
 tools, ctx)` that loops on tool_use blocks):
 
-1. **Remove `_gather_lookup_data` from billing_support_v2.py.**
+1. **Remove `_gather_lookup_data` from billing_support.py.**
    Speculative reads come out; the LLM decides what to call.
 2. **Remove `_dispatch_escalation_if_requested`.** The post-LLM
    escalation dispatch hack goes; the LLM emits a `tool_use`
@@ -129,10 +129,10 @@ together give us:
 
 ## Cross-references
 
-- [backend/app/agents/billing_support_v2.py](../../backend/app/agents/billing_support_v2.py)
+- [backend/app/agents/billing_support.py](../../backend/app/agents/billing_support.py)
   — `_gather_lookup_data` (speculative reads),
   `_dispatch_escalation_if_requested` (post-LLM escalation dispatch)
-- [backend/tests/test_agents/test_billing_support_v2.py](../../backend/tests/test_agents/test_billing_support_v2.py)
+- [backend/tests/test_agents/test_billing_support.py](../../backend/tests/test_agents/test_billing_support.py)
   — three pin tests covering the LLM-trust contract:
   phantom-ticket replaced with real, tool-failure null + support
   email surfaced, no-escalation when LLM doesn't request one

@@ -42,7 +42,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.agentic_base import AgentContext
-from app.agents.billing_support_v2 import BillingSupportAgent
+from app.agents.billing_support import BillingSupportAgent
 from app.agents.primitives.communication import CallChain
 from app.agents.primitives.tools import ToolCallResult
 
@@ -214,7 +214,7 @@ async def test_phantom_ticket_id_replaced_with_real_one_when_tool_succeeds() -> 
         patch.object(agent, "_recall_billing_memories", return_value=[]),
         patch.object(agent, "_record_interaction", return_value=None),
     ):
-        from app.agents.billing_support_v2 import BillingSupportInput
+        from app.agents.billing_support import BillingSupportInput
 
         result = await agent.run(
             BillingSupportInput(
@@ -293,7 +293,7 @@ async def test_escalation_tool_failure_nulls_ticket_and_appends_support_email() 
         patch.object(agent, "_recall_billing_memories", return_value=[]),
         patch.object(agent, "_record_interaction", return_value=None),
     ):
-        from app.agents.billing_support_v2 import BillingSupportInput
+        from app.agents.billing_support import BillingSupportInput
 
         result = await agent.run(
             BillingSupportInput(
@@ -373,7 +373,7 @@ async def test_no_escalation_when_llm_did_not_request_one() -> None:
         patch.object(agent, "_recall_billing_memories", return_value=[]),
         patch.object(agent, "_record_interaction", return_value=None),
     ):
-        from app.agents.billing_support_v2 import BillingSupportInput
+        from app.agents.billing_support import BillingSupportInput
 
         result = await agent.run(
             BillingSupportInput(question="When will my refund arrive?"),
@@ -455,7 +455,7 @@ async def test_llm_returns_malformed_json_falls_back_gracefully() -> None:
         patch.object(agent, "_recall_billing_memories", return_value=[]),
         patch.object(agent, "_record_interaction", return_value=None),
     ):
-        from app.agents.billing_support_v2 import BillingSupportInput
+        from app.agents.billing_support import BillingSupportInput
 
         result = await agent.run(
             BillingSupportInput(question="Where's my refund?"),
@@ -517,7 +517,7 @@ async def test_lookup_tool_failure_does_not_break_run() -> None:
         patch.object(agent, "_recall_billing_memories", return_value=[]),
         patch.object(agent, "_record_interaction", return_value=None),
     ):
-        from app.agents.billing_support_v2 import BillingSupportInput
+        from app.agents.billing_support import BillingSupportInput
 
         result = await agent.run(
             BillingSupportInput(question="When will my refund arrive?"),
@@ -590,7 +590,7 @@ async def test_memory_recall_failure_does_not_break_run() -> None:
         patch.object(agent, "tool_call", side_effect=_stub_tool_call),
         patch.object(agent, "_record_interaction", return_value=None),
     ):
-        from app.agents.billing_support_v2 import BillingSupportInput
+        from app.agents.billing_support import BillingSupportInput
 
         result = await agent.run(
             BillingSupportInput(question="When will my refund arrive?"),
@@ -649,7 +649,7 @@ async def test_speculative_lookups_fire_for_every_invocation() -> None:
         patch.object(agent, "_recall_billing_memories", return_value=[]),
         patch.object(agent, "_record_interaction", return_value=None),
     ):
-        from app.agents.billing_support_v2 import BillingSupportInput
+        from app.agents.billing_support import BillingSupportInput
 
         await agent.run(
             BillingSupportInput(question="What's covered in your refund policy?"),
@@ -680,7 +680,7 @@ async def test_no_user_id_skips_lookups_and_memory() -> None:
         raise AssertionError(f"tool {tool_name} called when user_id is None")
 
     with patch.object(agent, "tool_call", side_effect=_track):
-        from app.agents.billing_support_v2 import BillingSupportInput
+        from app.agents.billing_support import BillingSupportInput
 
         result = await agent.run(
             BillingSupportInput(question="What's your refund policy?"),
