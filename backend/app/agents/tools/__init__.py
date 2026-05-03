@@ -38,6 +38,9 @@ from __future__ import annotations
 # noqa block: each import side-effect-registers tools at import time.
 # Universal tools come first because every agent gets them.
 from app.agents.tools import universal  # noqa: F401
+# Agent-specific tools per Pass 3d §A.3. D10 Checkpoint 3 ships the
+# first set: billing_support's four lookup + escalation tools.
+from app.agents.tools import agent_specific  # noqa: F401
 from app.agents.tools import (  # noqa: F401
     career_tools,
     code_tools,
@@ -48,6 +51,7 @@ from app.agents.tools import (  # noqa: F401
 
 
 __all__ = [
+    "agent_specific",
     "career_tools",
     "code_tools",
     "content_tools",

@@ -60,6 +60,33 @@ class AuthService:
                     error=str(exc),
                 )
 
+        # D10 Checkpoint 3 — grant a 24-hour signup_grace free-tier
+        # window per Pass 3f §C.1. Function shipped in D9 but was
+        # never called from production registration (deferred Item 11
+        # from D9 closure). Without this hook, freshly-signed-up
+        # students get 402 from the canonical agentic endpoint
+        # because compute_active_entitlements sees no active
+        # entitlement AND no free-tier grant.
+        #
+        # Student-role-only mirrors the cohort_event filter above —
+        # admins / instructors authenticate via different paths and
+        # don't need the signup_grace UX. Idempotent (the function
+        # returns the existing grant id if one is already active),
+        # so a repeat call from a future flow doesn't stack grants.
+        # Best-effort like the cohort_event block: failure to grant
+        # must never block registration.
+        if user.role == "student":
+            try:
+                from app.services.entitlement_service import grant_signup_grace
+
+                await grant_signup_grace(self.repo.db, user_id=user.id)
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "auth.signup_grace_failed",
+                    user_id=str(user.id),
+                    error=str(exc),
+                )
+
         return user
 
     async def login(self, email: str, password: str) -> dict[str, str]:

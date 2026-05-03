@@ -69,6 +69,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         raise
 
+    # D10 Checkpoint 3: ensure the @tool decorators fire at startup
+    # so the tool registry is populated when the canonical agentic
+    # endpoint dispatches to specialists. Without this, the agent-
+    # specific tools (Pass 3d §F.1+) appear "not registered" the
+    # first time an agent calls them — which manifests as the
+    # billing_support_v2 fail-honest path firing on every escalation
+    # request because escalate_to_human can't be found. PG-1-style
+    # gap (registration that needs to happen in the FastAPI process,
+    # not just be available somewhere on disk).
+    try:
+        from app.agents.primitives.tools import ensure_tools_loaded
+
+        ensure_tools_loaded()
+        log.info("app.startup.tools_loaded")
+    except Exception as exc:  # noqa: BLE001
+        log.error(
+            "app.startup.tools_load_failed",
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        raise
+
     # Safety primitive eager-load. The first call to get_default_gate
     # triggers Presidio + spaCy load; from this point onward every
     # AgenticBaseAgent.execute() and the orchestrator scan_input/

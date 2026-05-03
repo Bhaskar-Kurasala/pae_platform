@@ -182,6 +182,35 @@ class AgenticBaseAgent(Generic[_InputT]):
     eval_threshold: ClassVar[float] = DEFAULT_THRESHOLD
     eval_max_retries: ClassVar[int] = DEFAULT_MAX_RETRIES
 
+    # ── cost tracking (D10 Checkpoint 3) ──────────────────────────
+    # The agent's model name, used by estimate_cost_inr to compute
+    # cost_inr for the agent_actions audit row. Subclasses override
+    # to reflect their actual model — billing_support uses "claude-haiku-4-5",
+    # learning_coach uses "claude-sonnet-4-6", etc. Default points at
+    # the same Sonnet tier the legacy BaseAgent uses so unknown agents
+    # don't silently zero out cost.
+    model_name: ClassVar[str] = "claude-sonnet-4-6"
+
+    # ── permissions (D10 Checkpoint 3 / Pass 3d §C.2) ─────────────
+    # Per-agent declared permissions. The tool executor checks the
+    # union of (this set) ∪ (ctx.permissions) against each tool's
+    # required permissions. ctx.permissions is the per-call set
+    # (used for admin-on-behalf-of cases that grant temporary
+    # extra access); this ClassVar is the agent's baseline set.
+    #
+    # Default empty so a new subclass without permissions
+    # declarations gets no implicit access to permissioned tools.
+    # Subclasses MUST declare what they need:
+    #
+    #   permissions: ClassVar[frozenset[str]] = frozenset({
+    #       "read:student_data",
+    #       "write:agent_memory",
+    #       ...
+    #   })
+    #
+    # Pass 3d §C.1 lists the canonical permission roster.
+    permissions: ClassVar[frozenset[str]] = frozenset()
+
     # ── lifecycle ──────────────────────────────────────────────────
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
@@ -231,6 +260,10 @@ class AgenticBaseAgent(Generic[_InputT]):
              the input each attempt so the critic's reasoning can
              be threaded into the next call as `feedback`.
           3. Otherwise, run() once, wrap output in AgentResult.
+          4. (D10 Checkpoint 3) Always write an agent_actions audit
+             row at exit with cost_inr populated from accumulated
+             LLM usage, so mv_student_daily_cost can aggregate for
+             the cost-ceiling enforcement at Layer 3.
 
         Memory, tools, and inter-agent calls are accessed by
         subclasses inside `run()` via `self.memory(ctx)`, `self.tool_call(...)`,
@@ -239,7 +272,37 @@ class AgenticBaseAgent(Generic[_InputT]):
         deliberate: opt-outs would be meaningless if the base class
         were always calling `memory.recall()` whether the agent
         wanted it or not.
+
+        Cost tracking (D10 Checkpoint 3, "D9-foundation touch
+        applied during D10" per pre-approval in Checkpoint 1 Q2):
+
+          • execute() initializes a per-call token accumulator on
+            ctx.extra["_llm_usage"] = []
+          • Agents call self._track_llm_usage(response) after each
+            llm.ainvoke() to push usage onto the accumulator
+          • At every execute() return path, _finalize_action_log
+            writes an agent_actions row with cost_inr computed from
+            the summed tokens via estimate_cost_inr
+          • The audit row uses its own session (AsyncSessionLocal)
+            so it's not affected by the agent's session state —
+            same pattern as the legacy BaseAgent.log_action
+
+        Per-agent token tracking is opt-in (agents that don't call
+        _track_llm_usage get cost_inr=0 in their audit row, which
+        is honest — we don't have to know).
         """
+        started_at = time.perf_counter()
+        # Initialize the per-call LLM usage accumulator. Agents call
+        # self._track_llm_usage(response) after each LLM round trip.
+        ctx = ctx.model_copy(
+            update={
+                "extra": {
+                    **ctx.extra,
+                    "_llm_usage": [],
+                }
+            }
+        )
+
         validated: _InputT = self._validate_input(input)
         request_str = self._request_for_eval(validated)
 
@@ -256,7 +319,7 @@ class AgenticBaseAgent(Generic[_InputT]):
         # Pass 3g §A.5: "the wrapping is part of AgenticBaseAgent.run()".
         input_verdict = await _maybe_safety_scan_input(self, validated, ctx)
         if input_verdict is not None and input_verdict.decision == "block":
-            return AgentResult(
+            blocked_result = AgentResult(
                 output={
                     "blocked": True,
                     "block_reason": input_verdict.user_facing_message
@@ -267,6 +330,14 @@ class AgenticBaseAgent(Generic[_InputT]):
                 retry_count=0,
                 escalated=False,
             )
+            await self._finalize_action_log(
+                ctx=ctx,
+                started_at=started_at,
+                status="blocked",
+                output=blocked_result.output,
+                error_message="safety_input_block",
+            )
+            return blocked_result
         # If redacted, the gate populated redacted_text but the
         # specialist's input schema doesn't have a generic "text"
         # field we can swap. The redacted text lives in
@@ -284,8 +355,28 @@ class AgenticBaseAgent(Generic[_InputT]):
             )
 
         if not self.uses_self_eval:
-            output = await self.run(validated, ctx)
+            try:
+                output = await self.run(validated, ctx)
+            except Exception as exc:  # noqa: BLE001
+                # Audit-log even on uncaught run() failures so cost
+                # tracking is always emitted. Re-raise so the dispatch
+                # layer's error handling sees the original exception.
+                await self._finalize_action_log(
+                    ctx=ctx,
+                    started_at=started_at,
+                    status="error",
+                    output=None,
+                    error_message=f"{type(exc).__name__}: {exc}",
+                )
+                raise
             output = await _maybe_safety_scan_output(self, output, ctx, input_verdict)
+            await self._finalize_action_log(
+                ctx=ctx,
+                started_at=started_at,
+                status="completed",
+                output=output,
+                error_message=None,
+            )
             return AgentResult(
                 output=output,
                 score=None,
@@ -323,6 +414,13 @@ class AgenticBaseAgent(Generic[_InputT]):
         # one before handing back to the caller.
         result.output = await _maybe_safety_scan_output(
             self, result.output, ctx, input_verdict
+        )
+        await self._finalize_action_log(
+            ctx=ctx,
+            started_at=started_at,
+            status="escalated" if result.escalated else "completed",
+            output=result.output,
+            error_message=result.reasoning if result.escalated else None,
         )
         return result
 
@@ -401,12 +499,21 @@ class AgenticBaseAgent(Generic[_InputT]):
         ctx: AgentContext,
     ) -> ToolCallResult:
         """Run a registered tool via the executor. The tool's audit
-        row carries this agent's name + the active call_chain_id."""
+        row carries this agent's name + the active call_chain_id.
+
+        Permissions: union of (this agent's `permissions` ClassVar)
+        ∪ (ctx.permissions). The ClassVar is the agent's declared
+        baseline access (Pass 3d §C.2); ctx.permissions adds per-
+        call grants for admin-on-behalf-of paths. Tools fail-fast
+        with ToolPermissionError if the union doesn't include all
+        of their `requires=...` set.
+        """
         if not self.uses_tools:
             raise RuntimeError(
                 f"Agent {self.name!r} has uses_tools=False but tried "
                 "to call tool {tool_name!r}."
             )
+        merged_permissions = frozenset(self.permissions) | frozenset(ctx.permissions)
         executor = ToolExecutor(ctx.session)
         return await executor.execute(
             tool_name,
@@ -414,7 +521,7 @@ class AgenticBaseAgent(Generic[_InputT]):
             context=ToolCallContext(
                 agent_name=self.name,
                 user_id=ctx.user_id,
-                permissions=ctx.permissions,
+                permissions=merged_permissions,
                 call_chain_id=ctx.chain.root_id,
             ),
         )
@@ -445,6 +552,154 @@ class AgenticBaseAgent(Generic[_InputT]):
             session=ctx.session,
             chain=ctx.chain,
         )
+
+    # ── cost tracking helpers (D10 Checkpoint 3) ──────────────────
+
+    def _track_llm_usage(self, ctx: AgentContext, response: Any) -> None:
+        """Record LLM token usage from a response onto ctx.extra.
+
+        Call this from inside `run()` after each `llm.ainvoke(...)`:
+
+            response = await llm.ainvoke(messages)
+            self._track_llm_usage(ctx, response)
+
+        execute()'s _finalize_action_log sums whatever the agent
+        accumulated, computes cost via estimate_cost_inr, and writes
+        it to agent_actions.cost_inr — so the
+        mv_student_daily_cost materialized view can aggregate for
+        the cost-ceiling enforcement at Layer 3 of entitlements.
+
+        Mirrors the legacy BaseAgent._merge_token_usage extraction
+        rules: prefer LangChain's usage_metadata (>=0.2), fall back
+        to response_metadata.usage. If neither shape is present,
+        usage is silently zeroed — agents that don't need cost
+        tracking just don't call this helper.
+        """
+        usage_meta = getattr(response, "usage_metadata", None)
+        input_tokens = 0
+        output_tokens = 0
+        if usage_meta and isinstance(usage_meta, dict):
+            input_tokens = int(usage_meta.get("input_tokens", 0) or 0)
+            output_tokens = int(usage_meta.get("output_tokens", 0) or 0)
+        else:
+            resp_meta = getattr(response, "response_metadata", {}) or {}
+            raw_usage = resp_meta.get("usage", {}) if isinstance(resp_meta, dict) else {}
+            if raw_usage:
+                input_tokens = int(raw_usage.get("input_tokens", 0) or 0)
+                output_tokens = int(raw_usage.get("output_tokens", 0) or 0)
+
+        accumulator = ctx.extra.get("_llm_usage")
+        if accumulator is None:
+            # execute() initializes this; if it's missing we're
+            # being called outside the execute path. Don't crash;
+            # silently noop so direct-test calls of run() work.
+            return
+        accumulator.append(
+            {"input_tokens": input_tokens, "output_tokens": output_tokens}
+        )
+
+    async def _finalize_action_log(
+        self,
+        *,
+        ctx: AgentContext,
+        started_at: float,
+        status: str,
+        output: Any,
+        error_message: str | None,
+    ) -> None:
+        """Write an agent_actions row at execute() exit.
+
+        Called from every return path in execute() (safety block,
+        completed, escalated, error). Uses its own session
+        (AsyncSessionLocal) so the audit row lands even when the
+        caller's session has failed/rolled-back state — same pattern
+        as legacy BaseAgent.log_action.
+
+        Cost computation: sums all tokens accumulated via
+        _track_llm_usage during this execute() call, hands them to
+        estimate_cost_inr with the agent's model_name, persists the
+        result to agent_actions.cost_inr.
+
+        Failure mode: any exception during the audit write is
+        caught + logged. The agent's primary contract (returning a
+        response to the caller) must never fail because telemetry
+        broke.
+        """
+        try:
+            from app.agents.llm_factory import estimate_cost_inr
+            from app.core.database import AsyncSessionLocal
+            from app.models.agent_action import AgentAction
+
+            # Sum accumulated LLM usage.
+            accumulator = ctx.extra.get("_llm_usage", []) or []
+            total_input = sum(int(u.get("input_tokens", 0)) for u in accumulator)
+            total_output = sum(int(u.get("output_tokens", 0)) for u in accumulator)
+            total_tokens = total_input + total_output
+
+            cost_inr_float = 0.0
+            if total_tokens > 0:
+                try:
+                    cost_inr_float = estimate_cost_inr(
+                        model=self.model_name,
+                        input_tokens=total_input,
+                        output_tokens=total_output,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning(
+                        "agentic_base.cost_estimate_failed",
+                        agent=self.name,
+                        model=self.model_name,
+                        error=str(exc),
+                    )
+
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
+
+            # Compose the audit row. output_data is best-effort —
+            # a dict shape works for most agents; we fall back to
+            # repr() for unusual outputs so the column still gets
+            # populated.
+            output_data: dict[str, Any] = {
+                "input_tokens": total_input,
+                "output_tokens": total_output,
+                "llm_calls": len(accumulator),
+            }
+            if isinstance(output, dict):
+                # Don't bloat the audit row with multi-KB responses;
+                # cap the output preview at a reasonable size.
+                output_data["output_preview"] = {
+                    k: (v if not isinstance(v, str) else v[:500])
+                    for k, v in output.items()
+                }
+            elif output is not None:
+                output_data["output_repr"] = repr(output)[:1000]
+
+            from decimal import Decimal as _Decimal
+
+            async with AsyncSessionLocal() as audit_session:
+                row = AgentAction(
+                    agent_name=self.name,
+                    student_id=ctx.user_id,
+                    action_type="execute",
+                    input_data=None,  # PII concerns — input is in agent_call_chain
+                    output_data=output_data,
+                    status=status,
+                    error_message=error_message,
+                    duration_ms=duration_ms,
+                    tokens_used=total_tokens or None,
+                    cost_inr=_Decimal(str(cost_inr_float)) if cost_inr_float else None,
+                    actor_id=ctx.user_id,  # student-initiated; admin-on-behalf-of TBD
+                    actor_role="student" if ctx.user_id else "system",
+                )
+                audit_session.add(row)
+                await audit_session.commit()
+        except Exception as exc:  # noqa: BLE001
+            # Telemetry must never fail the user-facing response.
+            log.warning(
+                "agentic_base.action_log_failed",
+                agent=self.name,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
 
     # ── customization hooks (override per agent if needed) ────────
 
