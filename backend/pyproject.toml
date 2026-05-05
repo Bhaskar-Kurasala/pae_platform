@@ -68,6 +68,9 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+    "real_llm: opt-in tests that require a live LLM call (MINIMAX_API_KEY in env). Run with -m real_llm.",
+]
 
 [tool.ruff]
 line-length = 100
