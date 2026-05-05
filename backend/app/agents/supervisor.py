@@ -59,16 +59,37 @@ class SupervisorInput(AgentInput):
 
 
 def _build_supervisor_llm() -> ChatAnthropic:
-    """Sonnet 4.6 with structured-output knobs.
+    """Sonnet (or MiniMax M2.7) with structured-output knobs.
 
     Distinct from app.agents.llm_factory.build_llm because we need:
       - Lower temperature (Supervisor is a router, not a creative)
       - Slightly higher max_tokens (RouteDecision JSON can be ~600 toks)
       - Standard 30s timeout (factory default)
+
+    Provider routing mirrors build_llm: MiniMax is checked first so
+    AICareerOS runs Supervisor on M2.7 when MINIMAX_API_KEY is set.
+    The per-call params (temperature, max_tokens, timeout, retries)
+    are preserved across both branches — only the model + key + URL
+    differ. See docs/followups/asyncpg-rollback-discipline.md
+    "parallel LLM client construction" entry for why this builder
+    can't just delegate to build_llm() wholesale.
     """
+    if settings.minimax_api_key:
+        return ChatAnthropic(  # type: ignore[call-arg]
+            model=settings.minimax_model,
+            anthropic_api_key=SecretStr(settings.minimax_api_key),
+            base_url=settings.minimax_api_base_url,
+            temperature=0.1,
+            max_tokens=1500,
+            timeout=30.0,
+            max_retries=2,
+        )
     api_key = settings.anthropic_api_key
     if not api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY not set; Supervisor cannot run")
+        raise RuntimeError(
+            "Neither MINIMAX_API_KEY nor ANTHROPIC_API_KEY is set; "
+            "Supervisor cannot run"
+        )
     return ChatAnthropic(  # type: ignore[call-arg]
         model="claude-sonnet-4-6",
         anthropic_api_key=SecretStr(api_key),

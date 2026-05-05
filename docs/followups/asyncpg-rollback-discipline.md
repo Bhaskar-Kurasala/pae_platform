@@ -341,12 +341,58 @@ This will bite again as D11+ adds more agent tests. The
 recommendation should land in the test-writing guide whenever
 that doc gets written.
 
+## Sibling 4: Parallel LLM client construction bypassing the factory
+
+Discovered during MiniMax M2.7 activation (Phase 2 verification gate,
+2026-05-05) when the canonical agentic endpoint returned 500 with
+`RuntimeError: ANTHROPIC_API_KEY not set; Supervisor cannot run`.
+
+**The shape:** `app/agents/llm_factory.py:build_llm()` is the
+intended single entry point for constructing LLM clients — it
+priority-routes between MiniMax and Anthropic based on which key is
+configured. But two callers built `ChatAnthropic(...)` directly,
+bypassing the factory entirely:
+
+- `app/agents/supervisor.py:_build_supervisor_llm` — needed
+  Supervisor-specific params (`temperature=0.1`, `max_tokens=1500`,
+  `max_retries=2`) that the factory's surface didn't expose
+- `app/agents/primitives/safety/llm_classifier.py:_build_safety_classifier_llm`
+  — needed safety-specific params (`temperature=0.0`,
+  `max_tokens=200`, `timeout=1.5`, `max_retries=0`)
+
+Each builder hardcoded `settings.anthropic_api_key` and raised on
+its absence. **Fatal under MiniMax-only configuration** — every
+agentic request 500'd because Supervisor was the first hop.
+
+**Why the Phase 1.1 audit missed this:** the audit grepped
+`estimate_cost_inr` and `model_name` callers, both correct grep
+targets *for cost tracking*. Neither would have surfaced
+`ChatAnthropic(` constructors that don't track cost — those
+parallel builders were invisible to a cost-grep population.
+
+**The discipline:** when investigating any subsystem with an
+abstraction layer, grep BOTH the abstraction AND the underlying
+primitive. Each captures a different population:
+
+- Abstraction grep (`build_llm()`, `estimate_cost_inr`) → callers
+  using the intended interface
+- Primitive grep (`ChatAnthropic(`, `AsyncSession(`, `redis.Redis(`)
+  → callers bypassing the abstraction entirely
+
+The primitive grep is the one that catches the bypass.
+
+**Fix:** each builder gets a MiniMax priority check at the top
+mirroring `build_llm`'s shape, while preserving its existing
+per-builder params unchanged. The route-to-MiniMax branch and the
+route-to-Anthropic branch differ only in model + key + base_url.
+
 ## Meta-pattern across all four
 
-The asyncpg rollback, JSONB cast, registration-on-import, and
-test-isolation patterns share one shape: **code that works
-because some unstated environmental assumption happens to hold,
-and breaks (or silently misbehaves) when the assumption changes.**
+The asyncpg rollback, JSONB cast, registration-on-import,
+test-isolation, and parallel-LLM-client patterns share one shape:
+**code that works because some unstated environmental assumption
+happens to hold, and breaks (or silently misbehaves) when the
+assumption changes.**
 Each instance was discovered the same way: an end-to-end
 verification path (smoke test, full regression, manual
 verification) hit the failure mode, and the in-isolation tests

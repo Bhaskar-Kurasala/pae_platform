@@ -75,6 +75,34 @@ activation:
   remains accurate because it only sums `agent_actions.cost_inr`,
   which IS being tracked correctly under the MiniMax activation work.
 
+## Safety classifier tier divergence (registered 2026-05-05)
+
+Under Anthropic, the Layer 2 safety classifier ran on Haiku 4.5 — a
+small, fast model designed exactly for short-prompt classification
+work. Under MiniMax (post-activation), it runs on M2.7, which is
+MiniMax's large general model. Cost is fine (M2.7 is cheap). Latency
+might not be: safety scans are on the hot path of every agentic
+request, and a larger model means marginally higher per-call
+latency.
+
+**Not a launch blocker.** The classifier still has the 1.5s
+SDK timeout + 2.0s `asyncio.wait_for` cap from Pass 3g §B.2.2; if
+M2.7 exceeds those it falls back to Layer 1 (regex) verdict — a
+logged degradation, not a hard failure.
+
+**If post-launch safety latency becomes a concern**, the cause is
+likely M2.7 doing classification work originally designed for a
+Haiku-tier model. Three options:
+
+1. Route safety classification to a separate small model if MiniMax
+   adds tier support
+2. Keep Anthropic as a parallel provider specifically for safety
+   classification (re-add the ANTHROPIC_API_KEY check in
+   `_build_safety_classifier_llm`, prefer it over MiniMax for this
+   one builder)
+3. Accept the latency and tune the safety timeout knobs upward —
+   simplest if the budget allows
+
 ## When to revisit
 
 When D17 closes, do a comprehensive cost-tracking sweep that:

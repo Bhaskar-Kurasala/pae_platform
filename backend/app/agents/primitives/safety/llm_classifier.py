@@ -100,17 +100,36 @@ _LLM_REQUEST_TIMEOUT_S = 1.5
 
 
 def _build_safety_classifier_llm() -> ChatAnthropic:
-    """Build a Haiku client tuned for safety classification.
+    """Build a Haiku (or MiniMax M2.7) client tuned for safety classification.
 
     Distinct from build_llm() in app.agents.llm_factory because we
     need a tighter timeout (2s vs the factory's 30s) and lower max
     tokens (~100 — the response schema is small). Adding a tier knob
     to build_llm would muddy its surface; a narrow helper is cleaner.
+
+    Provider routing mirrors build_llm: MiniMax is checked first so
+    AICareerOS runs the safety classifier on M2.7 when MINIMAX_API_KEY
+    is set. NOTE: M2.7 is a large model doing classification work
+    originally designed for a Haiku-tier model — see
+    docs/followups/llm-cost-tracking-silent-zero.md for the
+    safety-classifier-tier-divergence note (post-launch latency knob
+    if needed).
     """
+    if settings.minimax_api_key:
+        return ChatAnthropic(  # type: ignore[call-arg]
+            model=settings.minimax_model,
+            anthropic_api_key=SecretStr(settings.minimax_api_key),
+            base_url=settings.minimax_api_base_url,
+            temperature=0.0,
+            max_tokens=200,
+            timeout=_LLM_REQUEST_TIMEOUT_S,
+            max_retries=0,
+        )
     api_key = settings.anthropic_api_key
     if not api_key:
         raise RuntimeError(
-            "ANTHROPIC_API_KEY not set; safety classifier cannot run"
+            "Neither MINIMAX_API_KEY nor ANTHROPIC_API_KEY is set; "
+            "safety classifier cannot run"
         )
     return ChatAnthropic(  # type: ignore[call-arg]
         model="claude-haiku-4-5",
