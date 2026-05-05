@@ -19,8 +19,10 @@ import re
 
 # Agents that do hands-on coding work. Only these get the overlay; the
 # conceptual tutors (socratic, student_buddy) are allowed to dive in.
+# D11 cutover (Checkpoint 4) absorbed coding_assistant + code_review
+# into senior_engineer.
 _CODING_AGENTS: frozenset[str] = frozenset(
-    {"coding_assistant", "studio_tutor", "code_review"}
+    {"senior_engineer", "studio_tutor"}
 )
 
 # Patterns that are strong signals of a pasted error. Case-insensitive. We

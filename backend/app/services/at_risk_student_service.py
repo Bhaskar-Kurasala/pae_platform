@@ -48,11 +48,14 @@ LOW_MOODS: frozenset[str] = frozenset({"stuck", "overwhelmed", "frustrated", "ex
 
 
 # Help-oriented agents — same list as the confusion heatmap. Keep in sync.
+# D11 cutover (Checkpoint 4) absorbed coding_assistant + code_review
+# into senior_engineer (Pass 3c E2). The 0059 data migration
+# consolidates historical agent_actions rows so this query matches
+# pre-cutover activity too.
 HELP_AGENTS: tuple[str, ...] = (
     "socratic_tutor",
-    "coding_assistant",
+    "senior_engineer",
     "student_buddy",
-    "code_review",
     "project_evaluator",
 )
 

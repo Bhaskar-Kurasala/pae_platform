@@ -44,8 +44,11 @@ def _ensure_registered() -> None:
     # routes to billing_support — students hit it through the
     # canonical /api/v1/agentic/{flow}/chat endpoint instead.
     import app.agents.career_coach  # noqa: F401
-    import app.agents.code_review  # noqa: F401
-    import app.agents.coding_assistant  # noqa: F401
+    # code_review + coding_assistant — D11 cutover (Checkpoint 4)
+    # absorbed both into senior_engineer (Pass 3c E2). Their
+    # AGENT_REGISTRY entries are no longer reachable via MOA;
+    # canonical /api/v1/agentic/{flow}/chat dispatch handles
+    # senior_engineer through _agentic_registry.
     import app.agents.community_celebrator  # noqa: F401
     import app.agents.content_ingestion  # noqa: F401
     import app.agents.curriculum_mapper  # noqa: F401
@@ -60,7 +63,12 @@ def _ensure_registered() -> None:
     import app.agents.progress_report  # noqa: F401
     import app.agents.project_evaluator  # noqa: F401
     import app.agents.resume_reviewer  # noqa: F401
-    import app.agents.senior_engineer  # noqa: F401
+    # senior_engineer — D11 cutover (Checkpoint 4) migrated this
+    # to the canonical agentic endpoint. The class is now an
+    # AgenticBaseAgent subclass loaded via _agentic_loader; legacy
+    # MOA dispatch (which AGENT_REGISTRY serves) can no longer
+    # reach senior_engineer. Same pattern as billing_support's
+    # D10 cutover.
     import app.agents.socratic_tutor  # noqa: F401
     import app.agents.spaced_repetition  # noqa: F401
     import app.agents.student_buddy  # noqa: F401

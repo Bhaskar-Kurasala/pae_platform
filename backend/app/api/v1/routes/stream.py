@@ -167,12 +167,10 @@ _STREAM_SYSTEM_PROMPTS: dict[str, str] = {
         "Always end your response with one thoughtful question."
         + _FORMATTING_RULES
     ),
-    "coding_assistant": (
-        "You are an expert AI engineering coding assistant. "
-        "Provide clear, production-quality code with type hints, structlog logging, and async patterns. "
-        "For code reviews: list issues as numbered items with severity, then show a corrected code block."
-        + _FORMATTING_RULES
-    ),
+    # coding_assistant entry removed at D11 cutover (Checkpoint 4) —
+    # absorbed into senior_engineer per Pass 3c E2. Code-flavored
+    # streaming requests should reach senior_engineer via the
+    # canonical agentic endpoint, not the legacy stream route.
     "adaptive_quiz": (
         "You are an AI engineering quiz coach. "
         "Ask focused questions, give immediate feedback, and explain the correct answer clearly."

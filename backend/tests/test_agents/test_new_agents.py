@@ -73,21 +73,10 @@ async def test_mcq_factory_generates_questions() -> None:
     assert len(data) >= 1
 
 
-@pytest.mark.asyncio
-async def test_coding_assistant_returns_markdown() -> None:
-    from app.agents.coding_assistant import CodingAssistantAgent
-
-    agent = CodingAssistantAgent()
-    state = AgentState(
-        student_id="s1",
-        task="help with code",
-        context={"code": "def add(a, b):\n    return a + b"},
-    )
-    with patch.object(agent, "_build_llm", return_value=_mock_llm(
-        "Nice work! A few suggestions:\n\n**Line 1**: Add type hints → `def add(a: int, b: int) -> int:`"
-    )):
-        result = await agent.execute(state)
-    assert result.response is not None
+# test_coding_assistant_returns_markdown removed at D11 cutover
+# (Checkpoint 4) — coding_assistant absorbed into senior_engineer
+# per Pass 3c E2. The senior_engineer agent class is exercised by
+# tests/test_agents/test_senior_engineer.py + the schema/tool tests.
 
 
 @pytest.mark.asyncio
@@ -354,8 +343,12 @@ async def test_all_agents_registered() -> None:
     from app.agents.registry import AGENT_REGISTRY, _ensure_registered
 
     _ensure_registered()
+    # code_review + coding_assistant — D11 cutover (Checkpoint 4)
+    # absorbed both into senior_engineer (which lives in
+    # _agentic_registry, not AGENT_REGISTRY). They were dropped from
+    # _ensure_registered at the same commit.
     expected = [
-        "adaptive_path", "adaptive_quiz", "code_review", "coding_assistant",
+        "adaptive_path", "adaptive_quiz",
         "community_celebrator", "content_ingestion", "curriculum_mapper", "deep_capturer",
         "disrupt_prevention", "job_match", "knowledge_graph", "mcq_factory",
         "mock_interview", "peer_matching", "portfolio_builder", "progress_report",
@@ -370,7 +363,13 @@ async def test_moa_keyword_routing() -> None:
     """MOA keyword router should correctly classify common patterns."""
     from app.agents.moa import _keyword_route
 
-    assert _keyword_route("review my code") == "code_review"
+    # "review my code" → previously routed to code_review via MOA;
+    # at D11 cutover the keyword map dropped that entry. Code-review-
+    # flavored requests reach senior_engineer via the canonical
+    # /api/v1/agentic/{flow}/chat endpoint instead. The keyword route
+    # falls through to None now, which signals the LLM-classifier
+    # fallback path.
+    assert _keyword_route("review my code") is None
     assert _keyword_route("quiz me on RAG") == "adaptive_quiz"
     assert _keyword_route("mock interview please") == "mock_interview"
     assert _keyword_route("find jobs in AI") == "job_match"

@@ -23,10 +23,12 @@ log = structlog.get_logger()
 # All routable agent names
 ROUTABLE_AGENTS = [
     "socratic_tutor",
-    "code_review",
+    # code_review + coding_assistant — D11 cutover (Checkpoint 4)
+    # absorbed both into senior_engineer (Pass 3c E2). Legacy MOA
+    # dispatch can no longer reach them; senior_engineer is reached
+    # via the canonical /api/v1/agentic/{flow}/chat endpoint.
     "adaptive_quiz",
     "mcq_factory",
-    "coding_assistant",
     "student_buddy",
     "content_ingestion",
     "curriculum_mapper",
@@ -60,10 +62,8 @@ Your job: classify the student's message and choose the right agent.
 
 Available agents and their purposes:
 - socratic_tutor: conceptual questions, "what is X", "explain Y", "how does Z work"
-- code_review: reviewing code for correctness and production readiness
 - adaptive_quiz: MCQ practice, "quiz me", "test my knowledge", "multiple choice"
 - mcq_factory: generating new questions from content
-- coding_assistant: coding help, debugging, "fix my code", "PR review"
 - student_buddy: quick explanations, "tldr", "eli5", "summarize briefly"
 - content_ingestion: ingesting YouTube/GitHub content
 - curriculum_mapper: curriculum updates, lesson ordering
@@ -90,7 +90,12 @@ Agent:"""
 
 # Fast keyword routing — avoids LLM call for the most common patterns
 _KEYWORD_MAP: list[tuple[list[str], str]] = [
-    (["def ", "class ", "import ", "```python", "review my code", "check my code"], "code_review"),
+    # code_review + coding_assistant keyword routes removed in D11
+    # cutover (Checkpoint 4). Code-review-flavored requests reach
+    # senior_engineer via the canonical /api/v1/agentic/{flow}/chat
+    # endpoint where the Supervisor's capability registry has the
+    # agent. Legacy MOA would have routed to non-existent
+    # AGENT_REGISTRY entries.
     (["quiz me", "mcq", "multiple choice", "test my knowledge"], "adaptive_quiz"),
     (["interview", "system design", "mock interview", "interview prep"], "mock_interview"),
     (["portfolio", "showcase", "build my portfolio"], "portfolio_builder"),
@@ -100,7 +105,6 @@ _KEYWORD_MAP: list[tuple[list[str], str]] = [
     (["weekly report", "progress report", "how am i doing"], "progress_report"),
     (["spaced repetition", "due cards", "flashcard", "review cards"], "spaced_repetition"),
     (["learning path", "what should i study", "study plan", "adapt path"], "adaptive_path"),
-    (["help with code", "debug", "fix my code", "pr review", "coding help"], "coding_assistant"),
     (["tldr", "eli5", "brief", "quick explanation", "summarize"], "student_buddy"),
     (["ingest", "youtube.com", "github.com/", "new video", "process content"], "content_ingestion"),
     (["generate question", "create mcq", "make quiz", "question bank"], "mcq_factory"),

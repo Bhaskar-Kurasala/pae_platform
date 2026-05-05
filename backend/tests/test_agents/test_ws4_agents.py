@@ -652,6 +652,26 @@ async def test_billing_support_no_longer_in_legacy_registry() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_senior_engineer_merge_no_longer_in_legacy_registry() -> None:
+    """D11 Checkpoint 4 cutover pin: senior_engineer migrated off the
+    legacy BaseAgent path AND absorbed code_review + coding_assistant
+    (Pass 3c E2 merge). All three legacy AGENT_REGISTRY entries are
+    gone. senior_engineer lives in _agentic_registry, reachable via
+    the canonical /api/v1/agentic/{flow}/chat endpoint.
+    """
+    from app.agents.registry import AGENT_REGISTRY, _ensure_registered
+
+    _ensure_registered()
+    for legacy_name in ("senior_engineer", "code_review", "coding_assistant"):
+        assert legacy_name not in AGENT_REGISTRY, (
+            f"{legacy_name!r} is back in AGENT_REGISTRY — D11 cutover "
+            "reverted? See app/agents/registry.py:_ensure_registered + "
+            "the canonical class at app/agents/senior_engineer.py "
+            "(AgenticBaseAgent, registered via _agentic_registry)."
+        )
+
+
 # ── RagService ─────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

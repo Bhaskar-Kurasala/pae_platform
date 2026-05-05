@@ -100,5 +100,9 @@ async def test_list_agents(client: AsyncClient) -> None:
     agents = resp.json()
     names = [a["name"] for a in agents]
     assert "socratic_tutor" in names
-    assert "code_review" in names
+    # code_review removed from AGENT_REGISTRY at D11 cutover
+    # (Checkpoint 4) — absorbed into senior_engineer which lives in
+    # _agentic_registry, not the legacy AGENT_REGISTRY this endpoint
+    # serves. Keep adaptive_quiz as the second sanity check that the
+    # registry is non-empty after the legacy MOA boots.
     assert "adaptive_quiz" in names

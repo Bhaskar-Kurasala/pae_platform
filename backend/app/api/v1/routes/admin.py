@@ -643,8 +643,12 @@ _AGENT_VERBS: dict[str, str] = {
     "adaptive_quiz": "Ran an adaptive quiz",
     "billing_support": "Answered a billing question",
     "career_coach": "Coached on career direction",
-    "code_review": "Reviewed a code submission",
-    "coding_assistant": "Helped debug code",
+    # code_review + coding_assistant — D11 cutover absorbed both into
+    # senior_engineer (Pass 3c E2). Activity-feed strings keyed by
+    # "senior_engineer" cover both legacy paths going forward; the
+    # 0059 data migration consolidates historical agent_actions rows
+    # so the dashboard query stays consistent across pre/post-cutover.
+    "senior_engineer": "Reviewed code or helped debug",
     "community_celebrator": "Celebrated a milestone",
     "content_ingestion": "Ingested new course content",
     "curriculum_mapper": "Mapped curriculum",

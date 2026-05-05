@@ -11,12 +11,15 @@ itself = 13 total declarations. Of those, only `learning_coach`
 (D8-migrated) is `available_now=True`. The rest stay
 `available_now=False` until their migration deliverable lands.
 
-The 14 retired/merged legacy agents (socratic_tutor, student_buddy,
-adaptive_path, spaced_repetition, knowledge_graph, code_review,
-coding_assistant, curriculum_mapper, cover_letter, job_match,
-peer_matching, deep_capturer, community_celebrator, disrupt_prevention,
-adaptive_quiz) get NO capability declaration — they remain reachable
-ONLY via the legacy MOA endpoint until Pass 3j / D17 deletes them.
+The retired/merged legacy agents (socratic_tutor, student_buddy,
+adaptive_path, spaced_repetition, knowledge_graph, curriculum_mapper,
+cover_letter, job_match, peer_matching, deep_capturer,
+community_celebrator, disrupt_prevention, adaptive_quiz) get NO
+capability declaration — they remain reachable ONLY via the legacy
+MOA endpoint until Pass 3j / D17 deletes them. code_review and
+coding_assistant were ALSO in this list pre-D11; they were
+absorbed into senior_engineer at the D11 cutover (Checkpoint 4),
+so they're no longer reachable via either path.
 """
 
 from __future__ import annotations
