@@ -52,6 +52,16 @@ _AGENTIC_AGENT_MODULES: tuple[str, ...] = (
     # dropped — the new class registers via _agentic_registry, not
     # via the legacy @register decorator).
     "app.agents.billing_support",
+    # D11 — senior_engineer migration (Pass 3c E2). Checkpoint 2
+    # registers the new AgenticBaseAgent class via this module path.
+    # Cutover at Checkpoint 4 will rename senior_engineer_v2.py →
+    # senior_engineer.py and delete the legacy BaseAgent file at
+    # the same commit (mirroring the D10 billing_support pattern).
+    # During the dual-registry coexistence window between CP2 and
+    # CP4, AGENT_REGISTRY still has the legacy senior_engineer entry
+    # for MOA dispatch; _agentic_registry has this new class for the
+    # canonical /api/v1/agentic/{flow}/chat endpoint.
+    "app.agents.senior_engineer_v2",
     # "app.agents.engagement_watchdog",      # future
     # "app.agents.code_mentor",              # future
 )

@@ -167,6 +167,30 @@ schema change. If by then production data shows up-front chains
 suffice, Option B continues; if signal-loss is observable, D13
 implements Option A.
 
+## Forward-dependency note: HandoffRequest module location
+
+`HandoffRequest` currently lives in `backend/app/schemas/supervisor.py`
+(D9). D11 imports it from there into
+`backend/app/schemas/agents/senior_engineer.py` so
+`SeniorEngineerOutput.handoff_request: HandoffRequest | None` resolves
+cleanly. The dependency direction (agents → supervisor schemas) is
+awkward but not broken — it works because supervisor schemas have no
+back-imports from agent schemas.
+
+When D13 ships and `mock_interview` starts importing `HandoffRequest`
+from agent code, the same pattern compounds: two agent modules
+depending on a sibling-tier (supervisor) module. Consider extracting
+to `schemas/handoff.py` as a leaf module before D13 starts importing
+it heavily.
+
+**Refactor cost:** mechanical — move the class, update 2-4 imports
+(currently `dispatch.py`, `senior_engineer.py`, plus D13's future
+`mock_interview.py`). No semantic change.
+
+**Triage:** Optional cleanup during D13 — bundle with the handoff
+Option A/B revisit so the schema-location decision is part of the
+same conversation as the routing-protocol decision.
+
 ## Cross-references
 
 - `backend/app/agents/dispatch.py::process_handoff` — the simplified

@@ -207,6 +207,34 @@ D10's scope.
   retroactively migrated to `sa.JSON`. The shim approach preserves
   both production capability and test compatibility.
 
+## Sibling pattern: silent skips when TEST_PG_DSN unset (registered 2026-05-05)
+
+Tool tests requiring real Postgres skip silently when `TEST_PG_DSN`
+isn't set. The default
+(`postgresql+asyncpg://postgres:postgres@localhost:5433/platform`)
+doesn't reach `db:5432` from inside the container; the in-container
+DSN must be set explicitly:
+`TEST_PG_DSN=postgresql+asyncpg://postgres:postgres@db:5432/platform`.
+
+Surfaced during D11 Checkpoint 1 — the new `senior_engineer` tool
+tests skipped silently in regressions until the env override was
+applied. Same constraint affects:
+
+- `tests/test_agents/tools/agent_specific/billing_support/*`
+- `tests/test_agents/tools/agent_specific/senior_engineer/*` (D11)
+- `tests/test_agents/primitives/test_memory.py` (uses the same fixture)
+- any future tool tests using the `pg_session` per-schema fixture
+
+Silent skips are a class of test infrastructure bug — tests that
+should be verifying behavior look identical in CI to tests that
+don't apply. Auto-detect would be cleaner UX: if running inside a
+container with a reachable `db:5432`, prefer that over the
+host-side default; emit an explicit "skipped because no Postgres"
+message rather than the silent `pytest.skip`.
+
+**Triage:** D17 (test infrastructure cleanup) unless 30 minutes can
+be spared during a future deliverable touching the conftest.
+
 ## Cross-references
 
 - `tests/conftest.py` — the shim itself, with the long-form rationale
