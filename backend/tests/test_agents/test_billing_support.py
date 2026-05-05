@@ -315,10 +315,10 @@ async def test_escalation_tool_failure_nulls_ticket_and_appends_support_email() 
 
 @pytest.mark.asyncio
 async def test_no_escalation_when_llm_did_not_request_one() -> None:
-    """Negative case: when the LLM doesn't emit a ticket, no
-    escalate_to_human call should fire. Confirms the dispatch is
-    gated on suggested_action="contact_support" + non-null
-    escalation_ticket_id, not always-on."""
+    """Negative case: when the LLM emits suggested_action != "contact_support",
+    escalate_to_human MUST NOT fire. Confirms the dispatch is gated on
+    suggested_action only (the symmetric contract — the LLM's emitted
+    escalation_ticket_id value is irrelevant to the gate decision)."""
     student_id = uuid.uuid4()
     llm = _NonEscalationLLM()
     agent = _make_agent(llm)
@@ -385,6 +385,238 @@ async def test_no_escalation_when_llm_did_not_request_one() -> None:
     )
     assert result["escalation_ticket_id"] is None
     assert result["suggested_action"] == "wait"
+
+
+# ── Symmetric phantom-ticket pin tests (added 2026-05-05) ─────────
+#
+# Surfaced by MiniMax M2.7 activation: the gate previously required
+# both suggested_action="contact_support" AND ticket_id != None to
+# fire the tool. Under Haiku the LLM always emitted a placeholder
+# ticket id; under M2.7 it emits None. Result: phantom escalation
+# re-emerged (LLM's answer text claimed escalation, no real student_inbox
+# row landed). Symmetric fix: gate on suggested_action only; force
+# ticket_id=None when LLM didn't request escalation. The two tests
+# below pin both directions.
+
+
+class _NullTicketEscalationLLM:
+    """M2.7 shape: suggested_action="contact_support" but ticket_id=None.
+
+    Pre-fix this slipped through the gate silently — phantom escalation.
+    Post-fix the gate fires the tool anyway and writes the real ticket
+    id back, regardless of what the LLM emitted in that field.
+    """
+
+    async def ainvoke(self, messages: Any) -> Any:
+        msg = MagicMock()
+        msg.content = json.dumps(
+            {
+                "answer": "I've escalated this to our human billing team.",
+                "grounded_in": ["3 disputed charges in 30 days"],
+                "suggested_action": "contact_support",
+                "escalation_ticket_id": None,  # M2.7 shape
+                "confidence": "high",
+            }
+        )
+        msg.usage_metadata = {"input_tokens": 50, "output_tokens": 60}
+        return msg
+
+
+class _PhantomTicketSelfServeLLM:
+    """Inverse phantom: LLM hallucinates a ticket id alongside self-serve advice.
+
+    The LLM says "your refund will arrive in 5-7 days, ticket id TKT-FAKE"
+    despite suggested_action being "self_serve" (no actual escalation
+    requested). Pre-fix the dispatch gate's first condition (suggested ==
+    "contact_support") correctly skipped tool dispatch, but the response
+    payload retained the LLM's fake ticket id — student sees a non-null
+    escalation_ticket_id with no matching student_inbox row. Post-fix
+    the gate forces ticket_id to None when the LLM didn't request
+    escalation, so the inverse phantom never reaches the response.
+    """
+
+    async def ainvoke(self, messages: Any) -> Any:
+        msg = MagicMock()
+        msg.content = json.dumps(
+            {
+                "answer": (
+                    "Your refund will arrive in 5-7 days. Reference: TKT-FAKE-555."
+                ),
+                "grounded_in": ["refund REF-2026-X9 in_transit"],
+                "suggested_action": "self_serve",
+                "escalation_ticket_id": "TKT-FAKE-555",  # inverse phantom
+                "confidence": "high",
+            }
+        )
+        msg.usage_metadata = {"input_tokens": 35, "output_tokens": 30}
+        return msg
+
+
+@pytest.mark.asyncio
+async def test_escalation_fires_when_llm_emits_null_ticket_id() -> None:
+    """M2.7-shape symmetric contract.
+
+    LLM emits suggested_action="contact_support" + escalation_ticket_id=None.
+    The gate MUST fire escalate_to_human anyway and write the real ticket
+    id back. The LLM's emitted ticket_id value (None or otherwise) is
+    irrelevant to the gate decision — only suggested_action matters.
+    """
+    real_ticket_id = uuid.uuid4()
+    student_id = uuid.uuid4()
+
+    llm = _NullTicketEscalationLLM()
+    agent = _make_agent(llm)
+    ctx = _make_ctx(student_id=student_id)
+
+    from app.agents.tools.agent_specific.billing_support.escalate_to_human import (
+        EscalateToHumanOutput,
+    )
+    from app.agents.tools.agent_specific.billing_support.lookup_active_entitlements import (
+        LookupActiveEntitlementsOutput,
+    )
+    from app.agents.tools.agent_specific.billing_support.lookup_order_history import (
+        LookupOrderHistoryOutput,
+    )
+    from app.agents.tools.agent_specific.billing_support.lookup_refund_status import (
+        LookupRefundStatusOutput,
+    )
+
+    escalate_calls = 0
+
+    async def _stub_tool_call(tool_name, args, ctx_arg):  # type: ignore[no-untyped-def]
+        nonlocal escalate_calls
+        if tool_name == "escalate_to_human":
+            escalate_calls += 1
+            return ToolCallResult(
+                tool_name="escalate_to_human",
+                output=EscalateToHumanOutput(ticket_id=real_ticket_id, was_new=True),
+                status="ok",
+            )
+        if tool_name == "lookup_order_history":
+            return ToolCallResult(
+                tool_name=tool_name,
+                output=LookupOrderHistoryOutput(
+                    orders=[], total_returned=0, truncated=False
+                ),
+                status="ok",
+            )
+        if tool_name == "lookup_active_entitlements":
+            return ToolCallResult(
+                tool_name=tool_name,
+                output=LookupActiveEntitlementsOutput(
+                    entitlements=[], total_active=0
+                ),
+                status="ok",
+            )
+        if tool_name == "lookup_refund_status":
+            return ToolCallResult(
+                tool_name=tool_name,
+                output=LookupRefundStatusOutput(refunds=[], total_returned=0),
+                status="ok",
+            )
+        raise AssertionError(f"unexpected tool_call: {tool_name}")
+
+    with (
+        patch.object(agent, "tool_call", side_effect=_stub_tool_call),
+        patch.object(agent, "_recall_billing_memories", return_value=[]),
+        patch.object(agent, "_record_interaction", return_value=None),
+    ):
+        from app.agents.billing_support import BillingSupportInput
+
+        result = await agent.run(
+            BillingSupportInput(question="My account shows phantom charges."),
+            ctx,
+        )
+
+    assert escalate_calls == 1, (
+        "Tool MUST fire on suggested_action='contact_support' regardless "
+        "of what the LLM emitted for escalation_ticket_id"
+    )
+    assert result["escalation_ticket_id"] == str(real_ticket_id), (
+        f"Expected real ticket {real_ticket_id}, got "
+        f"{result['escalation_ticket_id']}. "
+        "Real ticket id must overwrite the LLM's None."
+    )
+    assert result["suggested_action"] == "contact_support"
+
+
+@pytest.mark.asyncio
+async def test_self_serve_action_clears_phantom_ticket_id() -> None:
+    """Inverse-phantom symmetric contract.
+
+    LLM emits suggested_action="self_serve" + escalation_ticket_id="TKT-FAKE-555".
+    The gate MUST force ticket_id to None — the LLM didn't request
+    escalation, so any ticket id it hallucinated is fictional.
+    No tool fires, no student_inbox row is created, the response carries
+    no phantom ticket id.
+    """
+    student_id = uuid.uuid4()
+    llm = _PhantomTicketSelfServeLLM()
+    agent = _make_agent(llm)
+    ctx = _make_ctx(student_id=student_id)
+
+    from app.agents.tools.agent_specific.billing_support.lookup_active_entitlements import (
+        LookupActiveEntitlementsOutput,
+    )
+    from app.agents.tools.agent_specific.billing_support.lookup_order_history import (
+        LookupOrderHistoryOutput,
+    )
+    from app.agents.tools.agent_specific.billing_support.lookup_refund_status import (
+        LookupRefundStatusOutput,
+    )
+
+    escalate_calls = 0
+
+    async def _stub_tool_call(tool_name, args, ctx_arg):  # type: ignore[no-untyped-def]
+        nonlocal escalate_calls
+        if tool_name == "escalate_to_human":
+            escalate_calls += 1
+            raise AssertionError(
+                "escalate_to_human fired on suggested_action='self_serve' — "
+                "the inverse phantom guard didn't kick in"
+            )
+        if tool_name == "lookup_order_history":
+            return ToolCallResult(
+                tool_name=tool_name,
+                output=LookupOrderHistoryOutput(
+                    orders=[], total_returned=0, truncated=False
+                ),
+                status="ok",
+            )
+        if tool_name == "lookup_active_entitlements":
+            return ToolCallResult(
+                tool_name=tool_name,
+                output=LookupActiveEntitlementsOutput(
+                    entitlements=[], total_active=0
+                ),
+                status="ok",
+            )
+        if tool_name == "lookup_refund_status":
+            return ToolCallResult(
+                tool_name=tool_name,
+                output=LookupRefundStatusOutput(refunds=[], total_returned=0),
+                status="ok",
+            )
+        raise AssertionError(f"unexpected tool_call: {tool_name}")
+
+    with (
+        patch.object(agent, "tool_call", side_effect=_stub_tool_call),
+        patch.object(agent, "_recall_billing_memories", return_value=[]),
+        patch.object(agent, "_record_interaction", return_value=None),
+    ):
+        from app.agents.billing_support import BillingSupportInput
+
+        result = await agent.run(
+            BillingSupportInput(question="When will my refund arrive?"),
+            ctx,
+        )
+
+    assert escalate_calls == 0
+    assert result["escalation_ticket_id"] is None, (
+        f"LLM hallucinated a ticket id alongside self_serve; gate must "
+        f"force it to None. Got: {result['escalation_ticket_id']!r}"
+    )
+    assert result["suggested_action"] == "self_serve"
 
 
 # ── Wave 2: Pass 3b §7.1 failure classes + integration tests ──────

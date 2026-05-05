@@ -488,30 +488,50 @@ class BillingSupportAgent(AgenticBaseAgent[BillingSupportInput]):
     ) -> dict[str, Any]:
         """Post-LLM escalation dispatch — never ship a phantom ticket.
 
-        Inspect the LLM's structured output. If suggested_action is
-        "contact_support" AND escalation_ticket_id is non-null, the
-        LLM has requested an escalation but Anthropic tool-use isn't
-        wired (see docs/followups/anthropic-tool-use-protocol.md) —
-        meaning no real student_inbox row landed yet. The LLM's
-        ticket_id is fictional.
+        Contract (symmetric, provider-independent):
+        ``escalation_ticket_id`` is non-null IF AND ONLY IF this method
+        actually fired the escalate_to_human tool successfully. The
+        LLM's emitted ``escalation_ticket_id`` value is never trusted
+        in either direction:
 
-        We fix this by firing escalate_to_human ourselves, then
-        OVERWRITING the LLM's escalation_ticket_id with the real one
-        (never trust the LLM's value). On tool failure, null out the
-        ticket_id and append a support email to the answer text — be
-        honest with the student rather than silent.
+          * suggested_action="contact_support" → fire the tool, write
+            the real ticket id back. Whatever the LLM emitted (a
+            placeholder UUID under Haiku, None under MiniMax M2.7,
+            anything else) is irrelevant to the gate.
+          * suggested_action != "contact_support" → force ticket_id
+            to None. Discard any value the LLM hallucinated in the
+            inverse direction (e.g. emitting a fake ticket alongside
+            self_serve advice).
 
-        If the LLM didn't request escalation, no-op.
+        The earlier shape gated on ``ticket_id != None`` as a proxy
+        for "LLM requested escalation," which happened to work under
+        Haiku (always emitted some placeholder) but broke under M2.7
+        (emits None). suggested_action is the actual contract signal.
+
+        Anthropic tool-use isn't wired (see
+        docs/followups/anthropic-tool-use-protocol.md) — without the
+        proper protocol the host has to dispatch the tool itself.
+        On tool failure, null out the ticket_id and append a support
+        email to the answer text — be honest with the student rather
+        than silent.
 
         Returns the (possibly modified) answer_payload.
         """
-        # Only dispatch when the LLM both asked for support AND
-        # claimed a ticket. Either condition alone is ambiguous; both
-        # together is the LLM saying "I escalated this."
         suggested = answer_payload.get("suggested_action")
         llm_ticket_id = answer_payload.get("escalation_ticket_id")
 
-        if suggested != "contact_support" or not llm_ticket_id:
+        if suggested != "contact_support":
+            # Inverse-direction phantom guard: the LLM didn't request
+            # escalation, so any ticket_id it emitted is hallucinated.
+            # Force None so the response can never carry a fake id
+            # alongside self_serve / wait / none advice.
+            if llm_ticket_id is not None:
+                log.info(
+                    "billing_support.dropped_phantom_ticket_id",
+                    suggested_action=suggested,
+                    llm_ticket_id_was=str(llm_ticket_id),
+                )
+                answer_payload["escalation_ticket_id"] = None
             return answer_payload
 
         if ctx.user_id is None:
@@ -544,10 +564,16 @@ class BillingSupportAgent(AgenticBaseAgent[BillingSupportInput]):
                     "student_id": str(ctx.user_id),
                     "reason": "agent_initiated",
                     "summary": summary[:1900],  # tool's max_length=2000
-                    # Use the LLM's claimed ticket as an idempotency
-                    # key. If the same conversation re-fires, we
-                    # collapse to the original real ticket.
-                    "idempotency_key": str(llm_ticket_id)[:200],
+                    # Idempotency key: prefer the LLM's claimed ticket
+                    # (collapses re-fires of the same turn to one real
+                    # ticket); when LLM emits None (M2.7 shape), fall
+                    # back to the conversation chain's call_id so we
+                    # still get per-call idempotency.
+                    "idempotency_key": (
+                        str(llm_ticket_id)[:200]
+                        if llm_ticket_id
+                        else f"call:{ctx.chain.root_id}"[:200]
+                    ),
                 },
                 ctx,
             )
