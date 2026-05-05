@@ -97,21 +97,39 @@ _CAPABILITIES: Final[list[AgentCapability]] = [
     AgentCapability(
         name="senior_engineer",
         description=(
-            "Code review, debugging help, architecture feedback. "
-            "Replaces code_review, coding_assistant, and the legacy "
-            "senior_engineer (merged in Pass 3a). Use for: "
-            "PR-style code review, debugging stuck students, "
-            "production code patterns."
+            "Reviews student-submitted code with a senior engineer's "
+            "voice — direct, kind, no sycophancy. Three modes: "
+            "'pr_review' for structured PR-style feedback (verdict + "
+            "comments + next step), 'chat_help' for conversational "
+            "debugging and code discussion, 'rubric_score' for graded "
+            "code-review exercises. Reads the student's prior code "
+            "submissions and prior reviews to track patterns. Best "
+            "for: code review, debugging help, code quality questions, "
+            "'is this approach right'. Requires `code` in context. "
+            "v1 is LLM-only — does NOT execute code, run tests, or "
+            "run static analysis (sandbox tools land in D14)."
         ),
         inputs_required=["code"],
-        inputs_optional=["problem_context", "rubric"],
-        outputs_provided=["review", "score"],
-        typical_latency_ms=4000,
-        typical_cost_inr=Decimal("5.50"),
+        inputs_optional=["problem_context", "mode", "language", "test_results"],
+        outputs_provided=["review", "verdict", "next_step", "handoff_request"],
+        typical_latency_ms=10000,
+        typical_cost_inr=Decimal("3.50"),
         requires_entitlement=True,
         minimum_tier="standard",
-        available_now=False,  # awaits D11
-        handoff_targets=["learning_coach"],
+        # D11 Checkpoint 1 — capability flipped on. The agent class
+        # itself lands in Checkpoint 2; for now the registry advertises
+        # senior_engineer as available so Supervisor's filtered_agents
+        # logic can include it during chain construction even before
+        # the AgenticBaseAgent subclass is wired.
+        available_now=True,
+        # Pass 3c E2 lists ["mock_interview", "learning_coach"]. v1
+        # (D11) ships handoff_targets as INFORMATIONAL METADATA only —
+        # the Supervisor's chain-construction logic uses this hint
+        # up-front, but specialist HandoffRequest returns are NOT
+        # honored post-hoc until D13. See
+        # docs/followups/handoff-protocol-d11-d13.md for the Option B
+        # decision.
+        handoff_targets=["mock_interview", "learning_coach"],
     ),
     AgentCapability(
         name="project_evaluator",

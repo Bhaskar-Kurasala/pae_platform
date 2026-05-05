@@ -1,9 +1,13 @@
 # Handoff protocol — D11/D13 dependency
 
-**Status:** Open — **decision required by D11**.
+**Status:** **Decision: Option B confirmed at D11; revisit at D13**
+when mock_interview ships and provides the first real handoff target
+on both sides. Cross-references: Pass 3b §5.3 (architecture spec),
+D11 Checkpoint 1 readback (rationale), D13 prompt (revisit gate).
 **Created:** 2026-05-02 (D9 Checkpoint 3 sign-off).
-**Blocked by:** D11 (senior_engineer ships with first non-trivial
-`handoff_targets`).
+**Decided:** 2026-05-05 (D11 Checkpoint 1).
+**Originally blocked by:** D11. Now blocked by: D13 (mock_interview
+ships first real cross-side handoff target).
 
 ## What D9 shipped (the simplification)
 
@@ -118,6 +122,50 @@ there's evidence it's needed avoids paying double-Sonnet cost for
 a feature that may not move the needle. If at D13 we see
 specialists frequently producing useful handoff signal that gets
 dropped, Option A becomes the right call.
+
+## Decision recorded at D11 Checkpoint 1
+
+**Option B confirmed.** Three reasons:
+
+1. The Supervisor's chain-construction logic already consumes
+   `handoff_targets` as a hint, so multi-step chains can be built
+   *up-front* when the request shape calls for one. The platform
+   does not lose cross-agent coordination capability under Option B
+   — it routes through chain construction instead of post-hoc
+   handoff.
+2. Option A doubles the orchestration cost on handoff-triggering
+   requests (a second Sonnet call per request). Without production
+   data showing that the post-hoc signal moves the needle, paying
+   that cost now is speculative.
+3. D11's scope already includes a six-call-site rewrite at cutover
+   (services + routes that reference legacy `code_review` /
+   `coding_assistant` agent names). Bundling the
+   `parent_chain_summary` plumbing on top would push D11 past its
+   intended size.
+
+**What D11 ships under Option B:**
+
+- `senior_engineer` capability declares
+  `handoff_targets=["mock_interview", "learning_coach"]` —
+  Supervisor reads this for up-front chain dispatch.
+- `SeniorEngineerOutput.handoff_request` stays in the schema as
+  `Optional[HandoffRequest] = None` (Pass 3c E2's spec preserved).
+- `senior_engineer.md` prompt instructs the LLM to mention handoff
+  suggestions as text in `next_step` ("If you'd benefit from
+  conceptual help, our learning_coach can walk you through the
+  pattern"). Structured `handoff_request` is **never populated** by
+  the prompt.
+- `dispatch.process_handoff` keeps its D9 simplification — suggested
+  handoffs are declined, mandatory handoffs route directly. Since
+  the prompt never returns one, neither path fires for senior_engineer.
+
+**Forward compatibility for D13:** when mock_interview lands as the
+first deliverable that benefits from genuine post-hoc handoff
+(coding-round → senior_engineer for code review, then back), D13's
+prompt updates flip senior_engineer's handoff instruction without
+schema change. If by then production data shows up-front chains
+suffice, Option B continues; if signal-loss is observable, D13
+implements Option A.
 
 ## Cross-references
 

@@ -189,12 +189,19 @@ class TestCapabilityRegistry:
 
     def test_other_specialists_not_yet_available(self) -> None:
         """Specialists awaiting their own migration deliverable
-        stay available_now=False. D10 flipped billing_support; the
-        rest (senior_engineer, mock_interview, career bundle, etc.)
-        flip when D11/D12/D13/D14/D16 ship."""
+        stay available_now=False. D10 flipped billing_support; D11
+        flipped senior_engineer (Checkpoint 1); the rest
+        (mock_interview, career bundle, project_evaluator,
+        practice_curator, etc.) flip when D12/D13/D14/D16 ship."""
         caps = list_capabilities()
-        # As of D10: supervisor (D9), learning_coach (D8), billing_support (D10).
-        migrated = {"supervisor", "learning_coach", "billing_support"}
+        # As of D11 CP1: supervisor (D9), learning_coach (D8),
+        # billing_support (D10), senior_engineer (D11).
+        migrated = {
+            "supervisor",
+            "learning_coach",
+            "billing_support",
+            "senior_engineer",
+        }
         for c in caps:
             if c.name in migrated:
                 continue
@@ -553,7 +560,11 @@ class TestDispatchFailureClasses:
 
         decision = RouteDecision(
             action="dispatch_single",
-            target_agent="senior_engineer",  # in registry but available_now=False
+            # mock_interview is in the capability registry but
+            # available_now=False until D13. Picked here for the
+            # "valid name, unavailable" failure mode after D11 CP1
+            # flipped senior_engineer's available_now=True.
+            target_agent="mock_interview",
             constructed_context={"task": "x"},
             reasoning="test",
             confidence="medium",
