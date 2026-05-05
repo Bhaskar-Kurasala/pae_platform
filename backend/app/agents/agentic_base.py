@@ -183,12 +183,13 @@ class AgenticBaseAgent(Generic[_InputT]):
     eval_max_retries: ClassVar[int] = DEFAULT_MAX_RETRIES
 
     # ── cost tracking (D10 Checkpoint 3) ──────────────────────────
-    # The agent's model name, used by estimate_cost_inr to compute
-    # cost_inr for the agent_actions audit row. Subclasses override
-    # to reflect their actual model — billing_support uses "claude-haiku-4-5",
-    # learning_coach uses "claude-sonnet-4-6", etc. Default points at
-    # the same Sonnet tier the legacy BaseAgent uses so unknown agents
-    # don't silently zero out cost.
+    # The agent's *intended* model. Used as the cost-estimation fallback
+    # only when no LLM call happened (e.g., safety-blocked path). The
+    # authoritative source per call is the per-response model captured
+    # by `_track_llm_usage` into `ctx.extra["_llm_usage"][i]["model"]`
+    # — the factory may override this ClassVar (e.g., MiniMax routing
+    # via build_llm), so the live response's reported model is the only
+    # honest signal of what actually ran.
     model_name: ClassVar[str] = "claude-sonnet-4-6"
 
     # ── permissions (D10 Checkpoint 3 / Pass 3d §C.2) ─────────────
@@ -581,12 +582,24 @@ class AgenticBaseAgent(Generic[_InputT]):
         if usage_meta and isinstance(usage_meta, dict):
             input_tokens = int(usage_meta.get("input_tokens", 0) or 0)
             output_tokens = int(usage_meta.get("output_tokens", 0) or 0)
-        else:
-            resp_meta = getattr(response, "response_metadata", {}) or {}
-            raw_usage = resp_meta.get("usage", {}) if isinstance(resp_meta, dict) else {}
-            if raw_usage:
-                input_tokens = int(raw_usage.get("input_tokens", 0) or 0)
-                output_tokens = int(raw_usage.get("output_tokens", 0) or 0)
+
+        # Extract the actually-used model from response_metadata —
+        # the factory may have routed to MiniMax, in which case
+        # self.model_name (the agent's intended Anthropic default)
+        # would mis-attribute cost. Convention matches stream.py: prefer
+        # `model`, fall back to `model_name`. None means "unknown" —
+        # _finalize_action_log will fall back to self.model_name.
+        resp_meta = getattr(response, "response_metadata", {}) or {}
+        model_actually_used: str | None = None
+        if isinstance(resp_meta, dict):
+            if not usage_meta:
+                raw_usage = resp_meta.get("usage", {})
+                if raw_usage:
+                    input_tokens = int(raw_usage.get("input_tokens", 0) or 0)
+                    output_tokens = int(raw_usage.get("output_tokens", 0) or 0)
+            mdl = resp_meta.get("model") or resp_meta.get("model_name")
+            if isinstance(mdl, str) and mdl:
+                model_actually_used = mdl
 
         accumulator = ctx.extra.get("_llm_usage")
         if accumulator is None:
@@ -595,7 +608,11 @@ class AgenticBaseAgent(Generic[_InputT]):
             # silently noop so direct-test calls of run() work.
             return
         accumulator.append(
-            {"input_tokens": input_tokens, "output_tokens": output_tokens}
+            {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "model": model_actually_used,
+            }
         )
 
     async def _finalize_action_log(
@@ -636,11 +653,23 @@ class AgenticBaseAgent(Generic[_InputT]):
             total_output = sum(int(u.get("output_tokens", 0)) for u in accumulator)
             total_tokens = total_input + total_output
 
+            # Resolve the model that actually ran. Prefer the last
+            # accumulator entry's reported model (truth from the live
+            # response); fall back to self.model_name only when no LLM
+            # call happened. This is what makes cost honest under
+            # MiniMax routing — see the ClassVar comment above.
+            resolved_model = self.model_name
+            for entry in reversed(accumulator):
+                m = entry.get("model")
+                if isinstance(m, str) and m:
+                    resolved_model = m
+                    break
+
             cost_inr_float = 0.0
             if total_tokens > 0:
                 try:
                     cost_inr_float = estimate_cost_inr(
-                        model=self.model_name,
+                        model=resolved_model,
                         input_tokens=total_input,
                         output_tokens=total_output,
                     )
@@ -648,7 +677,7 @@ class AgenticBaseAgent(Generic[_InputT]):
                     log.warning(
                         "agentic_base.cost_estimate_failed",
                         agent=self.name,
-                        model=self.model_name,
+                        model=resolved_model,
                         error=str(exc),
                     )
 
@@ -662,6 +691,8 @@ class AgenticBaseAgent(Generic[_InputT]):
                 "input_tokens": total_input,
                 "output_tokens": total_output,
                 "llm_calls": len(accumulator),
+                # Reality, not intent — see ClassVar model_name comment.
+                "llm": {"model": resolved_model},
             }
             if isinstance(output, dict):
                 # Don't bloat the audit row with multi-KB responses;

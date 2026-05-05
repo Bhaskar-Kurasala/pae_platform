@@ -18,6 +18,10 @@ Tier = Literal["smart", "fast"]
 _PRICING_USD_PER_1M: dict[str, tuple[float, float]] = {
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-haiku-4-5": (0.80, 4.0),
+    # MiniMax M2.7 via Anthropic-compatible endpoint (verified May 2026).
+    # Roughly 10x cheaper than Sonnet — see docs/followups/llm-cost-tracking-silent-zero.md
+    # for what this means for Pass 3i §I.3 cost projections.
+    "MiniMax-M2.7": (0.30, 1.20),
 }
 _USD_TO_INR = 84.0  # rough conversion for cost-cap accounting
 

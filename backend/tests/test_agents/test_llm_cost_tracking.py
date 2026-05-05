@@ -229,3 +229,150 @@ async def test_unknown_model_falls_back_to_zero_cost(
     # But cost is zero.
     assert '"cost_estimate_usd": 0' in out
     assert '"cost_estimate_inr": 0' in out
+
+
+# ── MiniMax M2.7 activation — pricing + dynamic model_name resolution ──
+#
+# Both tests below pin the contract that AgenticBaseAgent's cost
+# tracking is honest under MiniMax routing: the pricing table covers
+# MiniMax-M2.7, and _finalize_action_log writes the model the live
+# response reported (not the agent's ClassVar default).
+
+
+def test_estimate_cost_inr_minimax_pricing_nonzero() -> None:
+    """Regression against the silent-zero gap: estimate_cost_inr must
+    return a nonzero value for MiniMax-M2.7 with realistic token counts.
+
+    This is the symptom that would have surfaced if the pricing table
+    weren't updated alongside MiniMax activation — every audit row
+    would silently emit cost_inr=0 and per-feature financial reporting
+    would lie. Sonnet must also stay nonzero (the change shouldn't
+    regress the existing model entries).
+    """
+    from app.agents.llm_factory import estimate_cost_inr
+
+    # 2k input + 500 output is a realistic billing_support short-call shape.
+    minimax_cost = estimate_cost_inr(
+        model="MiniMax-M2.7", input_tokens=2000, output_tokens=500
+    )
+    sonnet_cost = estimate_cost_inr(
+        model="claude-sonnet-4-6", input_tokens=2000, output_tokens=500
+    )
+
+    assert minimax_cost > 0, "MiniMax-M2.7 must have pricing — silent zero is the bug"
+    assert sonnet_cost > 0, "Sonnet pricing must not regress"
+    # MiniMax is roughly 10x cheaper than Sonnet at these rates; the
+    # ratio shouldn't invert without an explicit pricing-table change.
+    assert minimax_cost < sonnet_cost
+
+
+@pytest.mark.asyncio
+async def test_finalize_action_log_writes_actual_model_under_minimax(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When a live response reports model="MiniMax-M2.7", the audit row
+    must record THAT (not the agent's ClassVar default), and cost_inr
+    must be computed against MiniMax pricing.
+
+    Also pins the fallback: when no LLM call happened (empty
+    accumulator), resolved_model falls back to self.model_name and
+    cost_inr stays at 0 — no silent overcharge for safety-blocked paths.
+    """
+    import uuid as _uuid
+    from typing import Any
+    from unittest.mock import AsyncMock, MagicMock
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.agents.agentic_base import AgenticBaseAgent, AgentContext, CallChain
+
+    captured: dict[str, Any] = {}
+
+    class _CapturingSession:
+        def __init__(self) -> None:
+            self.added: list[Any] = []
+
+        def add(self, row: Any) -> None:
+            self.added.append(row)
+
+        async def commit(self) -> None:
+            captured["row"] = self.added[-1]
+
+        async def __aenter__(self) -> "_CapturingSession":
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            return None
+
+    # AsyncSessionLocal is imported lazily inside _finalize_action_log
+    # (`from app.core.database import AsyncSessionLocal`) — patch the
+    # source module so the lazy import resolves to our capturer.
+    monkeypatch.setattr(
+        "app.core.database.AsyncSessionLocal",
+        lambda: _CapturingSession(),
+    )
+
+    # Concrete agent — only need access to the protected helpers.
+    class _TestAgent(AgenticBaseAgent):  # type: ignore[misc]
+        name = "test_minimax_attribution"
+        description = "test"
+        model_name = "claude-haiku-4-5"  # the agent's *intended* default
+
+        async def execute(self, *args: Any, **kwargs: Any) -> Any:
+            raise NotImplementedError
+
+    agent = _TestAgent()
+    ctx = AgentContext(
+        user_id=_uuid.uuid4(),
+        chain=CallChain.start_root(caller="test"),
+        session=MagicMock(spec=AsyncSession),
+        extra={"_llm_usage": []},
+    )
+
+    # ── Path 1: live response reports MiniMax — accumulator captures it ──
+    fake_response = MagicMock()
+    fake_response.usage_metadata = {"input_tokens": 2000, "output_tokens": 500}
+    fake_response.response_metadata = {"model": "MiniMax-M2.7"}
+    agent._track_llm_usage(ctx, fake_response)
+
+    assert ctx.extra["_llm_usage"][-1]["model"] == "MiniMax-M2.7"
+
+    import time as _time
+    await agent._finalize_action_log(
+        ctx=ctx,
+        output={"answer": "hello"},
+        status="completed",
+        error_message=None,
+        started_at=_time.perf_counter() - 0.1,
+    )
+
+    row = captured["row"]
+    assert row.output_data["llm"]["model"] == "MiniMax-M2.7", (
+        "Audit row must record the model that ACTUALLY ran, "
+        "not the agent's ClassVar intent"
+    )
+    assert row.cost_inr is not None and float(row.cost_inr) > 0, (
+        "cost_inr must be nonzero — pricing table covers MiniMax-M2.7"
+    )
+
+    # ── Path 2: no LLM call (safety-blocked) — fallback to ClassVar, ₹0 ──
+    captured.clear()
+    ctx2 = AgentContext(
+        user_id=_uuid.uuid4(),
+        chain=CallChain.start_root(caller="test"),
+        session=MagicMock(spec=AsyncSession),
+        extra={"_llm_usage": []},
+    )
+    await agent._finalize_action_log(
+        ctx=ctx2,
+        output=None,
+        status="blocked",
+        error_message="safety",
+        started_at=_time.perf_counter() - 0.05,
+    )
+
+    row2 = captured["row"]
+    assert row2.output_data["llm"]["model"] == "claude-haiku-4-5", (
+        "Empty accumulator → fall back to self.model_name (intent)"
+    )
+    assert row2.cost_inr is None, "No LLM call → no silent overcharge"
