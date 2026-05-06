@@ -72,8 +72,9 @@ option 1 if more than 1-2 agents miss the convention before D17.
 Each agent migration must apply the convention until formalized.
 **Future migrations that need this:**
 
-- D12: career_coach, study_planner, resume_reviewer,
-  tailored_resume
+- ~~D12: career_coach, study_planner, resume_reviewer, tailored_resume~~
+  (applied in D12 CP1 — all four use a top-level `answer`/`output_text`
+  field or a `_compose_answer_text` projector)
 - D13: mock_interview
 - D14: practice_curator, project_evaluator
 - D15: content_ingestion

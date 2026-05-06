@@ -1,7 +1,8 @@
 # LLM cost tracking — silent-zero gaps after MiniMax activation
 
-**Status:** Open — six known auxiliary cost-write paths still emit ₹0
-under MiniMax. Resolution scheduled across D12, D13, D17.
+**Status:** Partially resolved — `tailored_resume_service.py` path RESOLVED in
+D12 CP3 Part C. Five remaining auxiliary cost-write paths still emit ₹0 under
+MiniMax. Resolution scheduled across D13, D17.
 **Created:** 2026-05-05 (during MiniMax M2.7 activation, Phase 1.1
 investigation).
 **Cross-references:**
@@ -19,10 +20,23 @@ MiniMax activation work),
 
 `estimate_cost_inr(model=..., input_tokens=..., output_tokens=...)`
 in `llm_factory.py` does a string-keyed lookup against
-`_PRICING_USD_PER_1M`. Unknown models return `0.0` silently. With
-MiniMax M2.7 added to the pricing table during this activation, calls
+`_PRICING_USD_PER_1M`. Unknown models return `0.0` silently.
+
+**Two distinct failure shapes exist** (important for triage):
+
+- **Silent-zero**: the caller passes an unknown model string → returns `0.0`.
+  Example: a self-hosted model variant not in the pricing table.
+- **Under-cost**: the caller passes a known model string, but the wrong one.
+  Example: MiniMax runs the call, but the caller passes `"claude-sonnet-4-6"` →
+  Sonnet pricing applied to a MiniMax call. Cost is non-zero but systematically
+  incorrect (undercharged ~10x). This was the `tailored_resume_llm.py` shape.
+
+Both shapes corrupt per-feature financial reporting. Under-cost is harder to
+notice than silent-zero because the dashboard shows plausible-looking numbers.
+
+With MiniMax M2.7 added to the pricing table during this activation, calls
 that pass `"MiniMax-M2.7"` get priced correctly. Callers that
-hardcoded an Anthropic model identifier still emit ₹0 even when the
+hardcoded an Anthropic model identifier still emit incorrect costs even when the
 factory routed the actual call to MiniMax.
 
 The investigation that produced this doc found six such callers
@@ -40,9 +54,40 @@ dashboards) which we do not yet have built.
   `interview_turns.cost_inr` and `interview_sessions.total_cost_inr`;
   swap the hardcoded `model_for(tier)` argument for the live response's
   `response_metadata["model"]`.
-- **`tailored_resume_service.py` cost tracking** → fix during D12
-  (career bundle includes resume area). Writes to
-  `tailored_resumes.cost_inr` per migration 0037.
+- **`tailored_resume_service.py` cost tracking** → **RESOLVED in D12 CP3
+  Part C** (2026-05-06). The actual bug was an **under-cost** shape, not
+  silent-zero: `tailored_resume_llm.py`'s `generate()` returned
+  `model_for("smart")` = `"claude-sonnet-4-6"` unconditionally, so MiniMax
+  calls were priced at Sonnet rates. Fix: replaced the static sentinel with
+  `response_metadata.get("model") or response_metadata.get("model_name")`,
+  matching the convention in `agentic_base.py:_extract_llm_metadata`. Falls
+  back to `model_for("smart")` when response_metadata is absent (stub LLMs,
+  providers without this field). Unit tests in
+  `tests/test_agents/test_llm_cost_tracking.py` pin both the live-model path
+  and the fallback path.
+
+- **D12 v2 agents (career_coach_v2, study_planner_v2, resume_reviewer_v2,
+  tailored_resume_v2) cost columns NULL under MiniMax** → registered
+  2026-05-07 (D12 CP4 closure). All 9 verification calls during Phase 4
+  + post-cutover smoke produced `agent_actions.cost_inr = NULL` despite
+  the underlying LLM calls completing successfully and `usage_metadata`
+  being populated on the response. The `AgenticBaseAgent._finalize_action_log`
+  cost-tracking path appears to not write through to the `agent_actions`
+  row. This is distinct from the under-cost shape — it's a "tracking
+  pipeline broken" shape. The cost ceiling enforcement view
+  (`mv_student_daily_cost`) reads from `agent_actions.cost_inr`, so this
+  affects D12 agents' cost ceiling enforcement: a MiniMax-routed
+  career_coach call does NOT contribute to the daily cost cap. Pricing
+  table is correct; the write isn't happening.
+
+  Symptom debugging hint: `_track_llm_usage` is called during the
+  AgenticBaseAgent execute() path; it appends to `ctx.extra["_llm_usage"]`.
+  `_finalize_action_log` reads that accumulator. Under MiniMax, either
+  the accumulator never gets populated OR the finalize path raises and
+  fail-softs to a NULL cost_inr write. The structlog `llm.call` event
+  IS emitting (verified during Phase 4), so `_merge_token_usage` runs;
+  the issue is downstream. Triage: D17 or when production cost
+  reporting becomes a blocker.
 - **`jd_decoder_service.py` cost tracking** → D17 cleanup OR accept
   as deferred. Writes to a dedicated `jd_decode_runs.cost_inr` table.
 - **`readiness_orchestrator.py` cost tracking** → D17 cleanup OR

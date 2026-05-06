@@ -1640,7 +1640,10 @@ async def _compute_live_funnel(
         )
     ).scalar() or 0
 
-    # Onboarded — has a goal_contracts row.
+    # Onboarded — has ever created a goal_contracts row.
+    # Intentionally NO expires_at filter: "has onboarded" is a lifetime
+    # event; a student remains counted even after their contract expires.
+    # D12 CP3 Part D.5 — do not add expires_at here without a product decision.
     onboarded = (
         await db.execute(
             select(func.count(func.distinct(GoalContract.user_id)))

@@ -115,7 +115,7 @@ async def pg_session(_pg_available: bool) -> AsyncGenerator[AsyncSession, None]:
             f'SET search_path TO "{schema_name}", public'
         )
         # Mirrors the model + migrations 0002+0018+0044 — String(16)
-        # weekly_hours, String(128) target_role, no expires_at.
+        # weekly_hours, String(128) target_role, expires_at (migration 0060).
         await conn.exec_driver_sql(
             """
             CREATE TABLE goal_contracts (
@@ -126,6 +126,7 @@ async def pg_session(_pg_available: bool) -> AsyncGenerator[AsyncSession, None]:
                 success_statement TEXT NOT NULL,
                 weekly_hours VARCHAR(16) NULL,
                 target_role VARCHAR(128) NULL,
+                expires_at TIMESTAMPTZ NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )

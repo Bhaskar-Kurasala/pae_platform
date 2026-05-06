@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.cover_letter import CoverLetterAgent
 from app.agents.llm_factory import estimate_cost_inr
-from app.agents.tailored_resume import TailoredResumeAgent
+from app.agents.tailored_resume_llm import TailoredResumeAgent
 from app.models.agent_invocation_log import (
     SOURCE_RESUME,
     STATUS_CAP_EXCEEDED,

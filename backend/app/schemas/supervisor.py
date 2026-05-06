@@ -59,6 +59,16 @@ class AgentCapability(BaseModel):
     minimum_tier: Literal["free", "standard", "premium"] = "standard"
     available_now: bool = True
     handoff_targets: list[str] = Field(default_factory=list)
+    # D12 CP3 Phase 3 (Bug 11 / Bug 6) — per-agent dispatch timeout override.
+    # Normally the timeout is derived from typical_latency_ms by the
+    # capability.resolve_timeout_seconds() resolver:
+    #   timeout = max(30, min(60, typical_latency_ms * 3 / 1000))
+    # Set this to bypass the formula when an agent's structural latency
+    # demands a different envelope (e.g. multi-LLM-call pipelines).
+    # tailored_resume sets this to 120 because its full pipeline does
+    # 3-5 inner LLM calls (JD parse + evidence + tailoring + cover letter
+    # + validation) which structurally exceeds the 60s formula ceiling.
+    timeout_override_seconds: int | None = None
 
 
 # ── Student snapshot (curated student model) ────────────────────────
@@ -109,11 +119,10 @@ class GoalContractSummary(BaseModel):
     # that diverged from the actual schema.
     weekly_hours: str | None = None
     target_role: str | None = None
-    # expires_at is a forward-looking field — the goal_contracts
-    # table currently has no expires_at column. The snapshot service
-    # never populates this field; it stays None until/unless a
-    # future deliverable (Pass 3c E4 / D12 study_planner is the
-    # natural home) adds the column via a proper migration.
+    # expires_at added to goal_contracts table by migration 0060 (D12 CP1).
+    # NULL means no expiry. The snapshot service now populates this field
+    # and filters active contracts by it. See goal-contracts-schema-divergence.md
+    # (RESOLVED in D12).
     expires_at: datetime | None = None
 
 

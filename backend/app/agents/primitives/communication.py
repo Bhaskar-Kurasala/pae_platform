@@ -494,11 +494,38 @@ async def call_agent(
     # nested call_agent invocations inside the callee see their own
     # session, not ours. asyncio context vars copy on `await` so
     # the callee's reads inside its own coroutine work correctly.
+    # D12 CP3 Phase 3 (Bug 11 / Bug 6) — per-agent dispatch timeout.
+    # Was a hardcoded 30s for every agent, which timed out career_coach
+    # (typical 12s, P95 well above 30s under MiniMax) and tailored_resume
+    # (multi-LLM pipeline, structurally >30s). Resolver derives per-agent
+    # budget from capability.typical_latency_ms with override path for
+    # structurally-longer agents like tailored_resume (override=120s).
+    # Imported here (not at module top) to avoid widening the import
+    # surface for a single dispatch-time lookup.
+    from app.agents.capability import get_capability, resolve_timeout_seconds
+
+    capability_for_timeout = get_capability(name)
+    if capability_for_timeout is not None:
+        agent_timeout_seconds = resolve_timeout_seconds(capability_for_timeout)
+    else:
+        # Unknown agent — fall back to the legacy flat default. The
+        # dispatch layer should have rejected unknown agents before
+        # reaching here (Failure Class B), but the fallback keeps
+        # call_agent robust if a future code path bypasses dispatch.
+        agent_timeout_seconds = float(settings.agent_call_timeout_seconds)
+
+    log.info(
+        "agentic.dispatch_timeout_resolved",
+        callee=name,
+        timeout_seconds=agent_timeout_seconds,
+        root_id=str(chain.root_id),
+    )
+
     session_token = _active_session.set(session)
     try:
         result = await asyncio.wait_for(
             callee.run_agentic(payload, next_chain),
-            timeout=settings.agent_call_timeout_seconds,
+            timeout=agent_timeout_seconds,
         )
     except asyncio.TimeoutError:
         duration_ms = int((time.monotonic() - attempt_start) * 1000)
@@ -509,14 +536,14 @@ async def call_agent(
             payload=payload,
             status="error",
             duration_ms=duration_ms,
-            error_message=f"timeout after {settings.agent_call_timeout_seconds}s",
+            error_message=f"timeout after {agent_timeout_seconds}s",
             row_id=chain_id_for_call,
         )
         log.warning(
             "agentic.timeout",
             caller=caller,
             callee=name,
-            timeout_seconds=settings.agent_call_timeout_seconds,
+            timeout_seconds=agent_timeout_seconds,
             root_id=str(chain.root_id),
         )
         if chain.depth == 0:
@@ -526,7 +553,7 @@ async def call_agent(
             callee=name,
             output=None,
             status="timeout",
-            error=f"timeout after {settings.agent_call_timeout_seconds}s",
+            error=f"timeout after {agent_timeout_seconds}s",
             duration_ms=duration_ms,
             chain_id=chain_id_for_call,
             root_id=chain.root_id,

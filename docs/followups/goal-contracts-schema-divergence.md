@@ -1,8 +1,14 @@
 # goal_contracts schema divergence — D9 foundation bug found during D10
 
-**Status:** Defensive fix shipped in D10 Checkpoint 2 sign-off
-(commit `<hash>` — to be filled at commit time). Proper schema work
-deferred to **D12 (career bundle / study_planner)** per Pass 3c E4.
+**Status:** FULLY RESOLVED as of D12 CP3 Part D (2026-05-06).
+- D10 CP2: Defensive fix for asyncpg transaction poisoning; real column names.
+- D12 CP1: Migration 0060 adds `expires_at TIMESTAMPTZ NULL`. Snapshot service
+  filters by `expires_at`. `GoalContractSummary.expires_at` is populated.
+- D12 CP3 Part D.1–D.3: Reader audit found two D12 tool readers did NOT filter
+  `expires_at`. Fixed in both `career_coach/read_goal_contract.py` and
+  `study_planner/read_goal_contract.py`. Per-tool tests pin filter behavior.
+- D12 CP3 Part D.5: `admin.py` onboarded metric intentionally skips the filter
+  (any goal_contracts row = onboarded regardless of expiry). Comment added.
 **Created:** 2026-05-03 (D10 Checkpoint 2 sign-off, after smoke-test
 investigation).
 **Cross-references:** Pass 3b §3.1 (architecture spec gap), Pass 3c E4
@@ -188,6 +194,41 @@ shapes without committing to one prematurely.
   fresh-session-per-call test pattern that hid the
   asyncpg transaction poisoning.
 
+## D12 CP3 Part D — reader audit and fixes (2026-05-06)
+
+**Audit finding:** The two D12 tool readers created in CP2 did NOT inherit the
+`expires_at` filter from `agentic_snapshot_service._load_goal_contract`. They
+queried `WHERE user_id = :uid ORDER BY created_at DESC LIMIT 1` — returning
+the most-recent row regardless of expiry. The snapshot service and the tool
+readers diverged on a fundamental contract: "active contract" means different
+things to each reader.
+
+**Divergence table:**
+
+| Reader | File | Filter before CP3 | After CP3 |
+|---|---|---|---|
+| Snapshot service | `agentic_snapshot_service.py` | `expires_at IS NULL OR > now()` ✓ | unchanged |
+| career_coach tool | `tools/agent_specific/career_coach/read_goal_contract.py` | no expires_at filter ✗ | `expires_at IS NULL OR > now()` ✓ |
+| study_planner tool | `tools/agent_specific/study_planner/read_goal_contract.py` | no expires_at filter ✗ | `expires_at IS NULL OR > now()` ✓ |
+| admin.py onboarded | `api/v1/routes/admin.py` | no filter (intentional) ✓ | comment added |
+
+**Admin metric note (D.5):** The `onboarded` count in the admin dashboard
+(`SELECT COUNT(DISTINCT user_id) FROM goal_contracts`) intentionally does NOT
+filter by `expires_at`. "Has ever created a goal contract" is the definition
+of onboarded, regardless of whether that contract is still active. A comment
+was added to `admin.py` at the query site to document this intent.
+
+**Fixes shipped:**
+- D.1: `career_coach/read_goal_contract.py` — added `AND (expires_at IS NULL OR expires_at > now())` to WHERE clause.
+- D.2: `study_planner/read_goal_contract.py` — same fix.
+- D.3: `tests/test_agents/test_goal_contract_tool_filter.py` — 8 new tests (4 per tool):
+  - `test_returns_active_contract_null_expires_at`
+  - `test_returns_active_contract_future_expires_at`
+  - `test_filters_expired_contract` ← the regression pin
+  - `test_no_contract_returns_has_contract_false`
+  Tests use a real Postgres session (throwaway schema per-test); skipped when
+  Postgres unreachable so pure-SQLite CI still passes.
+
 ## Cross-references
 
 - [Pass 3b §3.1](../architecture/pass-3b-supervisor-design.md) —
@@ -201,9 +242,11 @@ shapes without committing to one prematurely.
 - [schemas/goal_contract.py](../../backend/app/schemas/goal_contract.py) —
   `WeeklyHours = Literal["3-5", "6-10", "11+"]`, the bucket-string
   convention used throughout the rest of the codebase
-- [migrations 0002 / 0018 / 0025 / 0044](../../backend/alembic/versions/) —
-  the actual migration history of `goal_contracts`
+- [migrations 0002 / 0018 / 0025 / 0044 / 0060](../../backend/alembic/versions/) —
+  the actual migration history of `goal_contracts`; 0060 adds `expires_at`
 - [services/agentic_snapshot_service.py](../../backend/app/services/agentic_snapshot_service.py) —
   the patched function with the rollback contract
 - [tests/test_services/test_snapshot_service_rollback.py](../../backend/tests/test_services/test_snapshot_service_rollback.py) —
   the pin-the-contract regression test
+- [tests/test_agents/test_goal_contract_tool_filter.py](../../backend/tests/test_agents/test_goal_contract_tool_filter.py) —
+  D12 CP3 Part D.3 per-tool filter behavior tests

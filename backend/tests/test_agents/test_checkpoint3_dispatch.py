@@ -167,8 +167,9 @@ def _supervisor_context(
 
 class TestCapabilityRegistry:
     def test_thirteen_declarations(self) -> None:
+        # D12 CP1 added study_planner → 14 total (was 13 at D11).
         caps = list_capabilities()
-        assert len(caps) == 13
+        assert len(caps) == 14
 
     def test_supervisor_and_learning_coach_available_now(self) -> None:
         caps = list_capabilities()
@@ -194,13 +195,18 @@ class TestCapabilityRegistry:
         (mock_interview, career bundle, project_evaluator,
         practice_curator, etc.) flip when D12/D13/D14/D16 ship."""
         caps = list_capabilities()
-        # As of D11 CP1: supervisor (D9), learning_coach (D8),
-        # billing_support (D10), senior_engineer (D11).
+        # As of D12 CP1: supervisor (D9), learning_coach (D8),
+        # billing_support (D10), senior_engineer (D11),
+        # career_coach + study_planner + resume_reviewer + tailored_resume (D12).
         migrated = {
             "supervisor",
             "learning_coach",
             "billing_support",
             "senior_engineer",
+            "career_coach",
+            "study_planner",
+            "resume_reviewer",
+            "tailored_resume",
         }
         for c in caps:
             if c.name in migrated:

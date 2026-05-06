@@ -235,6 +235,32 @@ message rather than the silent `pytest.skip`.
 **Triage:** D17 (test infrastructure cleanup) unless 30 minutes can
 be spared during a future deliverable touching the conftest.
 
+## Sibling pattern: test files baked into Docker image, not volume-mounted (registered 2026-05-06)
+
+Test files are baked into the Docker image at build time rather than volume-mounted.
+Each test edit requires an explicit `docker compose cp` step (or a full image rebuild)
+before the edited test version runs in-container. The host and container can silently
+diverge: CI sees the image-baked version, the developer edits the host version, and
+`pytest` in-container runs stale code with no warning.
+
+**Reproduction:** edit any file under `tests/`, run `pytest` in the container without
+copying, observe the pre-edit version still runs.
+
+**Surfaced during D12 CP1** — `test_snapshot_service_rollback.py` was edited on the
+host to add `expires_at` to the throwaway DDL, but the container kept running the
+pre-edit DDL until an explicit `docker compose cp` was issued. `test_tailored_resume_routes.py`
+had the same issue when the `tailored_resume_llm` import fix was applied.
+
+**Possible fixes:**
+- Volume-mount `tests/` in `docker-compose.yml` under a development profile
+  (`profiles: ["dev"]`) so the host checkout is served directly in-container during
+  local work. CI and production profiles keep the image-baked copy.
+- Document a "sync tests" step as part of the standard in-container dev loop:
+  `docker compose cp backend/tests/. backend:/app/tests/`.
+
+**Triage:** D17 (test infrastructure cleanup) unless it becomes blocking earlier.
+Not a D12 problem — the cp step is a known workaround.
+
 ## Cross-references
 
 - `tests/conftest.py` — the shim itself, with the long-form rationale

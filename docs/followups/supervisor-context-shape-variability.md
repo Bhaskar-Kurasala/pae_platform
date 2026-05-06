@@ -2,8 +2,9 @@
 
 ## Status
 
-Open. Workaround applied per-agent at D10 CP2 (billing_support) and
-D11 CP2 (senior_engineer).
+Open. Workaround applied per-agent at D10 CP2 (billing_support),
+D11 CP2 (senior_engineer), and D12 CP1 (career_coach, study_planner,
+resume_reviewer, tailored_resume — 4 more applications).
 
 ## Pattern
 
@@ -42,7 +43,8 @@ Examples observed in production migrations so far:
   complain. The agent silently absorbs the mismatch.
 - **Each agent migration adds boilerplate field-resolution
   logic.** D11 reuses the pattern; D12's career bundle (4 agents)
-  will need it 4 more times.
+  applied it 4 more times (career_coach, study_planner, resume_reviewer,
+  tailored_resume — confirmed in D12 CP1).
 - **Couples agent input schemas to Supervisor prompt history.**
   An agent's input schema reflects what Supervisor *currently*
   emits, not what the agent *should* receive.

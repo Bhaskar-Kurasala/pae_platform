@@ -49,8 +49,12 @@ from app.schemas.supervisor import (
 log = structlog.get_logger().bind(layer="dispatch")
 
 
-# Default specialist timeout. Pass 3b §5.1 references DEFAULT_SPECIALIST_TIMEOUT_MS.
-DEFAULT_SPECIALIST_TIMEOUT_MS = 30_000
+# Per-agent dispatch timeout is now resolved at call_agent() via
+# capability.resolve_timeout_seconds() (D12 CP3 Phase 3 — Bug 11/Bug 6).
+# The legacy `DEFAULT_SPECIALIST_TIMEOUT_MS = 30_000` constant was
+# defined here per Pass 3b §5.1 but never read; the resolver replaces
+# it conceptually. Removed in the Phase 3 commit alongside the wrapper
+# rewrite at primitives/communication.py:499-502.
 
 # When the Supervisor decision references an unavailable agent (rate-
 # limited, retired, hallucinated), we fall back to learning_coach.
@@ -556,7 +560,6 @@ async def process_handoff(
 
 __all__ = [
     "DEFAULT_FALLBACK_AGENT",
-    "DEFAULT_SPECIALIST_TIMEOUT_MS",
     "dispatch_chain",
     "dispatch_single",
     "process_handoff",

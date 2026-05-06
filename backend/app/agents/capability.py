@@ -51,7 +51,11 @@ _CAPABILITIES: Final[list[AgentCapability]] = [
         ),
         inputs_required=["user_message"],
         outputs_provided=["route_decision"],
-        typical_latency_ms=800,
+        # D12 CP3 Phase 4 calibration: observed ~26s P95 under MiniMax
+        # (consistent across multiple smoke runs). 9000ms typical * 3 = 27s
+        # which floors to 30s; matches observation. Was 800ms (Anthropic-era
+        # estimate when supervisor's route-decision call was sub-second).
+        typical_latency_ms=9000,
         typical_cost_inr=Decimal("0.40"),
         requires_entitlement=False,
         minimum_tier="free",
@@ -154,55 +158,125 @@ _CAPABILITIES: Final[list[AgentCapability]] = [
     AgentCapability(
         name="career_coach",
         description=(
-            "Strategic career direction over 90-day windows. NOT "
-            "tactical (that's study_planner). Use for: career-switch "
-            "questions, role-targeting, market positioning, when to "
-            "start interviewing."
+            "Builds personalized 90-day career plans for students transitioning "
+            "into senior GenAI engineering. Reads the student's mastery state, "
+            "completed projects, capstone progress, target role, and goal contract "
+            "to ground advice in their actual situation. Coordinates with "
+            "study_planner (for weekly tactical plans), resume_reviewer (for "
+            "portfolio review), and mock_interview (for readiness checks). Best "
+            "for: 'what should I focus on next', 'am I ready to apply for jobs', "
+            "'how do I get from where I am to senior GenAI engineer', career "
+            "direction questions. Does not handle: day-to-day study scheduling "
+            "(study_planner), resume editing (resume_reviewer), interview practice "
+            "(mock_interview). v1: market signals (salary/hiring data) not available."
         ),
-        inputs_required=["question"],
-        inputs_optional=["target_role", "current_role"],
-        outputs_provided=["plan", "rationale"],
-        typical_latency_ms=3000,
-        typical_cost_inr=Decimal("4.50"),
+        inputs_required=[],
+        inputs_optional=["target_role", "specific_question", "timeline_weeks"],
+        outputs_provided=["plan", "milestones", "concerns", "handoff_requests"],
+        # D12 CP3 Phase 4 calibration (Bug 16 ricochet): 90s override
+        # was sufficient at max_tokens=2048 (LLM completed in 69s but
+        # truncated mid-JSON). After bumping max_tokens to 8192 to fix
+        # truncation, MiniMax expanded its output (more thinking + more
+        # text) and the call exceeds 90s. Override raised to 150s —
+        # absorbs the heavy-output case under MiniMax. Pure-LLM measured
+        # P50 was 45s at 1280 output tokens; at 5000+ tokens (8192 budget
+        # × ~60% non-thinking) the proportional generation time is
+        # ~3-4x. 150s = 30% margin over 4x estimate.
+        typical_latency_ms=15000,
+        timeout_override_seconds=150,
+        typical_cost_inr=Decimal("4.00"),
         requires_entitlement=True,
         minimum_tier="standard",
-        available_now=False,  # awaits D12
-        handoff_targets=["resume_reviewer", "tailored_resume"],
+        # D12 CP1 — capability flipped. Agent class lands in CP2.
+        # handoff_targets is informational metadata (Option B per
+        # docs/followups/handoff-protocol-d11-d13.md). mock_interview
+        # and portfolio_builder declared now for forward compat even
+        # though they don't exist yet.
+        available_now=True,
+        handoff_targets=["study_planner", "resume_reviewer", "mock_interview", "portfolio_builder"],
+    ),
+    AgentCapability(
+        name="study_planner",
+        description=(
+            "Builds tactical weekly and daily study plans. Given a student's "
+            "available hours, current course progress, due SRS cards, capstone "
+            "state, and upcoming interview goals, produces time-blocked plans for "
+            "the week and specific plans for tonight's session. Best for: 'what "
+            "should I do this week', 'I have 2 hours tonight, what should I focus "
+            "on', 'my plan slipped, help me catch up'. Different from career_coach "
+            "(strategic 90-day plans) and adaptive_path (which lessons to take "
+            "next). Reads goal_contract for hours commitment."
+        ),
+        inputs_required=[],
+        inputs_optional=["available_hours_this_week", "session_duration_minutes", "specific_focus"],
+        outputs_provided=["weekly_plan", "session_plan", "adherence_check"],
+        # D12 CP3 Phase 4 calibration: Phase 2 verification measured 25.6s
+        # for 1081 output tokens, no tools. 9000ms * 3 = 27s floors to 30s.
+        # Was 6000 (Anthropic-era estimate).
+        typical_latency_ms=9000,
+        typical_cost_inr=Decimal("1.50"),
+        requires_entitlement=True,
+        minimum_tier="standard",
+        # D12 CP1 — NEW agent, no legacy reference.
+        available_now=True,
+        handoff_targets=["career_coach"],
     ),
     AgentCapability(
         name="resume_reviewer",
         description=(
-            "Structured resume critique against industry expectations. "
-            "Reads existing resume, returns line-by-line feedback + "
-            "rewrite suggestions. Use for: resume polishing, role-fit "
-            "alignment, gap framing."
+            "Reviews resumes for engineers transitioning into GenAI roles. "
+            "Cross-references resume claims against the student's actual "
+            "capstones, exercise submissions, and GitHub activity to flag claims "
+            "unsupported by evidence and to suggest additions for accomplishments "
+            "the student undersold. Best for: 'review my resume', 'is this resume "
+            "ready', 'what should I add or remove'. Different from tailored_resume "
+            "(which generates JD-tailored versions)."
         ),
         inputs_required=["resume_text"],
-        inputs_optional=["target_jd"],
-        outputs_provided=["critique", "suggestions"],
-        typical_latency_ms=3500,
-        typical_cost_inr=Decimal("4.00"),
+        inputs_optional=["target_role", "specific_concerns"],
+        outputs_provided=["review", "score", "suggested_changes"],
+        # D12 CP3 Phase 4 calibration (Bug 16 ricochet): observed 36s
+        # timeout under formula-derived budget after max_tokens bump
+        # to 8192. Resume_reviewer's schema has 4 nested object types
+        # (UnsupportedClaim, Accomplishment, ResumeSuggestion ×2 in
+        # issues + suggested_changes); under MiniMax with thinking
+        # blocks the heavy-output case structurally exceeds the formula
+        # ceiling. Override to 90s — same pattern as career_coach,
+        # lighter than tailored_resume's 120s pipeline.
+        typical_latency_ms=12000,
+        timeout_override_seconds=90,
+        typical_cost_inr=Decimal("3.00"),
         requires_entitlement=True,
         minimum_tier="standard",
-        available_now=False,  # awaits D12
-        handoff_targets=["tailored_resume"],
+        # D12 CP1 — flipped. portfolio_builder declared for forward compat.
+        available_now=True,
+        handoff_targets=["portfolio_builder"],
     ),
     AgentCapability(
         name="tailored_resume",
         description=(
-            "Generates a JD-tailored resume from the student's master "
-            "resume + a target job description. Calls resume_reviewer "
-            "for self-validation. Use for: applying to a specific role, "
-            "rewriting bullets for a JD."
+            "Generates a JD-tailored, ATS-safe version of the student's resume "
+            "for a specific job description. Reads the student's base resume + "
+            "capstones + submissions and rewrites for keyword match and role fit. "
+            "Best for: 'tailor my resume for this JD'. Different from "
+            "resume_reviewer (which critiques rather than generates). Note: "
+            "mandatory self-validation via resume_reviewer is deferred to D13."
         ),
-        inputs_required=["master_resume", "jd_text"],
-        outputs_provided=["tailored_resume"],
-        typical_latency_ms=5000,
-        typical_cost_inr=Decimal("6.50"),
+        inputs_required=["resume_text", "job_description"],
+        inputs_optional=["specific_emphasis"],
+        outputs_provided=["tailored_resume", "changes_made", "ats_score"],
+        typical_latency_ms=10000,
+        typical_cost_inr=Decimal("3.50"),
         requires_entitlement=True,
         minimum_tier="standard",
-        available_now=False,  # awaits D12
+        # D12 CP1 — flipped. resume_reviewer declared for D13 mandatory chain.
+        available_now=True,
         handoff_targets=["resume_reviewer"],
+        # D12 CP3 Phase 3 (Bug 6) — full tailored_resume pipeline does
+        # JD parse + evidence allowlist + tailoring + cover letter +
+        # validation across 3-5 inner LLM calls. Structurally exceeds
+        # the 60s formula ceiling; override to 120s.
+        timeout_override_seconds=120,
     ),
     # ── Group E / Interview ──────────────────────────────────────────
     AgentCapability(
@@ -369,6 +443,59 @@ def filter_capabilities_for_user(
     return out
 
 
+# ── Per-agent dispatch timeout resolver (D12 CP3 Phase 3) ──────────
+
+
+# Floor: 30s — matches the prior production behavior so already-shipped
+# agents (D8 supervisor, D10 billing_support, D11 senior_engineer) get
+# at least the budget they were operating under successfully. The "3x
+# typical" formula scales correctly in the middle of the range but
+# breaks down at the bottom because real-world LLM tail latency doesn't
+# scale linearly with typical (P99 of a 1500ms-typical agent is more
+# often 5-10s than 4.5s). 30s absorbs that tail.
+#
+# Ceiling: 60s — keeps the orchestrator from holding a connection for
+# minutes on a single specialist. Agents that structurally need longer
+# (multi-LLM pipelines) set timeout_override_seconds explicitly.
+#
+# Multiplier: 3x typical — gives a ~99th percentile envelope under
+# normal LLM latency distributions while staying well clear of HTTP
+# server-side limits.
+_TIMEOUT_FLOOR_SECONDS: Final[int] = 30
+_TIMEOUT_CEILING_SECONDS: Final[int] = 60
+_TIMEOUT_MULTIPLIER: Final[float] = 3.0
+
+
+def resolve_timeout_seconds(capability: AgentCapability) -> float:
+    """Per-agent dispatch timeout (D12 CP3 Phase 3 — Bug 11 / Bug 6).
+
+    Returns the wall-clock budget the orchestrator's `asyncio.wait_for`
+    around `callee.run_agentic` should use for this specific agent.
+
+    Resolution order:
+      1. If `capability.timeout_override_seconds` is set, use it verbatim.
+         This is the escape hatch for agents whose structural latency
+         doesn't fit the formula (e.g. tailored_resume's multi-LLM
+         pipeline, override=120).
+      2. Otherwise, derive from `typical_latency_ms`:
+         max(30, min(60, typical_latency_ms * 3 / 1000))
+         Floor and ceiling protect against runaway values; the floor
+         in particular ensures no shipped agent regresses below the
+         prior 30s flat default.
+
+    Pure function — safe to call from anywhere capability is reachable.
+    """
+    if capability.timeout_override_seconds is not None:
+        return float(capability.timeout_override_seconds)
+    formula_seconds = capability.typical_latency_ms * _TIMEOUT_MULTIPLIER / 1000.0
+    return float(
+        max(
+            _TIMEOUT_FLOOR_SECONDS,
+            min(_TIMEOUT_CEILING_SECONDS, formula_seconds),
+        )
+    )
+
+
 def all_known_agent_names() -> set[str]:
     """Set of every agent name the Supervisor knows about.
 
@@ -384,4 +511,5 @@ __all__ = [
     "filter_capabilities_for_user",
     "get_capability",
     "list_capabilities",
+    "resolve_timeout_seconds",
 ]

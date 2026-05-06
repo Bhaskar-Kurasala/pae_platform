@@ -44,9 +44,12 @@ ROUTABLE_AGENTS = [
     "disrupt_prevention",
     "peer_matching",
     "community_celebrator",
-    # WS4 new agents
-    "career_coach",
-    "resume_reviewer",
+    # career_coach + resume_reviewer — D12 CP4 cutover (Checkpoint 4)
+    # migrated both from BaseAgent to AgenticBaseAgent. The agent
+    # classes now live in _agentic_registry (career_coach_v2,
+    # resume_reviewer_v2). Legacy MOA dispatch can no longer reach
+    # them (keyword routing also dropped below). Same pattern as
+    # billing_support's D10 cutover and senior_engineer's D11 cutover.
     # billing_support — D10 cutover (Checkpoint 4) migrated this to
     # the canonical agentic endpoint. The agent class is now an
     # AgenticBaseAgent subclass; it lives in _agentic_registry, not
@@ -79,9 +82,6 @@ Available agents and their purposes:
 - disrupt_prevention: re-engagement messages, inactive students
 - peer_matching: "study partner", "find peers", "study group"
 - community_celebrator: celebrations, milestones, "I finished", "I passed"
-- career_coach: career planning, "become AI engineer", skill roadmap, career transition
-- resume_reviewer: resume review, CV feedback, resume critique, before/after improvements
-
 Respond with ONLY the agent name. No explanation.
 
 Student message: {message}
@@ -113,9 +113,13 @@ _KEYWORD_MAP: list[tuple[list[str], str]] = [
     # "re-engage inactive student" routed to socratic_tutor. The disrupt_prevention
     # agent is the correct target for churn-risk nudges.
     (["re-engage", "reengage", "inactive student", "churn risk", "win back", "nudge student"], "disrupt_prevention"),
-    # WS4 new agent keyword patterns
-    (["career plan", "career roadmap", "become ai engineer", "what skills do i need", "career transition", "career coaching"], "career_coach"),
-    (["review my resume", "resume feedback", "improve cv", "resume critique", "check my resume"], "resume_reviewer"),
+    # career_coach + resume_reviewer keyword routes removed in D12
+    # CP4 cutover (Checkpoint 4). Career-planning and resume-review
+    # questions reach the new AgenticBaseAgent classes
+    # (career_coach_v2, resume_reviewer_v2) via the canonical
+    # /api/v1/agentic/{flow}/chat endpoint where the Supervisor's
+    # capability registry has them. Legacy MOA would have routed to
+    # non-existent AGENT_REGISTRY entries.
     # billing_support keyword route removed in D10 cutover
     # (Checkpoint 4). Billing questions reach billing_support via
     # the canonical /api/v1/agentic/{flow}/chat endpoint where the

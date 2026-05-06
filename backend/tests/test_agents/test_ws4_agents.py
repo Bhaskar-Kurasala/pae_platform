@@ -445,169 +445,91 @@ async def test_content_ingestion_text_no_api_key() -> None:
     assert "status" in data
 
 
-# ── career_coach ───────────────────────────────────────────────────────────────
+# ── career_coach + resume_reviewer ─────────────────────────────────────────────
+# D12 Checkpoint 4 cutover: career_coach + resume_reviewer migrated off
+# the legacy BaseAgent path (app.agents.career_coach, app.agents.resume_reviewer
+# DELETED). The new classes are AgenticBaseAgent subclasses at
+# app.agents.career_coach_v2.CareerCoachAgent and
+# app.agents.resume_reviewer_v2.ResumeReviewerAgent. They register via
+# _agentic_registry (loaded by _agentic_loader at FastAPI startup), not
+# via the @register decorator that AGENT_REGISTRY consumes.
+#
+# Their full coverage lives in:
+#   • tests/test_agents/test_career_coach_v2_tool_calls.py — real
+#     ToolExecutor integration smoke (D12 CP3 Part H.2)
+#   • tests/test_agents/test_resume_reviewer_v2_tool_calls.py — same
+#   • tests/test_agents/test_extract_text_dict_blocks.py — parser
+#     regression for both agents (D12 CP3 Phase 2 Bug 10a)
+#   • tests/test_agents/test_study_planner_v2_tool_calls.py — sibling
+#     coverage of the AgenticBaseAgent surface
+#   • tests/test_agents/test_truncate_to_schema.py — server-side
+#     validation hardening (D12 CP3 Phase 4 Bug 17)
+#
+# The original ws4 tests below tested legacy-class behaviors:
+#   • test_career_coach_registered (AGENT_REGISTRY membership)
+#   • test_career_coach_generates_action_plan / _fallback_no_api_key
+#     (legacy execute() shape with state mutation)
+#   • test_career_coach_evaluate_numbered_plan / _no_plan (legacy
+#     regex-based evaluate())
+#   • test_resume_reviewer_registered + _asks_for_resume_when_missing
+#     + _returns_score_and_improvements + _evaluate_good_response
+#     + _evaluate_no_score
+# All ten removed at cutover. Keeping retirement pins below so a
+# future revert is loud.
+
 
 @pytest.mark.asyncio
-async def test_career_coach_registered() -> None:
-    import app.agents.career_coach  # noqa: F401
-    from app.agents.registry import AGENT_REGISTRY
+async def test_career_coach_no_longer_in_legacy_registry() -> None:
+    """D12 Checkpoint 4 cutover pin: career_coach migrated off the
+    legacy BaseAgent path. AGENT_REGISTRY no longer carries it; the
+    agent lives in _agentic_registry as career_coach_v2.CareerCoachAgent,
+    reachable via the canonical /api/v1/agentic/{flow}/chat endpoint.
+    """
+    from app.agents.registry import AGENT_REGISTRY, _ensure_registered
 
-    assert "career_coach" in AGENT_REGISTRY
-
-
-@pytest.mark.asyncio
-async def test_career_coach_generates_action_plan() -> None:
-    from app.agents.career_coach import CareerCoachAgent
-
-    agent = CareerCoachAgent()
-    state = AgentState(
-        student_id="s1",
-        task="I want to become an AI engineer",
-        context={
-            "current_role": "Backend Developer",
-            "target_role": "Senior AI Engineer",
-            "skills": ["Python", "FastAPI", "SQL"],
-            "timeline_months": 6,
-        },
+    _ensure_registered()
+    assert "career_coach" not in AGENT_REGISTRY, (
+        "career_coach is back in AGENT_REGISTRY — D12 cutover reverted? "
+        "See app/agents/registry.py:_ensure_registered + the new class "
+        "at app/agents/career_coach_v2.py (AgenticBaseAgent, registered "
+        "via _agentic_registry)."
     )
-    plan = (
-        "1. Week 1-2: Audit your Python skills against AI engineering requirements.\n"
-        "2. Week 3-6: Complete LangGraph and RAG modules.\n"
-        "3. Week 7-10: Build production portfolio project.\n\n"
-        "Top 3 skill gaps:\n1. LangGraph\n2. Vector databases\n3. LLM evaluation\n\n"
-        "Portfolio projects:\n1. RAG pipeline\n2. Multi-agent system\n3. LLM eval harness"
-    )
-    with patch("app.agents.career_coach.settings") as mock_settings:
-        mock_settings.anthropic_api_key = "fake-key"
-        with patch.object(agent, "_build_llm", return_value=_mock_llm(plan)):
-            result = await agent.execute(state)
-
-    assert result.response == plan
 
 
 @pytest.mark.asyncio
-async def test_career_coach_evaluate_numbered_plan() -> None:
-    from app.agents.career_coach import CareerCoachAgent
+async def test_resume_reviewer_no_longer_in_legacy_registry() -> None:
+    """D12 Checkpoint 4 cutover pin: resume_reviewer migrated off the
+    legacy BaseAgent path. AGENT_REGISTRY no longer carries it; the
+    agent lives in _agentic_registry as
+    resume_reviewer_v2.ResumeReviewerAgent.
+    """
+    from app.agents.registry import AGENT_REGISTRY, _ensure_registered
 
-    agent = CareerCoachAgent()
-    state = AgentState(
-        student_id="s1",
-        task="career plan",
-        response="1. Start with LangGraph. 2. Build RAG pipeline.\n\nSkill gaps: LLM evaluation.",
+    _ensure_registered()
+    assert "resume_reviewer" not in AGENT_REGISTRY, (
+        "resume_reviewer is back in AGENT_REGISTRY — D12 cutover "
+        "reverted? See app/agents/registry.py:_ensure_registered + "
+        "the new class at app/agents/resume_reviewer_v2.py."
     )
-    evaluated = await agent.evaluate(state)
-    assert evaluated.evaluation_score == pytest.approx(0.9)
 
 
 @pytest.mark.asyncio
-async def test_career_coach_evaluate_no_plan() -> None:
-    from app.agents.career_coach import CareerCoachAgent
+async def test_tailored_resume_no_longer_in_legacy_registry() -> None:
+    """D12 Checkpoint 4 cutover pin: tailored_resume_llm.py kept the
+    file (it is the inner LLM helper the service uses) but removed the
+    @register decorator and BaseAgent inheritance. The chat-path agent
+    is tailored_resume_v2.TailoredResumeShimAgent (AgenticBaseAgent),
+    registered via _agentic_registry. AGENT_REGISTRY entry is gone.
+    """
+    from app.agents.registry import AGENT_REGISTRY, _ensure_registered
 
-    agent = CareerCoachAgent()
-    state = AgentState(
-        student_id="s1",
-        task="career plan",
-        response="You should learn AI.",
+    _ensure_registered()
+    assert "tailored_resume" not in AGENT_REGISTRY, (
+        "tailored_resume is back in AGENT_REGISTRY — D12 cutover "
+        "reverted? See app/agents/tailored_resume_llm.py — it should "
+        "no longer carry @register; the chat-path lives at "
+        "app/agents/tailored_resume_v2.py."
     )
-    evaluated = await agent.evaluate(state)
-    assert evaluated.evaluation_score == pytest.approx(0.4)
-
-
-@pytest.mark.asyncio
-async def test_career_coach_fallback_no_api_key() -> None:
-    from app.agents.career_coach import CareerCoachAgent
-
-    agent = CareerCoachAgent()
-    state = AgentState(
-        student_id="s1",
-        task="career transition to AI",
-        context={"current_role": "Data Analyst", "target_role": "AI Engineer"},
-    )
-    with patch("app.agents.career_coach.settings") as mock_settings:
-        mock_settings.anthropic_api_key = ""
-        result = await agent.execute(state)
-
-    assert result.response is not None
-    assert "90-Day Action Plan" in (result.response or "")
-
-
-# ── resume_reviewer ────────────────────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_resume_reviewer_registered() -> None:
-    import app.agents.resume_reviewer  # noqa: F401
-    from app.agents.registry import AGENT_REGISTRY
-
-    assert "resume_reviewer" in AGENT_REGISTRY
-
-
-@pytest.mark.asyncio
-async def test_resume_reviewer_asks_for_resume_when_missing() -> None:
-    from app.agents.resume_reviewer import ResumeReviewerAgent
-
-    agent = ResumeReviewerAgent()
-    state = AgentState(student_id="s1", task="review my resume", context={})
-    result = await agent.execute(state)
-    assert "resume" in (result.response or "").lower()
-
-
-@pytest.mark.asyncio
-async def test_resume_reviewer_returns_score_and_improvements() -> None:
-    from app.agents.resume_reviewer import ResumeReviewerAgent
-
-    agent = ResumeReviewerAgent()
-    state = AgentState(
-        student_id="s1",
-        task="review my resume",
-        context={"resume_text": "John Doe\nPython developer\nWorked on machine learning projects."},
-    )
-    review = (
-        "## Overall Score: 42/100\n\n"
-        "## Top 3 Strengths\n1. Python background.\n\n"
-        "## Critical Issues\n1. No quantified impact.\n\n"
-        "## Line-Item Improvements\n"
-        "Original: Worked on machine learning projects.\n"
-        "Improved: Delivered 3 production ML pipelines reducing inference latency by 40%.\n\n"
-        "Before: ML experience\nAfter: Built RAG system serving 10k daily queries"
-    )
-    with patch("app.agents.resume_reviewer.settings") as mock_settings:
-        mock_settings.anthropic_api_key = "fake-key"
-        with patch.object(agent, "_build_llm", return_value=_mock_llm(review)):
-            result = await agent.execute(state)
-
-    assert result.response == review
-
-
-@pytest.mark.asyncio
-async def test_resume_reviewer_evaluate_good_response() -> None:
-    from app.agents.resume_reviewer import ResumeReviewerAgent
-
-    agent = ResumeReviewerAgent()
-    state = AgentState(
-        student_id="s1",
-        task="review",
-        response=(
-            "## Overall Score: 72/100\n\n"
-            "## Line-Item Improvements\n"
-            "Before: Worked on AI\nAfter: Deployed RAG pipeline handling 50k requests/day"
-        ),
-    )
-    evaluated = await agent.evaluate(state)
-    assert evaluated.evaluation_score == pytest.approx(0.9)
-
-
-@pytest.mark.asyncio
-async def test_resume_reviewer_evaluate_no_score() -> None:
-    from app.agents.resume_reviewer import ResumeReviewerAgent
-
-    agent = ResumeReviewerAgent()
-    state = AgentState(
-        student_id="s1",
-        task="review",
-        response="Your resume looks good overall. Some improvements needed.",
-    )
-    evaluated = await agent.evaluate(state)
-    assert evaluated.evaluation_score == pytest.approx(0.3)
 
 
 # ── billing_support ────────────────────────────────────────────────────────────
@@ -725,26 +647,40 @@ async def test_rag_service_pinecone_import_failure_graceful() -> None:
 
 @pytest.mark.asyncio
 async def test_all_ws4_agents_registered() -> None:
+    """WS4 originally introduced career_coach + resume_reviewer +
+    billing_support as legacy BaseAgent classes. All three migrated
+    off the legacy path:
+      • billing_support — D10 cutover (retirement pin above)
+      • career_coach — D12 cutover (retirement pin above)
+      • resume_reviewer — D12 cutover (retirement pin above)
+    AGENT_REGISTRY no longer carries any of them. Their canonical
+    homes are in _agentic_registry, exercised via /api/v1/agentic.
+    """
     from app.agents.registry import AGENT_REGISTRY, _ensure_registered
 
     _ensure_registered()
-    # billing_support removed in D10 cutover — see retirement pin
-    # at test_billing_support_no_longer_in_legacy_registry above.
-    new_agents = ["career_coach", "resume_reviewer"]
-    for name in new_agents:
-        assert name in AGENT_REGISTRY, f"WS4 agent '{name}' not in registry"
+    retired_legacy = ["billing_support", "career_coach", "resume_reviewer"]
+    for name in retired_legacy:
+        assert name not in AGENT_REGISTRY, (
+            f"WS4 agent '{name}' is back in legacy AGENT_REGISTRY — "
+            "a cutover reverted. See the retirement pins above."
+        )
 
 
 @pytest.mark.asyncio
 async def test_moa_keyword_routing_ws4() -> None:
+    """D10 + D12 cutovers removed the keyword routes that originally
+    reached billing_support / career_coach / resume_reviewer through
+    legacy MOA. After cutover, MOA's _keyword_route returns None for
+    those phrases — the canonical /api/v1/agentic/{flow}/chat endpoint
+    handles them through the Supervisor's capability registry.
+    """
     from app.agents.moa import _keyword_route
 
-    assert _keyword_route("I want a career plan for AI engineering") == "career_coach"
-    assert _keyword_route("review my resume please") == "resume_reviewer"
-    # billing_support keyword routing removed in D10 cutover — the
-    # keyword would have routed to a non-existent AGENT_REGISTRY
-    # entry. Billing questions reach billing_support via the
-    # canonical /api/v1/agentic/{flow}/chat endpoint instead.
+    # career_coach + resume_reviewer keyword routes removed D12 CP4.
+    assert _keyword_route("I want a career plan for AI engineering") is None
+    assert _keyword_route("review my resume please") is None
+    assert _keyword_route("what skills do i need to become AI engineer") is None
+    # billing_support keyword routing removed in D10 cutover.
     assert _keyword_route("billing issue with my subscription") is None
     assert _keyword_route("cancel subscription now") is None
-    assert _keyword_route("what skills do i need to become AI engineer") == "career_coach"

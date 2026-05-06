@@ -98,7 +98,7 @@ def stub_llm_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
             "model": "claude-sonnet-4-6",
         }
 
-    from app.agents import tailored_resume as ta_mod
+    from app.agents import tailored_resume_llm as ta_mod  # renamed α-1 (D12 CP1)
 
     monkeypatch.setattr(ta_mod.TailoredResumeAgent, "generate", fake_tailoring_generate)
 

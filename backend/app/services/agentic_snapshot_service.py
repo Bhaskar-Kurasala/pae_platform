@@ -230,9 +230,9 @@ async def _load_goal_contract(
          dispatch path. Now we explicitly rollback inside the
          except so the session is recoverable for downstream work.
 
-    See docs/followups/goal-contracts-schema-divergence.md for the
-    full classification + recommended D12 follow-up that adds the
-    architecturally-intended columns properly.
+    D12 CP1 update: migration 0060 adds expires_at to goal_contracts.
+    This query now selects expires_at and filters by it. See
+    docs/followups/goal-contracts-schema-divergence.md (RESOLVED).
 
     Fail-soft contract preserved: any SQL failure (the synthetic
     test fires this path on purpose — see
@@ -245,9 +245,10 @@ async def _load_goal_contract(
         result = await db.execute(
             text(
                 """
-                SELECT weekly_hours, target_role
+                SELECT weekly_hours, target_role, expires_at
                 FROM goal_contracts
                 WHERE user_id = :uid
+                  AND (expires_at IS NULL OR expires_at > now())
                 ORDER BY created_at DESC
                 LIMIT 1
                 """
@@ -258,13 +259,12 @@ async def _load_goal_contract(
         if row is None:
             return None
         # weekly_hours is a string bucket ("3-5", "6-10", "11+") per
-        # the model's String(16) column — no float coercion. expires_at
-        # stays None as a forward-looking schema field; the column
-        # doesn't exist yet (see followup doc).
+        # the model's String(16) column — no float coercion.
+        # expires_at column added by migration 0060 (D12 CP1).
         return GoalContractSummary(
             weekly_hours=row[0],
             target_role=row[1],
-            expires_at=None,
+            expires_at=row[2],
         )
     except Exception as exc:  # noqa: BLE001
         log.warning(

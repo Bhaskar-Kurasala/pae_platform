@@ -61,6 +61,17 @@ _AGENTIC_AGENT_MODULES: tuple[str, ...] = (
     # senior_engineer + code_review + coding_assistant were dropped
     # at the same commit (registry.py imports removed).
     "app.agents.senior_engineer",
+    # D12 — career bundle migration (Pass 3c E3-E6). CP4 cutover
+    # collapsed the dual-registry pattern: legacy AGENT_REGISTRY
+    # entries for career_coach + resume_reviewer were removed and
+    # the legacy modules deleted; tailored_resume_llm.py kept the
+    # file (it's the inner LLM helper the service uses) but lost
+    # its @register decorator. AgenticBaseAgent is now the only
+    # path for these four agents.
+    "app.agents.career_coach_v2",
+    "app.agents.study_planner_v2",
+    "app.agents.resume_reviewer_v2",
+    "app.agents.tailored_resume_v2",
     # "app.agents.engagement_watchdog",      # future
     # "app.agents.code_mentor",              # future
 )

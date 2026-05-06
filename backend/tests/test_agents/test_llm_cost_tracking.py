@@ -376,3 +376,106 @@ async def test_finalize_action_log_writes_actual_model_under_minimax(
         "Empty accumulator → fall back to self.model_name (intent)"
     )
     assert row2.cost_inr is None, "No LLM call → no silent overcharge"
+
+
+# ── D12 CP3 Part C — tailored_resume_llm live-model extraction ────────
+#
+# Pins the fix for the under-cost bug: generate() must return the model
+# id that the live LLM response actually reports (response_metadata["model"])
+# rather than the static model_for("smart") sentinel. When MiniMax runs,
+# "model" in response_metadata is "MiniMax-M2.7"; the old code would
+# return "claude-sonnet-4-6" regardless, causing Sonnet pricing to be
+# applied to a MiniMax call (under-cost, not silent-zero).
+
+
+@pytest.mark.asyncio
+async def test_tailored_resume_llm_generate_uses_live_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """generate() must return the model from response_metadata, not model_for('smart').
+
+    When the live response reports model="MiniMax-M2.7", the returned
+    dict's "model" key must be "MiniMax-M2.7" so the caller can apply
+    correct MiniMax pricing. Before the D12 CP3 Part C fix, this would
+    return "claude-sonnet-4-6" unconditionally.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.agents.tailored_resume_llm import TailoredResumeAgent
+
+    # Fake LLM response shaped like a real langchain response under MiniMax.
+    fake_response = MagicMock()
+    fake_response.content = '{"sections": [], "headline": "test"}'
+    fake_response.usage_metadata = {"input_tokens": 500, "output_tokens": 200}
+    fake_response.response_metadata = {"model": "MiniMax-M2.7"}
+
+    fake_llm = AsyncMock()
+    fake_llm.ainvoke = AsyncMock(return_value=fake_response)
+
+    # Patch build_llm to return our fake; also patch extract_json_object
+    # so the raw text parses cleanly without real JSON.
+    monkeypatch.setattr(
+        "app.agents.tailored_resume_llm.build_llm",
+        lambda **_kwargs: fake_llm,
+    )
+    monkeypatch.setattr(
+        "app.agents.tailored_resume_llm.extract_json_object",
+        lambda _raw: {"sections": [], "headline": "test"},
+    )
+
+    agent = TailoredResumeAgent()
+    result = await agent.generate(
+        evidence={"skills": ["Python"]},
+        parsed_jd={"role": "ML Engineer"},
+        evidence_allowlist={"skill:Python"},
+    )
+
+    assert result["model"] == "MiniMax-M2.7", (
+        f"Expected 'MiniMax-M2.7' from response_metadata, got {result['model']!r}. "
+        "This is the D12 CP3 Part C under-cost bug: static model_for('smart') "
+        "was returned instead of the live response model."
+    )
+    assert result["input_tokens"] == 500
+    assert result["output_tokens"] == 200
+
+
+@pytest.mark.asyncio
+async def test_tailored_resume_llm_falls_back_when_no_response_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When response_metadata is absent or empty, fall back to model_for('smart').
+
+    This covers stub LLMs and providers that don't emit response_metadata —
+    the fallback must not crash, and must return a non-empty model string.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.agents.tailored_resume_llm import TailoredResumeAgent
+
+    fake_response = MagicMock()
+    fake_response.content = '{"sections": [], "headline": "test"}'
+    fake_response.usage_metadata = {"input_tokens": 100, "output_tokens": 50}
+    # No response_metadata attribute at all — getattr returns {}.
+    del fake_response.response_metadata
+
+    fake_llm = AsyncMock()
+    fake_llm.ainvoke = AsyncMock(return_value=fake_response)
+
+    monkeypatch.setattr(
+        "app.agents.tailored_resume_llm.build_llm",
+        lambda **_kwargs: fake_llm,
+    )
+    monkeypatch.setattr(
+        "app.agents.tailored_resume_llm.extract_json_object",
+        lambda _raw: {"sections": [], "headline": "test"},
+    )
+
+    agent = TailoredResumeAgent()
+    result = await agent.generate(
+        evidence={"skills": ["Python"]},
+        parsed_jd={"role": "ML Engineer"},
+        evidence_allowlist={"skill:Python"},
+    )
+
+    # Fallback should be the static Sonnet name — non-empty, not None.
+    assert isinstance(result["model"], str) and len(result["model"]) > 0

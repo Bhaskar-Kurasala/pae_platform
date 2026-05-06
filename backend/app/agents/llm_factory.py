@@ -33,19 +33,41 @@ def model_for(tier: Tier) -> str:
 # PR2/B5.1 — Anthropic client timeouts and retry budget.
 #
 #   * `timeout` is the HARD wall-clock cap on a single LLM round-trip.
-#     30s is enough for the longest tutor responses we've actually seen
-#     in production; nothing useful happens after that. The UI's 30s
-#     AbortController on the frontend (PR2/B5.3) gives up at the same
-#     boundary, so the user gets a clean "request took too long" toast
-#     instead of a hung spinner.
+#     Originally 30s (Anthropic-era; structured-output Sonnet calls
+#     completed well within that). Bumped to 90s during D12 CP3 Phase 4
+#     after pure-LLM diagnostic measured career_coach's MiniMax round-trip
+#     at 45.4s for a single attempt — the prior 30s was killing every
+#     substantive structured-output call BEFORE it could return. The 90s
+#     ceiling absorbs MiniMax P95 (~60s) with safety margin while still
+#     preventing pathological hangs from leaking into request handlers.
+#     The orchestrator's per-agent dispatch wrapper (resolve_timeout_seconds,
+#     30-60s with 120s tailored_resume override) sits ABOVE this and
+#     remains the first line of defense.
 #   * `max_retries` is the SDK-internal retry on transient 5xx / network
-#     errors. 3 is the SDK default but we set it explicitly so a future
-#     SDK upgrade can't quietly change behavior.
-_LLM_TIMEOUT_S = 30.0
-_LLM_MAX_RETRIES = 3
+#     errors. Was 3 (SDK default); dropped to 1 in Phase 4 because at
+#     90s timeout, retries are about transient network failures (rare),
+#     not slow generations (which we now allow time for). 3x retries on
+#     90s = 270s of cumulative wait and was dangerous; 1 retry is
+#     sufficient for one network blip without compounding the wait.
+_LLM_TIMEOUT_S = 90.0
+_LLM_MAX_RETRIES = 1
 
 
-def build_llm(max_tokens: int = 4096, tier: Tier = "smart") -> ChatAnthropic:
+# Per-tier max_tokens defaults used when the caller doesn't pass an
+# explicit value. Smart-tier was bumped from 4096 to 8192 in D12 CP3
+# Phase 4 — career_coach's expanded output schema (post-Bug-15 Literal
+# allowlist enumeration) plus MiniMax thinking blocks (~38% of output)
+# consistently exceeds 4096. 8192 provides headroom; MiniMax bills per
+# consumed token so worst-case is unchanged. Fast-tier (Haiku for
+# classification/JD-parsing) stays at 4096 — those tasks have small
+# structured outputs and don't trigger the MiniMax thinking-block bloat.
+_DEFAULT_MAX_TOKENS_BY_TIER: dict[str, int] = {
+    "smart": 8192,
+    "fast": 4096,
+}
+
+
+def build_llm(max_tokens: int | None = None, tier: Tier = "smart") -> ChatAnthropic:
     """Return a ChatAnthropic instance pointed at MiniMax or Anthropic.
 
     *tier="fast"* selects Haiku for cheap structured tasks (JD parsing,
@@ -55,16 +77,26 @@ def build_llm(max_tokens: int = 4096, tier: Tier = "smart") -> ChatAnthropic:
     MiniMax doesn't offer a separate fast model in this stack, so when
     MINIMAX_API_KEY is set both tiers route to the configured MiniMax model.
 
-    Every client returned carries a 30s hard timeout and a 3-retry budget
-    for transient failures (PR2/B5.1) — without these, a wedged upstream
-    can hang a request indefinitely and starve the workers.
+    Every client returned carries a 90s hard timeout and a 1-retry budget
+    for transient failures (PR2/B5.1, updated in D12 CP3 Phase 4) —
+    without these, a wedged upstream can hang a request indefinitely
+    and starve the workers.
+
+    `max_tokens` defaults to a tier-specific value (smart=8192, fast=4096).
+    Callers that need a tighter budget (e.g. classifiers) pass an explicit
+    value to override.
     """
+    effective_max_tokens = (
+        max_tokens
+        if max_tokens is not None
+        else _DEFAULT_MAX_TOKENS_BY_TIER.get(tier, 4096)
+    )
     if settings.minimax_api_key:
         return ChatAnthropic(  # type: ignore[call-arg]
             model=settings.minimax_model,
             anthropic_api_key=SecretStr(settings.minimax_api_key),
             base_url=settings.minimax_api_base_url,
-            max_tokens=max_tokens,
+            max_tokens=effective_max_tokens,
             timeout=_LLM_TIMEOUT_S,
             max_retries=_LLM_MAX_RETRIES,
         )
@@ -72,7 +104,7 @@ def build_llm(max_tokens: int = 4096, tier: Tier = "smart") -> ChatAnthropic:
         return ChatAnthropic(  # type: ignore[call-arg]
             model=model_for(tier),
             anthropic_api_key=SecretStr(settings.anthropic_api_key),
-            max_tokens=max_tokens,
+            max_tokens=effective_max_tokens,
             timeout=_LLM_TIMEOUT_S,
             max_retries=_LLM_MAX_RETRIES,
         )
