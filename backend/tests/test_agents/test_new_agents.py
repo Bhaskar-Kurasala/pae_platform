@@ -207,18 +207,14 @@ async def test_progress_report_generates_text() -> None:
 
 # ── Career Agents ──────────────────────────────────────────────────────────────
 
-@pytest.mark.asyncio
-async def test_mock_interview_asks_question() -> None:
-    from app.agents.mock_interview import MockInterviewAgent
-
-    agent = MockInterviewAgent()
-    state = AgentState(student_id="s1", task="start interview")
-    with patch.object(agent, "_build_llm", return_value=_mock_llm(
-        "Let's begin. Design a production RAG pipeline for a customer support chatbot. How would you handle document ingestion?"
-    )):
-        result = await agent.execute(state)
-    evaluated = await agent.evaluate(result)
-    assert evaluated.evaluation_score == 0.9  # Contains "?"
+# test_mock_interview_asks_question — D13 CP4 cutover (commit 5cd7760)
+# removed the legacy BaseAgent MockInterviewAgent. The class at
+# app.agents.mock_interview is now an AgenticBaseAgent (formerly
+# mock_interview_v2) registered via _agentic_registry; it has no
+# _build_llm method and its evaluation flow runs through Critic, not
+# the legacy evaluate() heuristic. Mirrors the test-deletion discipline
+# of D11/D12/D14c cutovers (see retirement comments above for
+# coding_assistant, project_evaluator).
 
 
 @pytest.mark.asyncio
@@ -338,12 +334,18 @@ async def test_all_agents_registered() -> None:
     # absorbed both into senior_engineer (which lives in
     # _agentic_registry, not AGENT_REGISTRY). They were dropped from
     # _ensure_registered at the same commit.
+    # mock_interview + project_evaluator removed from expected list at
+    # D13 CP4 (commit 5cd7760) and D14c CP4 cutovers respectively.
+    # Both were migrated from BaseAgent to AgenticBaseAgent and now
+    # live in _agentic_registry, not AGENT_REGISTRY. Same pattern as
+    # billing_support (D10), senior_engineer (D11), career bundle (D12)
+    # — all dropped from this expected list at their cutover.
     expected = [
         "adaptive_path", "adaptive_quiz",
         "community_celebrator", "content_ingestion", "curriculum_mapper", "deep_capturer",
         "disrupt_prevention", "job_match", "knowledge_graph", "mcq_factory",
-        "mock_interview", "peer_matching", "portfolio_builder", "progress_report",
-        "project_evaluator", "socratic_tutor", "spaced_repetition", "student_buddy",
+        "peer_matching", "portfolio_builder", "progress_report",
+        "socratic_tutor", "spaced_repetition", "student_buddy",
     ]
     for name in expected:
         assert name in AGENT_REGISTRY, f"Agent '{name}' not in registry"
@@ -362,7 +364,12 @@ async def test_moa_keyword_routing() -> None:
     # fallback path.
     assert _keyword_route("review my code") is None
     assert _keyword_route("quiz me on RAG") == "adaptive_quiz"
-    assert _keyword_route("mock interview please") == "mock_interview"
+    # "mock interview please" — D13 CP4 cutover (commit 5cd7760)
+    # dropped this keyword route. Interview-practice questions now
+    # reach the AgenticBaseAgent class via the canonical
+    # /api/v1/agentic/{flow}/chat endpoint. The keyword route falls
+    # through to None now (LLM-classifier fallback path).
+    assert _keyword_route("mock interview please") is None
     assert _keyword_route("find jobs in AI") == "job_match"
     assert _keyword_route("find peer to study with") == "peer_matching"
     # Should return None for unknown intent (falls back to LLM)
