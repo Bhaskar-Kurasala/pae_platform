@@ -79,6 +79,7 @@ from app.models.reflection import Reflection
 from app.models.refund import Refund  # noqa: F401
 from app.models.refund_offer import RefundOffer
 from app.models.resume import Resume  # noqa: F401
+from app.models.role import Role, RoleTransition, StudentRoleState  # noqa: F401
 from app.models.saved_skill_path import SavedSkillPath
 from app.models.skill import Skill
 from app.models.skill_edge import SkillEdge
@@ -185,4 +186,7 @@ __all__ = [
     "PaymentAttempt",
     "PaymentWebhookEvent",
     "Refund",
+    "Role",
+    "RoleTransition",
+    "StudentRoleState",
 ]
