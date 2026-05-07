@@ -332,26 +332,45 @@ class _DefaultLLM:
 
     async def ainvoke_text(self, prompt: str) -> str:
         if self._llm is None:
-            from app.agents.llm_factory import build_llm
-
-            # Critic max_tokens=2048 to accommodate MiniMax thinking-block
-            # consumption (~38% of output tokens per D12 measurements).
-            # This is interim sizing — the architecturally-right fix is
-            # routing Critic to Anthropic Haiku (which doesn't emit
-            # thinking blocks; 400 tokens is correct for Haiku) and is
-            # registered as D14 prerequisite work in
-            # docs/followups/critic-tier-routing-architectural.md. Under
-            # MiniMax M2.7, 2048 gives the thinking block ~800 tokens of
-            # headroom and leaves ~1200 for the verdict JSON + reasoning.
+            # Critic tier routing (D14 prerequisite, landed pre-D13.5):
+            # Critic is structurally fast-path infrastructure designed
+            # for Haiku — no thinking blocks, tight ~80-token verdict
+            # JSON, ~3s elapsed. build_llm(tier="fast") would route to
+            # MiniMax M2.7 when MINIMAX_API_KEY is set (per llm_factory
+            # line 77-78), which is wrong for the Critic shape: M2.7
+            # always emits a thinking block (~38% of output tokens per
+            # D12 measurements), inflating elapsed ~10x and per-call
+            # cost ~40x. This was D13 Bug 19's root cause.
             #
-            # Critic uses build_llm's tier defaults for temperature.
-            # Threading explicit temperature through build_llm is a
-            # separate concern (see follow-up doc
-            # llm-factory-temperature-control.md) and not required for
-            # Critic correctness — both MiniMax and Anthropic produce
-            # stable structured-output JSON at default temperature per
-            # D12 + D13 measurements.
-            self._llm = build_llm(max_tokens=2048, tier="fast")
+            # Architectural fix: when ANTHROPIC_API_KEY is set, construct
+            # ChatAnthropic(Haiku) directly with max_tokens=400 (correct
+            # for Haiku's no-thinking output shape) and temperature=0.0
+            # (Critic's deterministic verdict requirement, restored from
+            # the D13 Bug 18 drop now that we're not going through
+            # build_llm). Fallback to MiniMax-with-bumped-max_tokens for
+            # environments without an Anthropic key (preserves D13's
+            # interim Bug 19 fix). See
+            # docs/followups/critic-tier-routing-architectural.md for
+            # the full background; pattern matches Pattern 18 in
+            # migration-verification-discipline.md.
+            if settings.anthropic_api_key:
+                from langchain_anthropic import ChatAnthropic
+                from pydantic import SecretStr
+
+                self._llm = ChatAnthropic(  # type: ignore[call-arg]
+                    model="claude-haiku-4-5",
+                    anthropic_api_key=SecretStr(settings.anthropic_api_key),
+                    temperature=0.0,
+                    max_tokens=400,
+                    timeout=15.0,  # Critic-specific; main agent's 90s is overkill here
+                    max_retries=0,
+                )
+            else:
+                # No Anthropic key — fall back to MiniMax with bumped
+                # max_tokens (D13 Bug 19 interim fix shape).
+                from app.agents.llm_factory import build_llm
+
+                self._llm = build_llm(max_tokens=2048, tier="fast")
 
         from langchain_core.messages import HumanMessage
 

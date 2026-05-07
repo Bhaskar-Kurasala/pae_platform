@@ -1,4 +1,6 @@
-# Critic tier routing — architectural fix (D14 prerequisite)
+# Critic tier routing — architectural fix (RESOLVED, pre-D13.5)
+
+**Status:** Resolved. Architectural fix landed pre-D13.5 in commit following the D13 closure (`5cd7760`). See "Architectural fix (landed)" section below.
 
 ## What
 
@@ -15,39 +17,34 @@ Bumped `_DefaultLLM` max_tokens from 400 → 2048. This addresses the budget sym
 
 Pinned by [test_critic_minimax_content_extraction.py](../../backend/tests/test_agents/test_critic_minimax_content_extraction.py) — content extraction logic + max_tokens floor (≥1024).
 
-## Architectural fix (D14 prerequisite)
+## Architectural fix (landed)
 
-`_DefaultLLM` should construct `ChatAnthropic` directly, bypassing `build_llm`'s MINIMAX preference, when `ANTHROPIC_API_KEY` is set. Roughly:
+`_DefaultLLM.ainvoke_text` constructs `ChatAnthropic` directly when `settings.anthropic_api_key` is set, bypassing `build_llm`'s MiniMax preference:
 
 ```python
-def __init__(self) -> None:
-    self._llm: Any | None = None
-
-def _build(self) -> ChatAnthropic:
-    from app.core.config import settings
-    if settings.anthropic_api_key:
-        # Critic always routes to Haiku — cheap, no thinking blocks,
-        # 400 tokens is correct.
-        return ChatAnthropic(
-            model="claude-haiku-4-5",
-            anthropic_api_key=SecretStr(settings.anthropic_api_key),
-            max_tokens=400,
-            timeout=_LLM_TIMEOUT_S,
-            max_retries=_LLM_MAX_RETRIES,
-        )
-    # Fall back to the MiniMax-shape budget for environments without
-    # an Anthropic key.
+if settings.anthropic_api_key:
+    self._llm = ChatAnthropic(
+        model="claude-haiku-4-5",
+        anthropic_api_key=SecretStr(settings.anthropic_api_key),
+        temperature=0.0,    # restored — direct construction has no Bug-18 constraint
+        max_tokens=400,     # correct for Haiku's no-thinking output shape
+        timeout=15.0,       # Critic-specific; main agent's 90s is overkill
+        max_retries=0,
+    )
+else:
+    # Fallback for environments without Anthropic key — MiniMax with
+    # bumped max_tokens (D13 Bug 19 interim fix shape preserved).
     from app.agents.llm_factory import build_llm
-    return build_llm(max_tokens=2048, tier="fast")
+    self._llm = build_llm(max_tokens=2048, tier="fast")
 ```
 
-Touches one file (~10 lines). Adds environment branching that needs verification under both configurations (Anthropic-only, MiniMax-only, both-keys).
+Pinned by [test_critic_tier_routing.py](../../backend/tests/test_agents/test_critic_tier_routing.py) — 6 tests covering both branches + temperature=0.0 invariant + SecretStr usage + Bug 18/19 regression intersection.
 
-## Why deferred to D14
+## Why this landed before D13.5
 
-- D14 likely flips `uses_self_eval=True` on at least project_evaluator (rubric-driven scoring naturally pairs with critic loop) and possibly practice_curator. D14's prerequisites should include the Critic routing fix so D14 agents land on Haiku-cost economics from day one.
-- D13 ships with `mock_interview` paying ~₹0.20/Critic-call instead of ~₹0.005. Single-agent overshoot is tolerable; bundle overshoot would not be.
-- The interim max_tokens=2048 fix is regression-tested and verified live under MiniMax (D13 CP3 Phase 1 re-run).
+- D14's project_evaluator and practice_curator both likely flip `uses_self_eval=True` (rubric-driven scoring pairs naturally with the Critic loop). The architectural fix lets D14 agents land on Haiku-cost economics from day one (~₹0.005/Critic-call) instead of inheriting D13's ~₹0.20/Critic-call interim.
+- The fix is small (one if/else branch in one file, ~10 lines) and well-isolated — production paths and the D13 interim fallback both still work.
+- Restores `temperature=0.0` for the Critic that D13 Bug 18 had to drop (the drop was forced by `build_llm` not accepting `temperature`; direct `ChatAnthropic` construction has no such constraint).
 
 ## Cost impact
 
