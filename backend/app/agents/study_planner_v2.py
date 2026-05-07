@@ -167,6 +167,10 @@ class StudyPlannerAgent(AgenticBaseAgent[StudyPlannerInput]):
         # ── Tool calls (D12 CP3 Part H.1: use AgenticBaseAgent.tool_call,
         # not bespoke ToolExecutor — the canonical helper at
         # agentic_base.py:496 constructs ToolCallContext correctly) ──
+        # D15 CP3 adds two role-state read tools so weekly plans ground
+        # in the student's actual role + accessible content; never
+        # fabricated. evaluate_student_against_gate is reserved for the
+        # career_coach gating path — study_planner doesn't need it.
         student_id = ctx.user_id
 
         contract_data = await _safe_tool(
@@ -186,6 +190,32 @@ class StudyPlannerAgent(AgenticBaseAgent[StudyPlannerInput]):
             {"student_id": str(student_id), "days": 14} if student_id else {},
         )
 
+        # D15 CP3 — role-state grounding ─────────────────────────────
+        role_state_data = await _safe_tool(
+            self, ctx, "read_student_role_state",
+            {"student_id": str(student_id)} if student_id else {},
+        )
+        current_role_slug = (
+            (role_state_data.get("current_role") or {}).get("slug")
+            if isinstance(role_state_data, dict)
+            else None
+        )
+        accessible_args: dict[str, Any] = (
+            {"student_id": str(student_id)} if student_id else {}
+        )
+        if current_role_slug:
+            accessible_args["role_slug"] = current_role_slug
+        accessible_content_data = await _safe_tool(
+            self, ctx, "read_student_accessible_content", accessible_args
+        )
+
+        # Urgency detection — extends D12 mode-inference convention.
+        # Looks for explicit "X days until / before [interview/exam/...]"
+        # phrasing and an evergreen short-fuse keyword set. Captured here
+        # at the agent layer so the prompt sees a structured signal
+        # rather than re-deriving it from raw text.
+        urgency_context = _detect_urgency(resolved_msg or "")
+
         # ── LLM call ──────────────────────────────────────────────
         system_prompt = _load_prompt("study_planner")
         user_block = _build_user_block(
@@ -195,6 +225,9 @@ class StudyPlannerAgent(AgenticBaseAgent[StudyPlannerInput]):
             srs=srs_data,
             capstone=capstone_data,
             history=history_data,
+            role_state=role_state_data,
+            accessible_content=accessible_content_data,
+            urgency_context=urgency_context,
             week_starting=input.week_starting,
             session_date=input.session_date,
             session_duration_minutes=input.session_duration_minutes,
@@ -357,6 +390,50 @@ async def _safe_tool(
         return {}
 
 
+def _detect_urgency(message: str) -> dict[str, Any] | None:
+    """Detect "X days/weeks until interview/exam" or short-fuse cues.
+
+    Returns a dict with `days_until` (int or None), `event` (str or
+    "interview"), and `signal` (the matched phrase) when an urgency
+    pattern fires. Returns None when no urgency is detectable.
+
+    The detection is intentionally narrow: we only fire on phrases
+    that name a deadline + an event the platform's gate-prep workflow
+    cares about (interview, exam, gate, defense). Generic urgency
+    ("ASAP", "quickly") is too noisy to act on.
+    """
+    if not message:
+        return None
+    lower = message.lower()
+    event_words = ("interview", "exam", "gate", "defense", "demo")
+
+    # Pattern 1: "N days/weeks until/before <event>"
+    m = re.search(
+        r"(\d+)\s+(day|days|week|weeks)\s+(until|before|to)\s+\w*\s*("
+        + "|".join(event_words)
+        + r")",
+        lower,
+    )
+    if m:
+        n = int(m.group(1))
+        unit = m.group(2)
+        if unit.startswith("week"):
+            n *= 7
+        return {
+            "days_until": n,
+            "event": m.group(4),
+            "signal": m.group(0),
+        }
+
+    # Pattern 2: explicit "tomorrow/today" + event word
+    if "tomorrow" in lower and any(w in lower for w in event_words):
+        return {"days_until": 1, "event": "interview", "signal": "tomorrow"}
+    if "today" in lower and any(w in lower for w in event_words):
+        return {"days_until": 0, "event": "interview", "signal": "today"}
+
+    return None
+
+
 def _build_user_block(
     *,
     message: str,
@@ -365,18 +442,40 @@ def _build_user_block(
     srs: dict[str, Any],
     capstone: dict[str, Any],
     history: dict[str, Any],
+    role_state: dict[str, Any],
+    accessible_content: dict[str, Any],
+    urgency_context: dict[str, Any] | None,
     week_starting: str | None,
     session_date: str | None,
     session_duration_minutes: int | None,
 ) -> str:
     parts = [f"## Student message\n\n{message}"]
     parts.append(f"## Resolved mode\n\n{mode}")
+    if urgency_context:
+        # Surface urgency as a top-level signal so the prompt's
+        # urgency-override rules fire at high salience.
+        parts.append(
+            "## Urgency context\n\n"
+            f"```json\n{json.dumps(urgency_context, indent=2)}\n```"
+        )
     if week_starting:
         parts.append(f"## Week starting\n\n{week_starting}")
     if session_date:
         parts.append(f"## Session date\n\n{session_date}")
     if session_duration_minutes:
         parts.append(f"## Session duration\n\n{session_duration_minutes} minutes")
+    # D15 CP3: role identity frames every plan; accessible content is
+    # the runtime-grounding signal for D-E.
+    if role_state and role_state.get("found"):
+        parts.append(
+            "## Role state\n\n"
+            f"```json\n{json.dumps(role_state, indent=2, default=str)}\n```"
+        )
+    if accessible_content and accessible_content.get("found") is not None:
+        parts.append(
+            "## Accessible content (filtered to current role)\n\n"
+            f"```json\n{json.dumps(accessible_content, indent=2, default=str)}\n```"
+        )
     if contract:
         parts.append(f"## Goal contract\n\n```json\n{json.dumps(contract, indent=2)}\n```")
     if srs:

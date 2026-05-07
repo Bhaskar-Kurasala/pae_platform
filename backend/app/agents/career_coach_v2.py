@@ -179,6 +179,11 @@ class CareerCoachAgent(AgenticBaseAgent[CareerCoachInput]):
             return payload
 
         # ── Tool calls (D12 CP3 Part H.1: use AgenticBaseAgent.tool_call) ──
+        # D15 CP3 adds three role-state tools so the response is grounded
+        # in the student's actual role progression + accessible content,
+        # never fabricated. read_student_accessible_content is filtered to
+        # the student's current role per D-E (runtime content discovery,
+        # filtered to role identity, never references unfetched content).
         student_id = ctx.user_id
         progress_data = await _safe_tool(
             self, ctx, "read_student_full_progress",
@@ -197,6 +202,55 @@ class CareerCoachAgent(AgenticBaseAgent[CareerCoachInput]):
             {"student_id": str(student_id)} if student_id else {},
         )
 
+        # D15 CP3 — role-state grounding ─────────────────────────────
+        role_state_data = await _safe_tool(
+            self, ctx, "read_student_role_state",
+            {"student_id": str(student_id)} if student_id else {},
+        )
+        # Filter accessible content to the current role for the
+        # default coaching path. The unfiltered union is reserved for
+        # when the student asks about cross-role progression — left
+        # as a future refinement; for D15 v1 the role-filtered view
+        # is the canonical D-E grounding signal.
+        current_role_slug = (
+            (role_state_data.get("current_role") or {}).get("slug")
+            if isinstance(role_state_data, dict)
+            else None
+        )
+        accessible_args: dict[str, Any] = (
+            {"student_id": str(student_id)} if student_id else {}
+        )
+        if current_role_slug:
+            accessible_args["role_slug"] = current_role_slug
+        accessible_content_data = await _safe_tool(
+            self, ctx, "read_student_accessible_content", accessible_args
+        )
+
+        # Gate evaluation: target the next adjacent role (not the
+        # senior_genai_engineer terminal hop directly), so the LLM
+        # sees the immediate gate the student must pass next. The
+        # tool raises on non-adjacent or terminal-current; _safe_tool
+        # collapses to {} which the prompt builder treats as
+        # "evaluation unavailable, reason from role state alone".
+        next_role_slug = (
+            (role_state_data.get("next_transition") or {}).get(
+                "target_role_slug"
+            )
+            if isinstance(role_state_data, dict)
+            else None
+        )
+        gate_eval_data: dict[str, Any] = {}
+        if student_id and next_role_slug:
+            gate_eval_data = await _safe_tool(
+                self,
+                ctx,
+                "evaluate_student_against_gate",
+                {
+                    "student_id": str(student_id),
+                    "target_role_slug": next_role_slug,
+                },
+            )
+
         # ── LLM call ──────────────────────────────────────────────
         system_prompt = _load_prompt("career_coach")
         user_block = _build_user_block(
@@ -205,6 +259,9 @@ class CareerCoachAgent(AgenticBaseAgent[CareerCoachInput]):
             contract=contract_data,
             capstone=capstone_data,
             mastery=mastery_data,
+            role_state=role_state_data,
+            accessible_content=accessible_content_data,
+            gate_eval=gate_eval_data,
             target_role=input.target_role,
             timeline_weeks=input.timeline_weeks,
         )
@@ -314,6 +371,9 @@ def _build_user_block(
     contract: dict[str, Any],
     capstone: dict[str, Any],
     mastery: dict[str, Any],
+    role_state: dict[str, Any],
+    accessible_content: dict[str, Any],
+    gate_eval: dict[str, Any],
     target_role: str | None,
     timeline_weeks: int | None,
 ) -> str:
@@ -322,6 +382,23 @@ def _build_user_block(
         parts.append(f"## Target role (caller-supplied)\n\n{target_role}")
     if timeline_weeks:
         parts.append(f"## Timeline (caller-supplied)\n\n{timeline_weeks} weeks")
+    # D15 CP3 sections come first so role identity frames every
+    # downstream piece of grounding data the LLM reads.
+    if role_state and role_state.get("found"):
+        parts.append(
+            "## Role state\n\n"
+            f"```json\n{json.dumps(role_state, indent=2, default=str)}\n```"
+        )
+    if accessible_content and accessible_content.get("found") is not None:
+        parts.append(
+            "## Accessible content (filtered to current role)\n\n"
+            f"```json\n{json.dumps(accessible_content, indent=2, default=str)}\n```"
+        )
+    if gate_eval:
+        parts.append(
+            "## Gate evaluation (current role → next adjacent role)\n\n"
+            f"```json\n{json.dumps(gate_eval, indent=2, default=str)}\n```"
+        )
     if contract:
         parts.append(f"## Goal contract\n\n```json\n{json.dumps(contract, indent=2)}\n```")
     if progress:
