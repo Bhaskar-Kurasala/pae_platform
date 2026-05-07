@@ -514,6 +514,30 @@ async def test_resume_reviewer_no_longer_in_legacy_registry() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mock_interview_no_longer_in_legacy_registry() -> None:
+    """D13 Checkpoint 4 cutover pin: mock_interview migrated off the
+    legacy BaseAgent path. AGENT_REGISTRY no longer carries it; the
+    agent lives in _agentic_registry as
+    mock_interview.MockInterviewAgent (renamed from mock_interview_v2
+    at cutover).
+
+    First v2 agent with uses_self_eval=True (Pass 3c E7); first
+    multi-turn agent (session_id binds turns); first to populate a
+    HandoffRequest at the schema level (D-2 Option B post-session
+    suggestion).
+    """
+    from app.agents.registry import AGENT_REGISTRY, _ensure_registered
+
+    _ensure_registered()
+    assert "mock_interview" not in AGENT_REGISTRY, (
+        "mock_interview is back in AGENT_REGISTRY — D13 cutover "
+        "reverted? See app/agents/registry.py:_ensure_registered + "
+        "the new class at app/agents/mock_interview.py "
+        "(AgenticBaseAgent, registered via _agentic_registry)."
+    )
+
+
+@pytest.mark.asyncio
 async def test_tailored_resume_no_longer_in_legacy_registry() -> None:
     """D12 Checkpoint 4 cutover pin: tailored_resume_llm.py kept the
     file (it is the inner LLM helper the service uses) but removed the

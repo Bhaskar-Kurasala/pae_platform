@@ -38,7 +38,11 @@ ROUTABLE_AGENTS = [
     "adaptive_path",
     "project_evaluator",
     "progress_report",
-    "mock_interview",
+    # mock_interview — D13 CP4 cutover (Checkpoint 4) migrated this from
+    # BaseAgent to AgenticBaseAgent. The agent class now lives in
+    # _agentic_registry (mock_interview_v2 → mock_interview after rename).
+    # Legacy MOA dispatch can no longer reach it (keyword routing also
+    # dropped below). Same pattern as D10/D11/D12 cutovers.
     "portfolio_builder",
     "job_match",
     "disrupt_prevention",
@@ -76,7 +80,6 @@ Available agents and their purposes:
 - adaptive_path: learning path, "what should I study next", "study plan"
 - project_evaluator: capstone evaluation, "grade my project"
 - progress_report: "how am I doing", "my progress", "weekly report"
-- mock_interview: interview practice, "system design", "mock interview"
 - portfolio_builder: "build my portfolio", "showcase project"
 - job_match: "find jobs", "job listings", "career opportunities"
 - disrupt_prevention: re-engagement messages, inactive students
@@ -97,7 +100,12 @@ _KEYWORD_MAP: list[tuple[list[str], str]] = [
     # agent. Legacy MOA would have routed to non-existent
     # AGENT_REGISTRY entries.
     (["quiz me", "mcq", "multiple choice", "test my knowledge"], "adaptive_quiz"),
-    (["interview", "system design", "mock interview", "interview prep"], "mock_interview"),
+    # mock_interview keyword route removed in D13 CP4 cutover
+    # (Checkpoint 4). Interview-practice questions reach the new
+    # AgenticBaseAgent class (mock_interview, formerly mock_interview_v2)
+    # via the canonical /api/v1/agentic/{flow}/chat endpoint where the
+    # Supervisor's capability registry has the agent. Legacy MOA would
+    # have routed to a non-existent AGENT_REGISTRY entry.
     (["portfolio", "showcase", "build my portfolio"], "portfolio_builder"),
     (["jobs", "job listing", "career opportun", "find jobs", "hiring"], "job_match"),
     (["study partner", "find peer", "study group", "peer match"], "peer_matching"),

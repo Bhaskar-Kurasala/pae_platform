@@ -72,6 +72,19 @@ _AGENTIC_AGENT_MODULES: tuple[str, ...] = (
     "app.agents.study_planner_v2",
     "app.agents.resume_reviewer_v2",
     "app.agents.tailored_resume_v2",
+    # D13 — mock_interview migration (Pass 3c E7). Stateful multi-turn
+    # interviews (session_id binds turns); first v2 agent with
+    # uses_self_eval=True per spec. CP4 cutover (D13 Checkpoint 4)
+    # deleted the legacy BaseAgent file and renamed mock_interview_v2.py
+    # → mock_interview.py at the same commit (mirroring the D10/D11/D12
+    # cutover pattern). The class reachable through this loader is the
+    # AgenticBaseAgent successor; the legacy AGENT_REGISTRY @register
+    # decorator was dropped at the same commit (registry.py import
+    # removed). First v2 agent to flip uses_self_eval=True; established
+    # the strip_extra_fields + truncate_to_schema canonical composition
+    # for "make LLM output safe before validation" (Bug 17 + Bug 23
+    # architectural fixes).
+    "app.agents.mock_interview",
     # "app.agents.engagement_watchdog",      # future
     # "app.agents.code_mentor",              # future
 )

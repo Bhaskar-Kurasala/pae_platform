@@ -60,7 +60,10 @@ def _ensure_registered() -> None:
     import app.agents.job_match  # noqa: F401
     import app.agents.knowledge_graph  # noqa: F401
     import app.agents.mcq_factory  # noqa: F401
-    import app.agents.mock_interview  # noqa: F401
+    # mock_interview — D13 CP4 cutover. Legacy file deleted; new class
+    # at app.agents.mock_interview (formerly mock_interview_v2) registers
+    # via _agentic_registry. Same pattern as D12 career_coach /
+    # resume_reviewer above and D10/D11 cutovers.
     import app.agents.peer_matching  # noqa: F401
     import app.agents.portfolio_builder  # noqa: F401
     import app.agents.progress_report  # noqa: F401

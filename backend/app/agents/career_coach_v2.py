@@ -28,7 +28,7 @@ import structlog
 from pydantic import ConfigDict, Field
 
 from app.agents.agentic_base import AgentContext, AgentInput, AgenticBaseAgent
-from app.agents.parsing_helpers import truncate_to_schema
+from app.agents.parsing_helpers import strip_extra_fields, truncate_to_schema
 from app.schemas.agents.career_coach import CareerCoachOutput
 
 log = structlog.get_logger().bind(layer="career_coach")
@@ -406,9 +406,14 @@ def _parse_output(raw: str) -> CareerCoachOutput:
     if end == -1:
         raise ValueError("Unbalanced JSON in LLM output.")
 
-    # D12 CP3 Phase 4 Bug 17 architectural fix — see parsing_helpers.py.
+    # D12 CP3 Phase 4 Bug 17 + D13 CP3 Phase 1.8 Bug 23 architectural
+    # fix — see parsing_helpers.py. Strip unknown keys (Bug 23) before
+    # truncating string overshoots (Bug 17). Preventive retrofit; D12
+    # never surfaced Bug 23 live but the helper is mechanical and the
+    # composition is the canonical "make LLM output safe" pattern.
     raw_dict = json.loads(text[start : end + 1])
-    truncated = truncate_to_schema(raw_dict, CareerCoachOutput)
+    stripped = strip_extra_fields(raw_dict, CareerCoachOutput)
+    truncated = truncate_to_schema(stripped, CareerCoachOutput)
     return CareerCoachOutput.model_validate(truncated)
 
 

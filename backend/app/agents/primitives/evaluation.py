@@ -334,10 +334,24 @@ class _DefaultLLM:
         if self._llm is None:
             from app.agents.llm_factory import build_llm
 
-            # tier="fast" → Haiku. Pin temperature=0 for determinism;
-            # max_tokens=400 is plenty for the critic's JSON object
-            # plus reasoning string.
-            self._llm = build_llm(max_tokens=400, tier="fast", temperature=0.0)
+            # Critic max_tokens=2048 to accommodate MiniMax thinking-block
+            # consumption (~38% of output tokens per D12 measurements).
+            # This is interim sizing — the architecturally-right fix is
+            # routing Critic to Anthropic Haiku (which doesn't emit
+            # thinking blocks; 400 tokens is correct for Haiku) and is
+            # registered as D14 prerequisite work in
+            # docs/followups/critic-tier-routing-architectural.md. Under
+            # MiniMax M2.7, 2048 gives the thinking block ~800 tokens of
+            # headroom and leaves ~1200 for the verdict JSON + reasoning.
+            #
+            # Critic uses build_llm's tier defaults for temperature.
+            # Threading explicit temperature through build_llm is a
+            # separate concern (see follow-up doc
+            # llm-factory-temperature-control.md) and not required for
+            # Critic correctness — both MiniMax and Anthropic produce
+            # stable structured-output JSON at default temperature per
+            # D12 + D13 measurements.
+            self._llm = build_llm(max_tokens=2048, tier="fast")
 
         from langchain_core.messages import HumanMessage
 
@@ -1010,12 +1024,20 @@ async def _write_evaluation_row(
     call_chain_id: uuid.UUID | None,
     attempt_number: int,
     verdict: CriticVerdict | None,
-    total_score: float,
+    total_score: float | None,
     threshold: float,
     passed: bool,
     critic_reasoning: str,
 ) -> uuid.UUID | None:
-    """Insert one agent_evaluations row. Returns its id."""
+    """Insert one agent_evaluations row. Returns its id.
+
+    D13 Bug 22: total_score may legitimately be None on the
+    agent-call-failed path (line 866) — the agent's run() raised before
+    the Critic could score anything. Treat None as 0.0 (below-threshold,
+    matches Critic's parsed_ok=False semantics) so the row writes
+    cleanly. See docs/followups/eval-row-writer-defensive-fix.md.
+    """
+    score_for_clamp = 0.0 if total_score is None else total_score
     try:
         row = AgentEvaluation(
             agent_name=agent_name,
@@ -1025,7 +1047,7 @@ async def _write_evaluation_row(
             accuracy_score=verdict.accuracy if verdict else None,
             helpful_score=verdict.helpful if verdict else None,
             complete_score=verdict.complete if verdict else None,
-            total_score=max(0.0, min(1.0, total_score)),
+            total_score=max(0.0, min(1.0, score_for_clamp)),
             threshold=threshold,
             passed=passed,
             critic_reasoning=critic_reasoning[:2000] if critic_reasoning else None,

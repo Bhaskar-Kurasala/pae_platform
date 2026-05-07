@@ -27,7 +27,7 @@ import structlog
 from pydantic import ConfigDict, Field
 
 from app.agents.agentic_base import AgentContext, AgentInput, AgenticBaseAgent
-from app.agents.parsing_helpers import truncate_to_schema
+from app.agents.parsing_helpers import strip_extra_fields, truncate_to_schema
 from app.schemas.agents.resume_reviewer import ResumeReviewerOutput
 
 log = structlog.get_logger().bind(layer="resume_reviewer")
@@ -359,9 +359,12 @@ def _parse_output(raw: str) -> ResumeReviewerOutput:
                 break
     if end == -1:
         raise ValueError("Unbalanced JSON in LLM output.")
-    # D12 CP3 Phase 4 Bug 17 architectural fix — see parsing_helpers.py.
+    # D12 CP3 Phase 4 Bug 17 + D13 CP3 Phase 1.8 Bug 23 architectural
+    # fix — see parsing_helpers.py. Strip unknown keys then truncate
+    # length overshoots; canonical "make LLM output safe" composition.
     raw_dict = json.loads(text[start : end + 1])
-    truncated = truncate_to_schema(raw_dict, ResumeReviewerOutput)
+    stripped = strip_extra_fields(raw_dict, ResumeReviewerOutput)
+    truncated = truncate_to_schema(stripped, ResumeReviewerOutput)
     return ResumeReviewerOutput.model_validate(truncated)
 
 

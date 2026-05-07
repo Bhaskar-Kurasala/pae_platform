@@ -32,7 +32,7 @@ import structlog
 from pydantic import ConfigDict, Field
 
 from app.agents.agentic_base import AgentContext, AgentInput, AgenticBaseAgent
-from app.agents.parsing_helpers import truncate_to_schema
+from app.agents.parsing_helpers import strip_extra_fields, truncate_to_schema
 from app.schemas.agents.study_planner import StudyPlannerOutput
 
 log = structlog.get_logger().bind(layer="study_planner")
@@ -452,12 +452,14 @@ def _parse_output(raw: str) -> StudyPlannerOutput:
                 break
     if end == -1:
         raise ValueError("Unbalanced JSON in LLM output.")
-    # D12 CP3 Phase 4 Bug 17 architectural fix: server-side string
-    # max_length enforcement before Pydantic validation. Prompt-level
-    # constraint emphasis proved unreliable under MiniMax; truncating
-    # in-place keeps validation deterministic.
+    # D12 CP3 Phase 4 Bug 17 + D13 CP3 Phase 1.8 Bug 23 architectural
+    # fix: strip unknown keys, then enforce string max_length, then
+    # validate. Both layers are server-side coercion of LLM output
+    # before Pydantic; prompt-level constraints proved unreliable
+    # under MiniMax for either shape drift or length overshoot.
     raw_dict = json.loads(text[start : end + 1])
-    truncated = truncate_to_schema(raw_dict, StudyPlannerOutput)
+    stripped = strip_extra_fields(raw_dict, StudyPlannerOutput)
+    truncated = truncate_to_schema(stripped, StudyPlannerOutput)
     return StudyPlannerOutput.model_validate(truncated)
 
 

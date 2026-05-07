@@ -182,6 +182,30 @@ The discipline going forward: when investigating any subsystem with an abstracti
 
 **Provenance**: MiniMax activation commit `049a087`. The pattern is captured as Sibling 4 of the implicit-state-assumption meta-pattern in `asyncpg-rollback-discipline.md`.
 
+### Pattern 16: Real-LLM harness setup must call BOTH loaders
+
+`load_agentic_agents()` populates the agent registry by importing each agent module so its `__init_subclass__` hook fires; `ensure_tools_loaded()` populates the tool registry by importing each `@tool`-decorated function. The two registries are independent. Production paths (FastAPI startup at `app/main.py`, Celery worker boot at `app/core/celery_app.py`) call BOTH. Out-of-process harnesses that drive `call_agent` directly (CP3 verification scripts, ad-hoc diagnostics) commonly only call the agent loader and silently get `Tool 'memory_recall' not registered` failures the moment the agent's `run()` invokes a universal tool.
+
+**Discipline**: every out-of-process harness or test fixture that invokes `call_agent` must call both `load_agentic_agents()` and `ensure_tools_loaded()` at startup. The two-line pairing is canonical; pin it in CP3 harness templates so it isn't reinvented per migration.
+
+**Provenance**: D13 CP3 first attempt — Phase 1 hit `Tool 'memory_recall' not registered. Available: <none>` because the harness only loaded agents. The cascade ate the dispatch budget on a retry path; root cause was 4 hours into the diagnostic. See `docs/followups/agentic-loader-fastapi-startup.md` for the production-side wire-up.
+
+### Pattern 17: First-flip primitive verification before agent-level CP3 phases
+
+When a migration is the FIRST to flip a primitive flag (`uses_self_eval`, `uses_proactive`, etc.), the corresponding code path has never executed in production. Unit tests for those primitives exist (D7-era Critic tests, D7b-era proactive tests) but commonly stub the LLM or transport, missing real-provider integration gaps. Running the agent's CP3 verification IS NOT a substitute for primitive verification; failures under the agent's call path are 5+ frames deep, surface intermittently across retry paths, and burn the dispatch budget on diagnostic.
+
+**Discipline**: at CP1, identify which primitives the agent flips for the first time. For each, write a standalone smoke that drives the primitive's real-provider integration directly (e.g., `Critic.evaluate(request="x", response="y")` against the real LLM, with `parsed_ok` asserted non-None). Run BEFORE CP3's agent-level phases. Cost: one cheap LLM call per primitive; payoff: bugs surface in seconds instead of half-hours.
+
+**Provenance**: D13 mock_interview was the first v2 agent with `uses_self_eval=True`. Bugs 18 (Critic `build_llm(temperature=…)` TypeError) and 19 (Critic max_tokens=400 too small for MiniMax thinking blocks) both surfaced via agent-level CP3 retries, costing 2 stop-and-fix iterations at ~₹1 each. Standalone Critic smoke would have caught both in seconds.
+
+### Pattern 18: Provider-aware tier collapse — abstract tier names lie under MiniMax
+
+`build_llm(tier="fast")` is meaningful only on the Anthropic route, where it resolves to Haiku. Under MiniMax (`MINIMAX_API_KEY` set), both `tier="fast"` and `tier="smart"` collapse to MiniMax M2.7 (`llm_factory.py:77-78` documents this explicitly: *"MiniMax doesn't offer a separate fast model in this stack, so when MINIMAX_API_KEY is set both tiers route to the configured MiniMax model."*). Callers that reason about budget/latency assuming a Haiku-shaped output (no thinking blocks, tight responses, ~3s elapsed) are silently routed through M2.7 (~38% thinking-block tokens, ~16-31s elapsed, 40× per-call cost).
+
+**Discipline**: when a caller declares a tier, audit whether their downstream assumptions (max_tokens budget, expected elapsed, expected output shape) actually hold under EVERY provider route the tier collapses to. If the assumption is Haiku-specific — and the caller is structurally fast-path infrastructure (Critic, classifier, intake-question selector) — bypass `build_llm` and construct `ChatAnthropic` directly when an Anthropic key is set, with the abstract-tier path as fallback. The architectural answer is provider-aware capability metadata, but the inline answer is direct construction.
+
+**Provenance**: D13 Bug 19 — Critic was sized for Haiku (max_tokens=400); under MiniMax-only configuration the thinking block consumed the entire budget and the text block came back empty. Interim fix bumped max_tokens to 2048 (~₹0.20/Critic-call). Architectural fix routes Critic directly to Haiku via `ChatAnthropic` when `ANTHROPIC_API_KEY` is set (~₹0.005/Critic-call). See `docs/followups/critic-tier-routing-architectural.md`.
+
 ## Application guide
 
 When starting a new agent migration (D13+), walk these patterns in order and confirm each is addressed:

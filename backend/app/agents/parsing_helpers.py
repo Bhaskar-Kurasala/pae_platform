@@ -214,4 +214,131 @@ def _nested_model_class(
     return None
 
 
-__all__ = ["truncate_to_schema"]
+# ── strip_extra_fields ────────────────────────────────────────────
+
+
+def _model_drops_extra(model: type[BaseModel]) -> bool:
+    """True when the model's config rejects or ignores extra keys.
+
+    Both extra="forbid" and extra="ignore" produce the same observable
+    result for the LLM: keys not in the schema don't end up on the model
+    instance. We strip in either case so the caller's `model_validate`
+    sees a clean dict. extra="allow" callers get pass-through.
+    """
+    config = getattr(model, "model_config", None)
+    if config is None:
+        return False
+    extra = config.get("extra") if isinstance(config, dict) else getattr(config, "extra", None)
+    return extra in ("forbid", "ignore")
+
+
+def strip_extra_fields(
+    data: dict[str, Any],
+    model: type[BaseModel],
+    *,
+    _path: str = "",
+) -> dict[str, Any]:
+    """Drop keys not in `model.model_fields` recursively.
+
+    Counterpart to `truncate_to_schema`: that function enforces string
+    constraints, this one coerces SHAPE. Together they form the
+    canonical "make LLM output safe before validation" composition:
+
+        parsed = json.loads(text)
+        stripped = strip_extra_fields(parsed, MyOutputModel)
+        truncated = truncate_to_schema(stripped, MyOutputModel)
+        return MyOutputModel.model_validate(truncated)
+
+    D13 Bug 23 motivated this helper: under MiniMax, the LLM
+    occasionally flattens nested fields to the top level (e.g. emits
+    `handoff_type` at the root instead of nested under
+    `handoff_request`). With extra="forbid" on the output model, that
+    raises ValidationError. Server-side stripping is more reliable
+    than prompt-level constraints (Bug 17 lesson).
+
+    Behavior:
+      • Models with extra="forbid" or "ignore": drop unknown keys.
+        We strip even on "ignore" because validating-then-ignoring is
+        wasted work; stripping eagerly produces cleaner downstream
+        truncation paths.
+      • Models with extra="allow": pass unknown keys through unchanged.
+      • Nested BaseModel fields: recurse with the nested model class.
+      • list[BaseModel] fields: iterate, recurse on each dict element.
+      • Optional[BaseModel] / Union[BaseModel, None]: unwrap, recurse.
+      • Union with >1 BaseModel member: log warning, pass-through.
+
+    Each dropped key emits one debug log line. Production callers see
+    these only when log level is DEBUG; live shape-drift signal is
+    queryable but doesn't pollute INFO logs.
+
+    Returns a NEW dict; does not mutate `data`.
+    """
+    if not isinstance(data, dict):
+        return data
+
+    fields = model.model_fields
+    drops_extra = _model_drops_extra(model)
+
+    out: dict[str, Any] = {}
+    for key, value in data.items():
+        if key not in fields:
+            if drops_extra:
+                log.debug(
+                    "strip_extra_fields.dropped",
+                    field=f"{_path}{key}",
+                    model=model.__name__,
+                )
+                continue
+            # extra="allow" — preserve the key as-is.
+            out[key] = value
+            continue
+
+        field_info = fields[key]
+        out[key] = _strip_field(value, field_info, f"{_path}{key}")
+
+    return out
+
+
+def _strip_field(
+    value: Any,
+    field_info: FieldInfo,
+    path: str,
+) -> Any:
+    """Recurse strip_extra_fields into one field's value when the type
+    is a BaseModel (direct, Optional, list[Model])."""
+    if value is None:
+        return value
+
+    annotation = field_info.annotation
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+
+    # Direct dict → BaseModel match.
+    if isinstance(value, dict):
+        nested_model = _nested_model_class(annotation, origin, args)
+        if nested_model is not None:
+            return strip_extra_fields(value, nested_model, _path=f"{path}.")
+        # Untyped dict (e.g. dict[str, Any]) — leave alone.
+        return value
+
+    # list[BaseModel] → iterate.
+    if isinstance(value, list):
+        element_type = _list_element_type(annotation, origin, args)
+        if (
+            element_type is not None
+            and isinstance(element_type, type)
+            and issubclass(element_type, BaseModel)
+        ):
+            return [
+                strip_extra_fields(item, element_type, _path=f"{path}.{i}.")
+                if isinstance(item, dict)
+                else item
+                for i, item in enumerate(value)
+            ]
+        return value
+
+    # Primitives — pass through.
+    return value
+
+
+__all__ = ["strip_extra_fields", "truncate_to_schema"]

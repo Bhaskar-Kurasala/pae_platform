@@ -282,20 +282,50 @@ _CAPABILITIES: Final[list[AgentCapability]] = [
     AgentCapability(
         name="mock_interview",
         description=(
-            "Stateful FAANG-style mock interviews across system "
-            "design, coding, behavioral, and take-home formats. "
-            "Maintains session state across multiple Supervisor "
-            "invocations within an interview. Use for: interview prep, "
-            "weakness identification, format-specific practice."
+            "Conducts mock interviews across multiple formats: "
+            "system_design, coding, behavioral, take_home. Reads the "
+            "student's prior session history, identified weaknesses, "
+            "and target role to calibrate difficulty. Tracks weakness "
+            "patterns across sessions. Suggests senior_engineer (for "
+            "code-level review when the candidate fails a coding round) "
+            "or career_coach (for strategic readiness gaps) at session "
+            "close. Best for: 'mock interview', 'practice for an "
+            "interview', 'evaluate me on system design'. Different from "
+            "career_coach (strategic 90-day plans) and senior_engineer "
+            "(code review). Sessions are stateful across multiple turns "
+            "via session_id."
         ),
-        inputs_required=["format"],
-        inputs_optional=["target_role", "session_id"],
-        outputs_provided=["question", "feedback", "next_step"],
-        typical_latency_ms=3500,
-        typical_cost_inr=Decimal("5.00"),
+        inputs_required=["mode"],
+        inputs_optional=[
+            "session_id", "target_role", "difficulty_level", "specific_topic",
+        ],
+        outputs_provided=[
+            "session_id", "turn_kind", "question", "evaluation",
+            "feedback", "session_summary",
+        ],
+        # D13 CP3 calibration: measured P50 ~35s under MiniMax with the
+        # self_eval Critic loop active (main agent ~17s + Critic ~16s +
+        # safety classifier 2s). The 3x formula on typical_latency_ms
+        # alone would resolve to a budget below the measured run length,
+        # so we use timeout_override_seconds=60 to set a hard 60s budget
+        # explicitly. Pattern matches D12 career_coach (override=150) and
+        # tailored_resume (override=120) — agents whose structural floor
+        # exceeds what the typical_latency_ms × 3 formula expresses.
+        # typical_latency_ms stays at 12000 as the no-Critic baseline so
+        # downstream consumers (UI ETA, cost forecasting) see realistic
+        # main-agent latency, not the Critic-inclusive worst case.
+        typical_latency_ms=12000,
+        timeout_override_seconds=60,
+        typical_cost_inr=Decimal("3.00"),  # per turn; full session is multiple turns
         requires_entitlement=True,
         minimum_tier="standard",
-        available_now=False,  # awaits D13
+        # D13 CP1 — capability flipped. Agent class lands in CP2 + CP3.
+        # handoff_targets is informational metadata (Option B per D-2);
+        # mock_interview emits HandoffRequest only on turn_kind=
+        # "session_summary" turns (post-session suggestion), never
+        # mid-session. True state-preserving mid-session handoff is
+        # deferred to a future deliverable.
+        available_now=True,
         handoff_targets=["senior_engineer", "career_coach"],
     ),
     # ── Group F / Content Pipeline ───────────────────────────────────
