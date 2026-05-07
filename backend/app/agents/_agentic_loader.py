@@ -96,6 +96,25 @@ _AGENTIC_AGENT_MODULES: tuple[str, ...] = (
     # solution verification deferred (D-B; see follow-up doc). First v2
     # agent producing user-facing content directly.
     "app.agents.practice_curator",
+    # D14c — project_evaluator migration (Pass 3c E9). CP4 cutover
+    # deleted the legacy BaseAgent file and renamed
+    # project_evaluator_v2.py → project_evaluator.py at the same
+    # commit (D11 senior_engineer / D13 mock_interview cutover
+    # pattern). The class reachable through this loader is the
+    # AgenticBaseAgent successor; the legacy AGENT_REGISTRY @register
+    # decorator was dropped at the same commit (registry.py import
+    # removed). Single-shot content-generating agent: each call
+    # evaluates ONE capstone submission against the published rubric.
+    # Highest-cost deliverable of the D14 arc (typical_cost_inr=8.00).
+    # Per locked D-A single-shot, D-B no sandbox dependency, D-C no
+    # Critic / no mandatory validation chain (no meta-evaluator
+    # exists yet), D-D Pattern 18b held at preemptive 90s after a
+    # CP4 75s tightening attempt timed out (MiniMax tail-latency
+    # spread wider than observed_max × 1.30 at n=2), D-E rubric-grounding
+    # enforcement (prompt + runtime + schema-flag triple-layered
+    # defense), D-4 dual-rail graceful refusal on non-capstone
+    # submissions.
+    "app.agents.project_evaluator",
     # "app.agents.engagement_watchdog",      # future
     # "app.agents.code_mentor",              # future
 )

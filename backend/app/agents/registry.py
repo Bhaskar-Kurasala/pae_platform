@@ -67,7 +67,11 @@ def _ensure_registered() -> None:
     import app.agents.peer_matching  # noqa: F401
     import app.agents.portfolio_builder  # noqa: F401
     import app.agents.progress_report  # noqa: F401
-    import app.agents.project_evaluator  # noqa: F401
+    # project_evaluator — D14c CP4 cutover. Legacy BaseAgent file
+    # deleted; new class at app.agents.project_evaluator (formerly
+    # project_evaluator_v2) registers via _agentic_registry, NOT here.
+    # Same pattern as billing_support (D10), senior_engineer (D11),
+    # career bundle (D12), mock_interview (D13).
     # resume_reviewer — D12 CP4 cutover. Legacy file deleted; new
     # class at app.agents.resume_reviewer_v2 registers via
     # _agentic_registry. Same pattern as D12 career_coach above.

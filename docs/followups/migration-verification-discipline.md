@@ -208,11 +208,12 @@ Two related sub-patterns. Both stem from MiniMax M2.7 having different cost/late
 
 **Discipline:**
 - For tier-collapse (18a): when a caller declares a tier, audit whether their downstream assumptions (max_tokens budget, expected elapsed, expected output shape) actually hold under EVERY provider route the tier collapses to. If the assumption is Haiku-specific — and the caller is structurally fast-path infrastructure (Critic, classifier, intake-question selector) — bypass `build_llm` and construct `ChatAnthropic` directly when an Anthropic key is set, with the abstract-tier path as fallback. The architectural answer is provider-aware capability metadata, but the inline answer is direct construction.
-- For latency multiplier (18b): treat spec `typical_latency_ms` values as Anthropic-era estimates. At CP1, set `timeout_override_seconds` proactively at 2-3× spec value (rounded to a clean number). At CP3, calibrate down based on measured P95 if measurements allow. **Do NOT skip the override and rely on the formula budget** — D14b CP3 burned ~₹0.33 in calibration timeouts because the spec's 8000ms × 3 = 30s floor was insufficient.
+- For latency multiplier (18b): treat spec `typical_latency_ms` values as Anthropic-era estimates. At CP1, set `timeout_override_seconds` preemptively at **spec × 4-5 multiplier** (rounded to a clean number). **Do NOT skip the override and rely on the formula budget** — D14b CP3 burned ~₹0.33 in calibration timeouts because the spec's 8000ms × 3 = 30s floor was insufficient. Tighten post-CP3 ONLY when **n ≥ 5 measurements exist**; tightening formula is **`observed_p95 × 1.30` OR `observed_max × 1.50`, whichever is larger**. At n=2-4, MiniMax tail-latency spread is wider than `observed_max × 1.30` absorbs (D14c CP4 evidence below). Never tighten on small samples alone.
 
 **Provenance:**
 - 18a: D13 Bug 19 — Critic was sized for Haiku (max_tokens=400); under MiniMax-only configuration the thinking block consumed the entire budget and the text block came back empty. Interim fix bumped max_tokens to 2048 (~₹0.20/Critic-call). Architectural fix routes Critic directly to Haiku via `ChatAnthropic` when `ANTHROPIC_API_KEY` is set (~₹0.005/Critic-call). See `docs/followups/critic-tier-routing-architectural.md`.
-- 18b: Multiple data points across the engagement: D12 career_coach (90s spec, 150s override needed), D12 tailored_resume (60s spec, 120s override needed), D13 mock_interview (12000ms spec → 60s override after Critic added), D14b practice_curator (8000ms spec → 60s override after CP3 timeouts). The pattern holds across both single-shot and multi-turn agents, both Critic-enabled and Critic-free agents. Spec is Anthropic-era; override discipline is the post-MiniMax reality.
+- 18b (preemptive sizing): Multiple data points across the engagement: D12 career_coach (90s spec, 150s override needed), D12 tailored_resume (60s spec, 120s override needed), D13 mock_interview (12000ms spec → 60s override after Critic added), D14b practice_curator (8000ms spec → 60s override after CP3 timeouts). The pattern holds across both single-shot and multi-turn agents, both Critic-enabled and Critic-free agents. Spec is Anthropic-era; override discipline is the post-MiniMax reality.
+- 18b (tightening-formula refinement, D14c CP4): D14c set `timeout_override_seconds=90` preemptively at CP1 (= spec 20000ms × 4.5). CP3 measured 4 phases: P1 51.81s, P2 57.48s (rubric-grounded paths), P3 15.18s, P4 15.79s (refusal paths) — `observed_max × 1.30 = 75s`. CP4 attempted to tighten 90 → 75; the post-cutover smoke on the **same Phase 1 payload that ran 51.81s in CP3 timed out at 75.05s**, a 22s spread on identical input at n=2. Held at 90s preemptive. Lesson: `observed_max × 1.30` is an acceptable target *value* but not a safe tightening threshold at small n; MiniMax tail latency is wider than the n=2-4 max captures. Wait for n ≥ 5 before tightening.
 
 ### Pattern 19: Capability adapter signatures should accept both Pydantic and dict from start
 
@@ -254,22 +255,38 @@ Agents that produce output students directly consume (vs. coaching/review/evalua
 - Gating threshold: "clearly broken" (unsolvable, off-topic, unsafe) — not "imperfect"
 - If a specific Literal value produces structurally wrong-shaped output (e.g., debugging-type exercise lacks broken starter_code, system_design exercise that's actually a coding problem), surface as prompt-quality finding; the relevant per-type prompt section is the prime suspect
 
-**Discipline applies to:** D14b practice_curator (5 exercise types × 3 difficulties); future agents like D17 mcq_factory (multiple choice questions → student-facing), D17 portfolio_builder (portfolio prose → student-facing).
+**Discipline applies to:** D14b practice_curator (5 exercise types × 3 difficulties); D14c project_evaluator (rubric-grounded evaluations become portfolio entries — see D14c extension below); future agents like D17 mcq_factory (multiple choice questions → student-facing), D17 portfolio_builder (portfolio prose → student-facing).
 
-**Discipline does NOT apply to:** content-processing agents (operate on submitted artifacts) like D14c project_evaluator, D12 resume_reviewer, D11 senior_engineer. These produce review/evaluation output that's processed by humans or downstream agents, not directly consumed; schema invariants suffice.
+**D14c extension — rubric-grounding check for evaluation agents:** when the agent's output is rubric-graded content that becomes a portfolio entry or graded artifact, Phase 5 quality observation MUST verify rubric-grounding at the dimension-by-dimension level: each output `dimension_name` matches a key in the source rubric, each `rubric_criterion` is a quote/paraphrase of the actual rubric language, evidence cites concrete artifacts (file names, function names, PR URLs) rather than generic praise. Gating threshold: "clearly invented" — dimension_name doesn't appear in rubric content, rubric_criterion is fabricated. Originally Pattern 21 was framed as "DOES NOT apply to content-processing agents"; D14c surfaced that evaluation agents producing portfolio entries straddle the line and DO need quality observation, just with rubric-fidelity as the load-bearing axis instead of pedagogical quality.
 
-**Provenance:** D14b practice_curator CP3 + CP4 established the canonical pattern. 4 real-LLM calls covered easy/medium/hard difficulty + coding/system_design exercise types + the all-empty optional-input path. Subjective Phase 5 review captured exercises as pedagogically sound (single-concept targeted, clear evaluation criteria, progressive hints, solvable in estimated time, domain-appropriate for senior GenAI engineering target role). No exercise was "clearly broken"; minor observations registered as informational.
+**Provenance:** D14b practice_curator CP3 + CP4 established the canonical pattern (4 real-LLM calls covered easy/medium/hard difficulty + coding/system_design exercise types + the all-empty optional-input path; subjective Phase 5 captured exercises as pedagogically sound). D14c project_evaluator CP3 extended with the rubric-grounding axis (4 phases: rubric-grounded × 2 + D-E refusal + D-4 refusal; Phase 6 verified every dimension_name matches an actual rubric key, every rubric_criterion is a direct quote/paraphrase, narrative_feedback references actual code/PR/self_explanation content rather than generic praise). Zero invented dimensions across either rubric-grounded phase; calibrated non-soft scores (P1=0.72, P2=0.53 with honest weakness call-outs) validated trust-contract-aligned behavior.
+
+### Pattern 22: Spec-vs-schema reconciliation at CP1 pre-authoring
+
+When a Pass 3 spec wording references a table, column, or tool name against a schema that doesn't exist in the actual codebase, fix at CP1 pre-authoring rather than encoding the leaky abstraction into agent code, tool names, or tests. Surface the decision point at the CP1 **pre-authoring** report (before any code ships), not at CP2 schema audit (after tools have been written against the spec name).
+
+**Discipline:** at CP1, before authoring schemas or capability declarations, cross-reference every spec-named entity (table, column, tool, FK target) against the actual codebase models:
+- `grep` for the named table/column in `app/models/`
+- If the spec entity doesn't exist as named, identify the actual schema location (often a renamed predecessor or a field that lives on a different table than the spec assumes)
+- Surface a pre-authoring decision-points report: "spec says X, actual schema is Y, recommend renaming spec entity to Z" — pause for founder confirmation before authoring
+- Locked-decision document the rename so future readers see why the deliverable diverges from spec wording
+
+**Why CP1 pre-authoring, not CP2 schema audit:** CP2 schema audit catches drift in *the SQL the tool emits* against the live DB. It does NOT catch the case where the tool was named correctly per spec but the spec's name is wrong relative to actual schema. By CP2, the misleading name is already encoded in the input schema, the capability declaration, the prompt's section names, and any partial test coverage — fixing it requires multi-file rename work. At CP1 pre-authoring it's a single decision before any code is written.
+
+**Provenance:** D14c CP1 — Pass 3c E9 spec referenced rubric storage at "course's `course_content`" against a `course_content` table that doesn't exist in the codebase. Actual rubric storage is `exercises.rubric` (JSON, nullable) per-capstone. Spec named the rubric reader `read_rubric_for_course` taking a course_id; reality required `read_rubric_for_capstone` taking an exercise_id. Surfaced at CP1 pre-authoring decision report; locked decisions D-1 (tool rename), D-2 (drop spec's `rubric_id` input — implied by submission), D-3 (`project_submission_id` maps to `exercise_submissions.id`) made before any agent code shipped. Pre-authoring discipline saved the multi-file rename cost a CP2-time discovery would have incurred. Single-data-point promotion is justified because the failure mode is concrete and the rule is simple.
 
 ## Application guide
 
 When starting a new agent migration (D13+), walk these patterns in order and confirm each is addressed:
 
 **At CP1** (capability + schema):
+- Pattern 22: spec-vs-schema reconciliation — cross-reference every spec-named entity against `app/models/` BEFORE authoring; surface mismatches at pre-authoring report, not CP2 audit
 - Pattern 1: scope is narrow (capability flip + schema + tools registered, no agent class yet)
 - Pattern 5: every fail-soft DB read tool has the asyncpg-rollback wrapper
 - Pattern 7: decide speculative-reads vs native-tool-use; if speculative, list the read set in the agent's run()
 - Pattern 13: calibrate `typical_latency_ms` against the active provider; document in the capability docstring
 - Pattern 14: estimate output token budget; don't blanket-apply smart-tier default to lightweight agents
+- Pattern 18b (preemptive sizing): set `timeout_override_seconds` at spec × 4-5 multiplier; do NOT skip the override
 
 **At CP2** (agent class + prompt):
 - Pattern 2: legacy and v2 coexist; suffix is `_v2`
@@ -285,11 +302,13 @@ When starting a new agent migration (D13+), walk these patterns in order and con
 - Pattern 11: server-side truncation verified live (helper fires when LLM overshoots; debug logs visible)
 - Pattern 14: actual output token usage measured; max_tokens recalibrated if measurement diverges from estimate
 - Pattern 15: schema/API audit greps both the abstraction and the primitive layer
+- Pattern 21: for content-generating-direct-to-user OR rubric-graded-evaluation agents, Phase 5/6 quality observation captures domain-quality findings as informational; rubric-graded agents add the dimension-by-dimension rubric-grounding check (D14c extension)
 
 **At CP4** (cutover):
 - Pattern 1: atomic — rename _v2 → canonical, delete legacy, drop AGENT_REGISTRY entry, remove MOA routes
 - Pattern 2: retirement-pin test asserts AGENT_REGISTRY no longer contains the agent
 - Pattern 3: data backfill (if any) lands as a separate `data(...)` commit
+- Pattern 18b (tightening): only tighten `timeout_override_seconds` when n ≥ 5 measurements exist; tightening formula is `observed_p95 × 1.30` OR `observed_max × 1.50`, whichever is larger; never tighten on small samples — D14c CP4 evidence shows MiniMax tail-latency spread defeats `observed_max × 1.30` at n=2-4
 
 ## Cost guidance
 

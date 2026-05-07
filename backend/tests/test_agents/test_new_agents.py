@@ -180,21 +180,12 @@ async def test_adaptive_path_calls_llm() -> None:
 
 # ── Analytics Agents ───────────────────────────────────────────────────────────
 
-@pytest.mark.asyncio
-async def test_project_evaluator_scores() -> None:
-    from app.agents.project_evaluator import ProjectEvaluatorAgent
-
-    agent = ProjectEvaluatorAgent()
-    state = AgentState(
-        student_id="s1",
-        task="evaluate my capstone",
-        context={"submission": "Built a RAG pipeline...", "rubric": {"correctness": 20}},
-    )
-    eval_resp = json.dumps({"score": 82, "summary": "Solid work.", "approved": True, "feedback": {}})
-    with patch.object(agent, "_build_llm", return_value=_mock_llm(eval_resp)):
-        result = await agent.execute(state)
-    evaluated = await agent.evaluate(result)
-    assert evaluated.evaluation_score == pytest.approx(0.82)
+# test_project_evaluator_scores — D14c CP4 cutover removed. The legacy
+# BaseAgent ProjectEvaluatorAgent class no longer exists; the
+# AgenticBaseAgent successor at app.agents.project_evaluator is
+# covered by tests/test_agents/test_project_evaluator_schema.py +
+# test_project_evaluator_stub_smoke.py + test_project_evaluator_schema_audit.py.
+# Mirrors the test-deletion discipline of D11/D12/D13 cutovers.
 
 
 @pytest.mark.asyncio

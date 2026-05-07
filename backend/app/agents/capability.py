@@ -186,17 +186,45 @@ _CAPABILITIES: Final[list[AgentCapability]] = [
     AgentCapability(
         name="project_evaluator",
         description=(
-            "Capstone evaluation against published rubrics. Reads the "
-            "full capstone artifact + rubric, returns scored evaluation. "
-            "Use for: capstone grading, portfolio-readiness checks."
+            "Evaluates capstone projects against the published rubric — "
+            "architecture, completeness, evidence of learning, demo "
+            "quality. Reads the actual rubric from exercises.rubric and "
+            "grades strictly to it. Different from senior_engineer "
+            "(line-level code review): project_evaluator looks at the "
+            "whole capstone and produces a portfolio entry draft. Best "
+            "for: capstone grading, 'is my project ready', portfolio-"
+            "readiness checks."
         ),
-        inputs_required=["capstone_id"],
-        outputs_provided=["evaluation_report", "score"],
-        typical_latency_ms=8000,
+        inputs_required=["project_submission_id"],
+        inputs_optional=["specific_concerns"],
+        outputs_provided=[
+            "evaluation",
+            "score",
+            "feedback_narrative",
+            "portfolio_entry_draft",
+        ],
+        # D14c CP4 — Pattern 18b held at preemptive 90s after CP4
+        # tightening attempt failed. CP3 measured P1 51.81s + P2 57.48s
+        # on rubric-grounded paths and P3 15.18s + P4 15.79s on refusal
+        # paths; tightening to 75s (observed_max × 1.30) seemed safe in
+        # principle but the CP4 post-cutover smoke (same Phase 1 input)
+        # timed out at 75.05s — a single retry of the same payload
+        # landed ~17s longer than CP3 P1, which is well within MiniMax's
+        # observed P50→P95 spread for structured-output calls. Pattern
+        # 18b refinement: observed_max × 1.30 is too tight when n=2
+        # data points; need observed_max × 1.50 OR observed_p95 × 1.30
+        # to absorb tail latency. Held at 90s preemptive (= spec × 4.5)
+        # which CP3 confirmed has comfortable headroom.
+        typical_latency_ms=20000,
+        timeout_override_seconds=90,
         typical_cost_inr=Decimal("8.00"),
         requires_entitlement=True,
         minimum_tier="standard",
-        available_now=False,  # awaits D14c
+        # D14c CP1 — capability flipped. Agent class registers via
+        # _agentic_loader at the same checkpoint. handoff_targets is
+        # informational metadata (Option B); orchestration layer
+        # dispatches portfolio_builder when D17 ships.
+        available_now=True,
         handoff_targets=["portfolio_builder"],
     ),
     # ── Group D / Career Services ────────────────────────────────────

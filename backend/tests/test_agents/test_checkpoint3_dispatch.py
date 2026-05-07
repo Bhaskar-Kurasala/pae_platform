@@ -169,6 +169,12 @@ class TestCapabilityRegistry:
     def test_thirteen_declarations(self) -> None:
         # D12 CP1 added study_planner → 14 total (was 13 at D11).
         # D14b CP1 added practice_curator → 15 total.
+        # D14c CP1 flipped project_evaluator available_now=True; the
+        # capability count stays at 15 (the entry already existed as a
+        # stub) — but the migrated set grows. See Pattern 20: closure-
+        # baseline test slice may miss latent assertion drift; we keep
+        # the count assertion to catch new-capability additions but the
+        # load-bearing growth is in test_other_specialists_not_yet_available.
         caps = list_capabilities()
         assert len(caps) == 15
 
@@ -196,10 +202,11 @@ class TestCapabilityRegistry:
         (mock_interview, career bundle, project_evaluator,
         practice_curator, etc.) flip when D12/D13/D14/D16 ship."""
         caps = list_capabilities()
-        # As of D14b: supervisor (D9), learning_coach (D8),
+        # As of D14c: supervisor (D9), learning_coach (D8),
         # billing_support (D10), senior_engineer (D11),
         # career_coach + study_planner + resume_reviewer + tailored_resume (D12),
-        # mock_interview (D13), practice_curator (D14b).
+        # mock_interview (D13), practice_curator (D14b),
+        # project_evaluator (D14c).
         migrated = {
             "supervisor",
             "learning_coach",
@@ -211,6 +218,7 @@ class TestCapabilityRegistry:
             "tailored_resume",
             "mock_interview",
             "practice_curator",
+            "project_evaluator",
         }
         for c in caps:
             if c.name in migrated:
