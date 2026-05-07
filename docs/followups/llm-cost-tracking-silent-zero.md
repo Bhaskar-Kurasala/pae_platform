@@ -90,6 +90,20 @@ dashboards) which we do not yet have built.
   reporting becomes a blocker.
 - **`jd_decoder_service.py` cost tracking** → D17 cleanup OR accept
   as deferred. Writes to a dedicated `jd_decode_runs.cost_inr` table.
+  **D17a investigation (2026-05-07): STOP — different architecture
+  than the tailored_resume precedent.** jd_decoder doesn't hardcode a
+  `model_for(tier)` argument at the cost-row write site; instead, the
+  `SubAgentResult.model` field is populated at every sub-agent
+  construction site (9 instances in `app/agents/readiness_sub_agents.py`,
+  1 in `app/services/jd_parser.py`) via `model_for(self.tier)`.
+  Applying the tailored_resume precedent fix here requires either
+  (a) modifying every sub-agent's LLM-response handling to extract
+  `response_metadata["model"]`, or (b) plumbing a `model_used` field
+  through `SubAgentResult` from each invocation point. Either is a
+  cross-module refactor, not a one-line precedent application. Also
+  intersects D15/D16 territory (`readiness_sub_agents.py` is shared
+  with `readiness_orchestrator.py`). Surface to founder for decision
+  on shape before resumption.
 - **`readiness_orchestrator.py` cost tracking** → D17 cleanup OR
   accept as deferred. Accumulates cost into a service-internal
   variable; touch the model resolution at the same time the orchestrator
