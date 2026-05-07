@@ -119,3 +119,107 @@ async def test_write_evaluation_row_clamps_score_above_one() -> None:
     )
     added_row = session.add.call_args[0][0]
     assert added_row.total_score == 1.0
+
+
+# D17a — verdict_reasoning silent-truncation gap (follow-up to Bug 22).
+# See docs/followups/eval-row-writer-defensive-fix.md "What's NOT addressed"
+# section. The 2000-char cap on critic_reasoning / escalation reason is
+# now surfaced via a structlog warning when truncation fires, including
+# the original length so debugging is possible.
+
+
+async def test_write_evaluation_row_short_reasoning_round_trips_clean(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reasoning under the cap passes through unchanged with no warning."""
+    from app.agents.primitives.evaluation import _write_evaluation_row
+
+    session = MagicMock(spec=AsyncSession)
+    session.flush = AsyncMock()
+
+    short_text = "a" * 1500  # under the 2000-char cap
+
+    await _write_evaluation_row(
+        session=session,
+        agent_name="mock_interview",
+        user_id=None,
+        call_chain_id=None,
+        attempt_number=1,
+        verdict=None,
+        total_score=0.5,
+        threshold=0.6,
+        passed=False,
+        critic_reasoning=short_text,
+    )
+    added_row = session.add.call_args[0][0]
+    assert added_row.critic_reasoning == short_text
+    captured = capsys.readouterr()
+    assert "evaluate.row_field_truncated" not in captured.out
+
+
+async def test_write_evaluation_row_long_reasoning_truncates_with_warning(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reasoning over the cap is truncated AND a warning is logged with
+    the original length so debugging the chopped-row case is possible.
+
+    structlog routes through its own pipeline, so we assert against the
+    captured stdout JSON event rather than caplog (which only sees stdlib
+    logging records).
+    """
+    from app.agents.primitives.evaluation import _write_evaluation_row
+
+    session = MagicMock(spec=AsyncSession)
+    session.flush = AsyncMock()
+
+    long_text = "x" * 5000  # well over the 2000-char cap
+
+    await _write_evaluation_row(
+        session=session,
+        agent_name="mock_interview",
+        user_id=None,
+        call_chain_id=None,
+        attempt_number=1,
+        verdict=None,
+        total_score=0.5,
+        threshold=0.6,
+        passed=False,
+        critic_reasoning=long_text,
+    )
+    added_row = session.add.call_args[0][0]
+    assert added_row.critic_reasoning is not None
+    assert len(added_row.critic_reasoning) == 2000
+    # Warning must surface the original length so the operator can tell
+    # "this row was capped at 2000 of {original_len}" without re-running.
+    captured = capsys.readouterr()
+    assert "evaluate.row_field_truncated" in captured.out
+    assert "5000" in captured.out
+    assert "critic_reasoning" in captured.out
+
+
+async def test_write_escalation_row_long_reason_truncates_with_warning(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Escalation reason follows the same truncate-with-warning shape."""
+    from app.agents.primitives.evaluation import _write_escalation_row
+
+    session = MagicMock(spec=AsyncSession)
+    session.flush = AsyncMock()
+
+    long_text = "y" * 4096
+
+    await _write_escalation_row(
+        session=session,
+        agent_name="mock_interview",
+        user_id=None,
+        call_chain_id=None,
+        reason=long_text,
+        best_attempt={"foo": "bar"},
+        notified_admin=False,
+    )
+    added_row = session.add.call_args[0][0]
+    assert len(added_row.reason) == 2000
+    captured = capsys.readouterr()
+    assert "evaluate.row_field_truncated" in captured.out
+    assert "4096" in captured.out
+    assert "reason" in captured.out

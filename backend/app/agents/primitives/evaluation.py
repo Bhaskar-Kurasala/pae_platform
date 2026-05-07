@@ -1034,6 +1034,42 @@ async def evaluate_with_retry(
 
 # ── DB helpers ──────────────────────────────────────────────────────
 
+# D17a — defensive cap on reasoning/reason text written to agent_evaluations
+# and agent_escalations rows. The columns themselves are PostgreSQL TEXT
+# (unbounded), so this is an application-level guard against a runaway
+# Critic verdict or escalation reason flooding rows. _truncate_with_warning
+# below surfaces the original length when the cap fires so debugging the
+# rare "why was my reasoning chopped" case is possible.
+_REASONING_MAX_LEN = 2000
+
+
+def _truncate_with_warning(
+    value: str | None,
+    max_len: int,
+    *,
+    writer: str,
+    field: str,
+    agent_name: str,
+) -> str | None:
+    """Cap `value` to `max_len` chars; log a warning when truncation occurs.
+
+    Returns None when value is None or empty (preserves existing
+    nullable-column semantics for critic_reasoning).
+    """
+    if not value:
+        return None
+    if len(value) <= max_len:
+        return value
+    log.warning(
+        "evaluate.row_field_truncated",
+        writer=writer,
+        field=field,
+        agent=agent_name,
+        original_len=len(value),
+        truncated_to=max_len,
+    )
+    return value[:max_len]
+
 
 async def _write_evaluation_row(
     *,
@@ -1069,7 +1105,13 @@ async def _write_evaluation_row(
             total_score=max(0.0, min(1.0, score_for_clamp)),
             threshold=threshold,
             passed=passed,
-            critic_reasoning=critic_reasoning[:2000] if critic_reasoning else None,
+            critic_reasoning=_truncate_with_warning(
+                critic_reasoning,
+                _REASONING_MAX_LEN,
+                writer="_write_evaluation_row",
+                field="critic_reasoning",
+                agent_name=agent_name,
+            ),
         )
         session.add(row)
         await session.flush()
@@ -1099,7 +1141,13 @@ async def _write_escalation_row(
             agent_name=agent_name,
             user_id=user_id,
             call_chain_id=call_chain_id,
-            reason=reason[:2000],
+            reason=_truncate_with_warning(
+                reason,
+                _REASONING_MAX_LEN,
+                writer="_write_escalation_row",
+                field="reason",
+                agent_name=agent_name,
+            ) or "",
             best_attempt=best_attempt,
             notified_admin=notified_admin,
         )
