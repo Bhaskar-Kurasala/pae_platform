@@ -198,13 +198,67 @@ When a migration is the FIRST to flip a primitive flag (`uses_self_eval`, `uses_
 
 **Provenance**: D13 mock_interview was the first v2 agent with `uses_self_eval=True`. Bugs 18 (Critic `build_llm(temperature=…)` TypeError) and 19 (Critic max_tokens=400 too small for MiniMax thinking blocks) both surfaced via agent-level CP3 retries, costing 2 stop-and-fix iterations at ~₹1 each. Standalone Critic smoke would have caught both in seconds.
 
-### Pattern 18: Provider-aware tier collapse — abstract tier names lie under MiniMax
+### Pattern 18: Provider-aware tier collapse + MiniMax structured-output latency multiplier
 
-`build_llm(tier="fast")` is meaningful only on the Anthropic route, where it resolves to Haiku. Under MiniMax (`MINIMAX_API_KEY` set), both `tier="fast"` and `tier="smart"` collapse to MiniMax M2.7 (`llm_factory.py:77-78` documents this explicitly: *"MiniMax doesn't offer a separate fast model in this stack, so when MINIMAX_API_KEY is set both tiers route to the configured MiniMax model."*). Callers that reason about budget/latency assuming a Haiku-shaped output (no thinking blocks, tight responses, ~3s elapsed) are silently routed through M2.7 (~38% thinking-block tokens, ~16-31s elapsed, 40× per-call cost).
+Two related sub-patterns. Both stem from MiniMax M2.7 having different cost/latency characteristics than Anthropic models, despite sharing the `build_llm` abstraction.
 
-**Discipline**: when a caller declares a tier, audit whether their downstream assumptions (max_tokens budget, expected elapsed, expected output shape) actually hold under EVERY provider route the tier collapses to. If the assumption is Haiku-specific — and the caller is structurally fast-path infrastructure (Critic, classifier, intake-question selector) — bypass `build_llm` and construct `ChatAnthropic` directly when an Anthropic key is set, with the abstract-tier path as fallback. The architectural answer is provider-aware capability metadata, but the inline answer is direct construction.
+**Sub-pattern 18a — tier collapse:** `build_llm(tier="fast")` is meaningful only on the Anthropic route, where it resolves to Haiku. Under MiniMax (`MINIMAX_API_KEY` set), both `tier="fast"` and `tier="smart"` collapse to MiniMax M2.7 (`llm_factory.py:77-78` documents this explicitly: *"MiniMax doesn't offer a separate fast model in this stack, so when MINIMAX_API_KEY is set both tiers route to the configured MiniMax model."*). Callers that reason about budget/latency assuming a Haiku-shaped output (no thinking blocks, tight responses, ~3s elapsed) are silently routed through M2.7 (~38% thinking-block tokens, ~16-31s elapsed, 40× per-call cost).
 
-**Provenance**: D13 Bug 19 — Critic was sized for Haiku (max_tokens=400); under MiniMax-only configuration the thinking block consumed the entire budget and the text block came back empty. Interim fix bumped max_tokens to 2048 (~₹0.20/Critic-call). Architectural fix routes Critic directly to Haiku via `ChatAnthropic` when `ANTHROPIC_API_KEY` is set (~₹0.005/Critic-call). See `docs/followups/critic-tier-routing-architectural.md`.
+**Sub-pattern 18b — structured-output latency multiplier:** MiniMax structured-output agents (those producing nested Pydantic outputs with multiple required fields) consistently land at 2-3x their spec `typical_latency_ms` estimates because of thinking-block overhead. Pass 3c spec values are Anthropic-era and undersize MiniMax dispatch budgets across the board. This is platform-wide for structured-output agents, not Critic-specific.
+
+**Discipline:**
+- For tier-collapse (18a): when a caller declares a tier, audit whether their downstream assumptions (max_tokens budget, expected elapsed, expected output shape) actually hold under EVERY provider route the tier collapses to. If the assumption is Haiku-specific — and the caller is structurally fast-path infrastructure (Critic, classifier, intake-question selector) — bypass `build_llm` and construct `ChatAnthropic` directly when an Anthropic key is set, with the abstract-tier path as fallback. The architectural answer is provider-aware capability metadata, but the inline answer is direct construction.
+- For latency multiplier (18b): treat spec `typical_latency_ms` values as Anthropic-era estimates. At CP1, set `timeout_override_seconds` proactively at 2-3× spec value (rounded to a clean number). At CP3, calibrate down based on measured P95 if measurements allow. **Do NOT skip the override and rely on the formula budget** — D14b CP3 burned ~₹0.33 in calibration timeouts because the spec's 8000ms × 3 = 30s floor was insufficient.
+
+**Provenance:**
+- 18a: D13 Bug 19 — Critic was sized for Haiku (max_tokens=400); under MiniMax-only configuration the thinking block consumed the entire budget and the text block came back empty. Interim fix bumped max_tokens to 2048 (~₹0.20/Critic-call). Architectural fix routes Critic directly to Haiku via `ChatAnthropic` when `ANTHROPIC_API_KEY` is set (~₹0.005/Critic-call). See `docs/followups/critic-tier-routing-architectural.md`.
+- 18b: Multiple data points across the engagement: D12 career_coach (90s spec, 150s override needed), D12 tailored_resume (60s spec, 120s override needed), D13 mock_interview (12000ms spec → 60s override after Critic added), D14b practice_curator (8000ms spec → 60s override after CP3 timeouts). The pattern holds across both single-shot and multi-turn agents, both Critic-enabled and Critic-free agents. Spec is Anthropic-era; override discipline is the post-MiniMax reality.
+
+### Pattern 19: Capability adapter signatures should accept both Pydantic and dict from start
+
+Adapter functions wired into capabilities (D13.5 `validation_input_adapter`) and tool-call argument builders (D12+ `_safe_tool` helpers) commonly receive dict-shaped data from the dispatch layer, NOT Pydantic instances. The dispatch layer normalizes outputs to dict via `model_dump(mode="json")` for audit + transport; adapters and helpers that assume Pydantic input crash on attribute access against a dict.
+
+**Discipline:** when authoring an adapter callable or a tool-call argument builder for a v2 agent:
+- Type the input as `SourceModel | dict[str, Any]` from the start
+- At runtime, branch on `isinstance(input, SourceModel)` to extract fields; for the dict branch, use `.get()` with explicit type checks
+- Defensive `TypeError` for non-dict / non-model inputs catches accidental misuse early
+- Unit-test both shapes — pass a typed model AND a dict to the same adapter; both should produce the same output
+
+The Pydantic-only signature is appealing for type safety but doesn't survive contact with dispatch-layer normalization. Dual-shape from start is the canonical pattern.
+
+**Provenance:** D13.5 Stage 2 — `tailored_resume_to_reviewer_input` adapter was originally typed `(output: TailoredResumeOutput) -> ResumeReviewerInput`; live verification crashed because `call_agent` returned the producer's output as a dict. Widened to `TailoredResumeOutput | dict[str, Any]`. D14b CP2 surfaced the analog at the tool-call layer: `_safe_tool` passes dict-shaped args even when the tool's input schema is Pydantic; the wrong field name (`limit` vs `days`) was silently swallowed by the helper's exception handler before reaching the tool body. Both data points point to the same lesson: dispatch is dict-shaped; agent-side helpers should be dict-shape-tolerant from the start.
+
+### Pattern 20: Closure-baseline test slices may miss latent assertion drift
+
+Closure-time test baselines that run a narrow slice may miss tests that count or enumerate the capability registry. Future closures should either (a) run the full `tests/test_agents/` slice or (b) explicitly run `test_checkpoint3_dispatch.py::TestCapabilityRegistry::*` as a sentinel for any capability-list change.
+
+**Discipline:** at every migration's CP1 (when capability is added) and CP4 (when cutover lands):
+- Run `tests/test_agents/test_checkpoint3_dispatch.py::TestCapabilityRegistry` explicitly as part of the baseline
+- Update the `migrated` set + declaration count in `test_thirteen_declarations` as part of CP1's working tree
+- The repair is mechanical — counting failure means the test is a sentinel doing its job; treat it as a CP1 maintenance task, not a finding
+
+**Provenance:** Three data points:
+- D13 closure: mock_interview's `available_now=True` flip silently broke `test_thirteen_declarations` + `test_failure_class_b_invalid_target_falls_back`; D13's narrow closure slice missed both.
+- D13.5 Stage 2: same tests still broken when broader slice ran; surfaced as part of D13.5's stale-assertion repair pass.
+- D14b CP1: D14b's own capability addition triggered the same shape; caught and repaired in the same CP1 working tree.
+
+The pattern is "every capability-list change touches this same test"; codify as a CP1 maintenance step, not a finding to be rediscovered.
+
+### Pattern 21: Verification posture for content-generating-direct-to-user agents
+
+Agents that produce output students directly consume (vs. coaching/review/evaluation that's processed by humans or downstream agents) require Phase 5-style subjective quality observation across Literal allowlist diversity. Schema invariants are necessary but not sufficient for these agents.
+
+**Discipline:** at CP3, beyond the standard schema invariant verification:
+- 3-4 real-LLM calls covering each major Literal value + the optional-input path (e.g., D14b practice_curator: easy/medium/hard × coding/system_design/all-empty)
+- Subjective review captures pedagogical/content-quality observations as **informational** (not gating) findings: are exercises solvable, is content domain-appropriate, are hints progressive, do test cases match the problem
+- Gating threshold: "clearly broken" (unsolvable, off-topic, unsafe) — not "imperfect"
+- If a specific Literal value produces structurally wrong-shaped output (e.g., debugging-type exercise lacks broken starter_code, system_design exercise that's actually a coding problem), surface as prompt-quality finding; the relevant per-type prompt section is the prime suspect
+
+**Discipline applies to:** D14b practice_curator (5 exercise types × 3 difficulties); future agents like D17 mcq_factory (multiple choice questions → student-facing), D17 portfolio_builder (portfolio prose → student-facing).
+
+**Discipline does NOT apply to:** content-processing agents (operate on submitted artifacts) like D14c project_evaluator, D12 resume_reviewer, D11 senior_engineer. These produce review/evaluation output that's processed by humans or downstream agents, not directly consumed; schema invariants suffice.
+
+**Provenance:** D14b practice_curator CP3 + CP4 established the canonical pattern. 4 real-LLM calls covered easy/medium/hard difficulty + coding/system_design exercise types + the all-empty optional-input path. Subjective Phase 5 review captured exercises as pedagogically sound (single-concept targeted, clear evaluation criteria, progressive hints, solvable in estimated time, domain-appropriate for senior GenAI engineering target role). No exercise was "clearly broken"; minor observations registered as informational.
 
 ## Application guide
 

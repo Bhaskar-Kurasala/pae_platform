@@ -85,6 +85,17 @@ _AGENTIC_AGENT_MODULES: tuple[str, ...] = (
     # for "make LLM output safe before validation" (Bug 17 + Bug 23
     # architectural fixes).
     "app.agents.mock_interview",
+    # D14b — practice_curator migration (Pass 3c E8). NET-NEW agent (no
+    # legacy BaseAgent file existed). CP4 cutover named the file
+    # canonically as `practice_curator.py` (D8 example_learning_coach
+    # net-new naming pattern; no _v2 suffix needed since there's nothing
+    # to disambiguate from). Single-shot content-generating agent: each
+    # call produces ONE personalized exercise. uses_self_eval=False
+    # (D-C), uses_inter_agent=False (D-A: orchestration layer owns the
+    # handoff to senior_engineer). Sandbox dependency for reference-
+    # solution verification deferred (D-B; see follow-up doc). First v2
+    # agent producing user-facing content directly.
+    "app.agents.practice_curator",
     # "app.agents.engagement_watchdog",      # future
     # "app.agents.code_mentor",              # future
 )

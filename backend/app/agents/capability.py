@@ -142,6 +142,48 @@ _CAPABILITIES: Final[list[AgentCapability]] = [
         handoff_targets=["mock_interview", "learning_coach"],
     ),
     AgentCapability(
+        name="practice_curator",
+        description=(
+            "Generates personalized practice exercises matched to the "
+            "student's current edge of mastery — coding exercises, "
+            "debugging challenges, system-design mini-problems, prompt "
+            "engineering drills, evaluation rubric exercises. Different "
+            "from adaptive_quiz (MCQs) and project_evaluator (capstones). "
+            "Best for: 'give me something to practice', 'I want to drill "
+            "on X concept'. Reads mastery state and prior exercises "
+            "completed to avoid repeats."
+        ),
+        inputs_required=[],
+        inputs_optional=["concept_focus", "exercise_type", "difficulty_level"],
+        outputs_provided=[
+            "exercise", "starter_code", "evaluation_criteria", "hints",
+        ],
+        # D14b CP3 calibration: under MiniMax, all 3 phases landed near
+        # or at the 30s floor (P1 30.04s timeout, P2 29.11s ok, P3 30.04s
+        # timeout). The 8000ms × 3 formula floors to 30s but practice_
+        # curator's structured output (Exercise + nested + 5 hints + 5
+        # criteria) consistently produces ~28-32s of LLM time + ~2s
+        # safety classifier overhead = ~30-34s total. timeout_override_
+        # seconds=60 sets a hard 60s budget per the D13 mock_interview
+        # pattern; typical_latency_ms stays at 8000 as the no-overhead
+        # baseline so downstream consumers (UI ETA, cost forecasting)
+        # see realistic per-call latency without dispatch wrapper noise.
+        typical_latency_ms=8000,
+        timeout_override_seconds=60,
+        typical_cost_inr=Decimal("2.50"),
+        requires_entitlement=True,
+        minimum_tier="standard",
+        # D14b CP1 — capability flipped on. Agent class registers via
+        # _agentic_loader at the same checkpoint.
+        available_now=True,
+        # Informational handoff metadata: orchestration layer recognizes
+        # "evaluate my submission" requests after a curator exercise and
+        # dispatches senior_engineer. The agent itself doesn't initiate
+        # handoff (uses_inter_agent=False per D-A); the orchestration
+        # loop owns the flow.
+        handoff_targets=["senior_engineer"],
+    ),
+    AgentCapability(
         name="project_evaluator",
         description=(
             "Capstone evaluation against published rubrics. Reads the "
@@ -154,7 +196,7 @@ _CAPABILITIES: Final[list[AgentCapability]] = [
         typical_cost_inr=Decimal("8.00"),
         requires_entitlement=True,
         minimum_tier="standard",
-        available_now=False,  # awaits D14
+        available_now=False,  # awaits D14c
         handoff_targets=["portfolio_builder"],
     ),
     # ── Group D / Career Services ────────────────────────────────────
