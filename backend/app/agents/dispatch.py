@@ -19,10 +19,20 @@ All three:
   4. Pre-charge cost-budget check before invoking
   5. Convert specialist output to AgentResult
   6. Surface handoff_request if the specialist returned one
+
+D13.5 — mandatory validation chains (capability-driven):
+  When the producer agent's capability declares
+  `requires_mandatory_validation_by`, dispatch_single auto-extends to
+  invoke the validator after the producer completes. Both outputs
+  surface in the producer's AgentResult.structured_output under the
+  validation_output key. Chain-summed timeout (sum × 1.10) wraps the
+  validator call as a defense-in-depth ceiling per D-E.
 """
 
 from __future__ import annotations
 
+import asyncio
+import math
 import time
 import uuid
 from decimal import Decimal
@@ -31,7 +41,11 @@ from typing import Any
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.capability import filter_capabilities_for_user, get_capability
+from app.agents.capability import (
+    filter_capabilities_for_user,
+    get_capability,
+    resolve_timeout_seconds,
+)
 from app.agents.primitives.communication import (
     CallChain,
     call_agent,
@@ -272,17 +286,331 @@ async def dispatch_single(
     # AgentCallResult.output dict with a 'handoff_request' key).
     handoff_request = _extract_handoff(call_result.output)
 
+    structured_output = _to_dict(call_result.output)
+
+    # D13.5 — mandatory validation chain (capability-driven).
+    #
+    # If the producer's capability declares a mandatory validator AND
+    # the producer succeeded AND we have structured output to feed the
+    # adapter, auto-dispatch the validator. The validator's output
+    # joins the producer's structured_output under VALIDATION_OUTPUT_KEY
+    # (compositional per D-C, not gating per D-B). The validator call
+    # is wrapped with the chain-summed budget remaining after the
+    # producer's elapsed time as a defense-in-depth ceiling per D-E.
+    #
+    # Failure semantics:
+    #   • Producer failed (call_result.status != "ok" or blocked):
+    #     skip validation; standard producer-failure path.
+    #   • Adapter raises: block with "validation_adapter_error" — fail
+    #     loud per the mandatory-validation contract.
+    #   • Validator times out / errors: producer's output still ships;
+    #     validation_unavailable marker added to structured_output.
+    producer_capability = get_capability(target)
+    should_validate = (
+        producer_capability is not None
+        and producer_capability.requires_mandatory_validation_by is not None
+        and call_result.status == "ok"
+        and structured_output is not None
+    )
+    if should_validate:
+        validation_outcome = await _run_mandatory_validation(
+            producer_target=target,
+            producer_capability=producer_capability,
+            producer_output=call_result.output,
+            producer_elapsed_seconds=time.perf_counter() - start,
+            ctx=ctx,
+            db=db,
+            chain=chain,
+            request_id=str(ctx.request_id),
+        )
+        if validation_outcome["block"]:
+            # Adapter failure — fail loud. Producer's resume does NOT
+            # reach the user when validation can't even be attempted.
+            return AgentResult(
+                agent_name=target,
+                output_text=None,
+                structured_output=structured_output,
+                output_summary=_extract_summary(call_result.output),
+                blocked=True,
+                block_reason=validation_outcome["block_reason"],
+                handoff_request=handoff_request,
+                duration_ms=int((time.perf_counter() - start) * 1000),
+                cost_inr=Decimal("0"),
+            )
+        # Compose validator output into the producer's structured output.
+        # Use the canonical VALIDATION_OUTPUT_KEY so frontends can
+        # distinguish primary content from validation report.
+        structured_output = dict(structured_output)
+        structured_output[VALIDATION_OUTPUT_KEY] = validation_outcome["payload"]
+
     return AgentResult(
         agent_name=target,
         output_text=_extract_text(call_result.output),
-        structured_output=_to_dict(call_result.output),
+        structured_output=structured_output,
         output_summary=_extract_summary(call_result.output),
         blocked=call_result.status == "error",
         block_reason=call_result.error if call_result.status == "error" else None,
         handoff_request=handoff_request,
-        duration_ms=duration_ms,
+        duration_ms=int((time.perf_counter() - start) * 1000),
         cost_inr=Decimal("0"),  # Real cost wires through agent_actions.cost_inr
     )
+
+
+# ── D13.5 mandatory validation chain helpers ──────────────────────────
+
+
+# Output projection key per D-C. Frontends find the validator's output
+# under producer.structured_output[VALIDATION_OUTPUT_KEY] when the chain
+# auto-extended to a validator. Fixed string keeps the contract stable
+# across producer/validator pairs (one canonical key, not per-pair).
+VALIDATION_OUTPUT_KEY = "validation"
+
+# Chain-summed timeout multiplier per D-E. sum(producer_timeout,
+# validator_timeout) × 1.10 gives a 10% safety margin over the per-agent
+# budgets without inflating the chain envelope further than necessary.
+_CHAIN_TIMEOUT_MULTIPLIER = 1.10
+
+
+def _resolve_chain_summed_budget(
+    producer_capability: Any,
+    validator_capability: Any,
+) -> float:
+    """Compute the outer chain-level timeout per D-E.
+
+    sum(producer_timeout, validator_timeout) × 1.10. Returned in seconds
+    as a float (asyncio.wait_for semantics).
+
+    Per-agent timeouts INSIDE the chain stay individual: each
+    `call_agent` invocation honors its own capability-derived budget.
+    The summed budget is an OUTER ceiling on the validator call,
+    measured against the time the producer already consumed.
+    """
+    producer_budget = resolve_timeout_seconds(producer_capability)
+    validator_budget = resolve_timeout_seconds(validator_capability)
+    return (producer_budget + validator_budget) * _CHAIN_TIMEOUT_MULTIPLIER
+
+
+async def _run_mandatory_validation(
+    *,
+    producer_target: str,
+    producer_capability: Any,
+    producer_output: Any,
+    producer_elapsed_seconds: float,
+    ctx: SupervisorContext,
+    db: AsyncSession,
+    chain: CallChain,
+    request_id: str,
+) -> dict[str, Any]:
+    """Run the mandatory validator after the producer completes.
+
+    Returns one of three shapes:
+      • {"block": True,  "block_reason": str}
+            adapter raised; producer's output is NOT shipped (fail-loud).
+      • {"block": False, "payload": dict}
+            validator ran; payload is either the validator's structured
+            output or a validation_unavailable marker.
+
+    See _run_mandatory_validation's caller for how `payload` lands in
+    the producer's structured_output under VALIDATION_OUTPUT_KEY.
+    """
+    validator_name = producer_capability.requires_mandatory_validation_by
+    adapter = producer_capability.validation_input_adapter
+
+    if adapter is None:
+        # Capability declared a validator but no adapter — configuration
+        # error. Fail loud rather than ship un-validated content.
+        log.error(
+            "dispatch.validation.adapter_missing",
+            producer=producer_target,
+            validator=validator_name,
+            request_id=request_id,
+        )
+        return {
+            "block": True,
+            "block_reason": "validation_adapter_missing",
+        }
+
+    validator_capability = get_capability(validator_name)
+    if validator_capability is None:
+        log.error(
+            "dispatch.validation.validator_unknown",
+            producer=producer_target,
+            validator=validator_name,
+            request_id=request_id,
+        )
+        # Validator not registered — capability typo or registry drift.
+        # Treat as best-effort failure (validation_unavailable), don't
+        # block the producer's output.
+        return {
+            "block": False,
+            "payload": _validation_unavailable_marker(
+                validator_name, "validator_not_registered"
+            ),
+        }
+
+    # Compute the chain-summed budget and remaining time for the
+    # validator (accounting for what the producer already consumed).
+    chain_budget = _resolve_chain_summed_budget(
+        producer_capability, validator_capability
+    )
+    remaining_for_validator = chain_budget - producer_elapsed_seconds
+    if remaining_for_validator <= 0:
+        log.warning(
+            "dispatch.validation.budget_exhausted",
+            producer=producer_target,
+            validator=validator_name,
+            chain_budget_s=chain_budget,
+            producer_elapsed_s=producer_elapsed_seconds,
+            request_id=request_id,
+        )
+        return {
+            "block": False,
+            "payload": _validation_unavailable_marker(
+                validator_name, "chain_budget_exhausted"
+            ),
+        }
+
+    log.info(
+        "agentic.chain_timeout_resolved",
+        producer=producer_target,
+        validator=validator_name,
+        chain_budget_seconds=round(chain_budget, 2),
+        multiplier=_CHAIN_TIMEOUT_MULTIPLIER,
+        producer_elapsed_seconds=round(producer_elapsed_seconds, 2),
+        validator_remaining_seconds=round(remaining_for_validator, 2),
+        request_id=request_id,
+    )
+
+    # ── Adapter ──────────────────────────────────────────────────────
+    # Adapter takes the producer's structured output (the LLM's parsed
+    # response, materialised as a Pydantic model when run() returned
+    # one). call_result.output may be a dict (from .model_dump()); if
+    # so, hydrate to the producer's output type before calling adapter.
+    try:
+        adapted_input = adapter(producer_output)
+    except Exception as exc:  # noqa: BLE001 — fail loud per D-B/D-E
+        log.error(
+            "dispatch.validation.adapter_error",
+            producer=producer_target,
+            validator=validator_name,
+            error=str(exc),
+            error_type=type(exc).__name__,
+            request_id=request_id,
+        )
+        return {
+            "block": True,
+            "block_reason": "validation_adapter_error",
+        }
+
+    # ── Validator dispatch (wrapped in chain-summed budget) ──────────
+    # Build the validator's payload from the adapted input. AgentInput
+    # subclasses serialize cleanly via model_dump; the validator's
+    # run_agentic accepts dict payloads.
+    try:
+        validator_payload: dict[str, Any] = (
+            adapted_input.model_dump()
+            if hasattr(adapted_input, "model_dump")
+            else dict(adapted_input)
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.error(
+            "dispatch.validation.payload_dump_failed",
+            producer=producer_target,
+            validator=validator_name,
+            error=str(exc),
+            request_id=request_id,
+        )
+        return {
+            "block": True,
+            "block_reason": "validation_adapter_error",
+        }
+
+    validator_payload.setdefault("user_message", ctx.user_message)
+    validator_payload.setdefault("request_id", request_id)
+
+    try:
+        validator_result = await asyncio.wait_for(
+            call_agent(
+                validator_name,
+                payload=validator_payload,
+                session=db,
+                chain=chain,
+            ),
+            timeout=remaining_for_validator,
+        )
+    except asyncio.TimeoutError:
+        log.warning(
+            "dispatch.validation.timeout",
+            producer=producer_target,
+            validator=validator_name,
+            timeout_s=round(remaining_for_validator, 2),
+            request_id=request_id,
+        )
+        return {
+            "block": False,
+            "payload": _validation_unavailable_marker(
+                validator_name, "validator_timeout"
+            ),
+        }
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "dispatch.validation.error",
+            producer=producer_target,
+            validator=validator_name,
+            error=str(exc),
+            error_type=type(exc).__name__,
+            request_id=request_id,
+        )
+        return {
+            "block": False,
+            "payload": _validation_unavailable_marker(
+                validator_name, "validator_error"
+            ),
+        }
+
+    if validator_result.status != "ok":
+        log.warning(
+            "dispatch.validation.validator_blocked",
+            producer=producer_target,
+            validator=validator_name,
+            status=validator_result.status,
+            error=validator_result.error,
+            request_id=request_id,
+        )
+        return {
+            "block": False,
+            "payload": _validation_unavailable_marker(
+                validator_name, "validator_blocked"
+            ),
+        }
+
+    log.info(
+        "dispatch.validation.complete",
+        producer=producer_target,
+        validator=validator_name,
+        request_id=request_id,
+    )
+    return {
+        "block": False,
+        "payload": _to_dict(validator_result.output) or {},
+    }
+
+
+def _validation_unavailable_marker(
+    validator_name: str, reason: str
+) -> dict[str, Any]:
+    """Structured marker the frontend sees when validation couldn't run.
+
+    Producer's output still ships (D-B compositional semantics for the
+    validator-failed branch); this marker tells the frontend that the
+    validation report is unavailable and why. Distinct from the
+    fail-loud adapter-error path, which blocks the producer entirely.
+    """
+    return {
+        "validation_unavailable": True,
+        "validator": validator_name,
+        "reason": reason,
+    }
 
 
 def _extract_text(output: Any) -> str | None:

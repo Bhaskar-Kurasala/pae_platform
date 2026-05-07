@@ -195,9 +195,10 @@ class TestCapabilityRegistry:
         (mock_interview, career bundle, project_evaluator,
         practice_curator, etc.) flip when D12/D13/D14/D16 ship."""
         caps = list_capabilities()
-        # As of D12 CP1: supervisor (D9), learning_coach (D8),
+        # As of D13: supervisor (D9), learning_coach (D8),
         # billing_support (D10), senior_engineer (D11),
-        # career_coach + study_planner + resume_reviewer + tailored_resume (D12).
+        # career_coach + study_planner + resume_reviewer + tailored_resume (D12),
+        # mock_interview (D13).
         migrated = {
             "supervisor",
             "learning_coach",
@@ -207,6 +208,7 @@ class TestCapabilityRegistry:
             "study_planner",
             "resume_reviewer",
             "tailored_resume",
+            "mock_interview",
         }
         for c in caps:
             if c.name in migrated:
@@ -566,15 +568,16 @@ class TestDispatchFailureClasses:
 
         decision = RouteDecision(
             action="dispatch_single",
-            # mock_interview is in the capability registry but
-            # available_now=False until D13. Picked here for the
-            # "valid name, unavailable" failure mode after D11 CP1
-            # flipped senior_engineer's available_now=True.
-            target_agent="mock_interview",
+            # portfolio_builder is in the capability registry but
+            # available_now=False (future migration). Picked here for
+            # the "valid name, unavailable" failure mode. Was
+            # mock_interview pre-D13; updated to portfolio_builder
+            # after D13 CP1 flipped mock_interview's available_now=True.
+            target_agent="portfolio_builder",
             constructed_context={"task": "x"},
             reasoning="test",
             confidence="medium",
-            primary_intent="code_review_request",
+            primary_intent="portfolio_request",
         )
         ctx = _supervisor_context()
         chain = CallChain.start_root(user_id=ctx.student_id)
@@ -589,7 +592,7 @@ class TestDispatchFailureClasses:
             chain=chain,
             fresh_ctx=ent_ctx,
         )
-        # senior_engineer is unavailable → fall back to learning_coach
+        # portfolio_builder is unavailable → fall back to learning_coach
         assert result.agent_name == DEFAULT_FALLBACK_AGENT
         assert len(fake_lc.calls) == 1
 

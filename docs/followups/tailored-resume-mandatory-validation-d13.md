@@ -1,12 +1,15 @@
-# tailored_resume mandatory reviewer validation — deferred to D13
+# tailored_resume mandatory reviewer validation — RESOLVED at D13.5
 
-**Status:** Deferred. `TailoredResumeAgent` ships in D12 without triggering a
-mandatory chain to `resume_reviewer`. The `handoff_request` field in
-`TailoredResumeOutput` is always `None` in D12.
+**Status:** RESOLVED. The mandatory validation chain landed at D13.5 via a **capability-driven** approach, not the HandoffRequest-driven approach proposed in this doc's original draft. Tailored_resume's capability declares `requires_mandatory_validation_by="resume_reviewer"`; the Supervisor's `dispatch_single` auto-extends the chain to invoke resume_reviewer after the producer completes. See the D13.5 closure for the full architecture.
+
+The HandoffRequest-driven approach proposed below (Steps 1–4 of "What D13 implements") is **OBSOLETE** — kept for historical context, but D13.5 took a different shape:
+  • Validation is declared on the producing agent's capability, not on the producer's structured output (D-A).
+  • Validation is compositional: producer's output and validator's output both surface; validator does not gate (D-B).
+  • Adapter function maps producer output → validator input, owned by the producer's capability (D-D).
+
 **Created:** 2026-05-06 (D12 CP1).
-**Deliverable:** D13 (Supervisor mandatory-chain work, per Pass 3c E6 line 1095).
-**Cross-references:** Pass 3c E6 line 1095; `backend/app/schemas/agents/tailored_resume.py`
-(`handoff_request` field); D11 Option B handoff decision.
+**Resolved:** 2026-05-07 (D13.5 commit pending).
+**Cross-references:** D13.5 closure; Pass 3c E6 line 1095; `backend/app/schemas/supervisor.py::AgentCapability` (`requires_mandatory_validation_by`, `validation_input_adapter`); `backend/app/agents/dispatch.py::dispatch_single` (chain construction extension); `backend/app/agents/adapters/tailored_to_reviewer.py` (canonical adapter).
 
 ## What was decided in D12
 

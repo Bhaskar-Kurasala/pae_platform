@@ -23,9 +23,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from collections.abc import Callable
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ── Capability registry ─────────────────────────────────────────────
@@ -48,6 +49,14 @@ class AgentCapability(BaseModel):
     filtering — that's the structural enforcement of tier gating.
     """
 
+    # arbitrary_types_allowed enables `validation_input_adapter: Callable`
+    # to live on this model (D13.5). Capabilities are consumed in-process
+    # by the Supervisor's prompt builder and chain-construction logic;
+    # they are not serialized to JSON anywhere. If a future code path
+    # ever needs to serialize capabilities, the adapter field can be
+    # excluded via `model_dump(exclude={"validation_input_adapter"})`.
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     name: str
     description: str
     inputs_required: list[str] = Field(default_factory=list)
@@ -69,6 +78,39 @@ class AgentCapability(BaseModel):
     # 3-5 inner LLM calls (JD parse + evidence + tailoring + cover letter
     # + validation) which structurally exceeds the 60s formula ceiling.
     timeout_override_seconds: int | None = None
+
+    # D13.5 — Mandatory validation chains.
+    #
+    # When set, the Supervisor's chain construction auto-extends the
+    # dispatch chain to invoke `requires_mandatory_validation_by` after
+    # this agent completes. The validator's input is produced by
+    # `validation_input_adapter(producer_output)`. Both outputs compose
+    # into the user-facing response (D-C: compositional, not gating).
+    # Per D-A, validation declarations live on the producing agent's
+    # capability so future agents inherit the pattern declaratively
+    # without teaching Supervisor each (producer, validator) pair.
+    #
+    # tailored_resume → resume_reviewer is the canonical example. Most
+    # agents leave both fields None; non-validating is the default.
+    requires_mandatory_validation_by: str | None = Field(
+        default=None,
+        description=(
+            "Agent name to invoke as a mandatory validator after this "
+            "agent's run. The validator runs in the same chain; both "
+            "outputs are surfaced to the user. None = no validation."
+        ),
+    )
+    validation_input_adapter: Callable[[Any], Any] | None = Field(
+        default=None,
+        description=(
+            "Adapter fn that maps this agent's structured output to "
+            "the validator's structured input. Required when "
+            "requires_mandatory_validation_by is set; ignored otherwise. "
+            "Signature: (producer_output: BaseModel) -> validator_input: "
+            "BaseModel. The producer agent owns the adapter so each "
+            "(producer, validator) pair is co-located."
+        ),
+    )
 
 
 # ── Student snapshot (curated student model) ────────────────────────

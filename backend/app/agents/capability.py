@@ -29,6 +29,9 @@ from typing import Final
 
 import structlog
 
+from app.agents.adapters.tailored_to_reviewer import (
+    tailored_resume_to_reviewer_input as _tailored_resume_to_reviewer_input,
+)
 from app.core.tiers import TierName, tier_meets_minimum
 from app.schemas.entitlement import EntitlementContext
 from app.schemas.supervisor import AgentCapability
@@ -259,8 +262,10 @@ _CAPABILITIES: Final[list[AgentCapability]] = [
             "for a specific job description. Reads the student's base resume + "
             "capstones + submissions and rewrites for keyword match and role fit. "
             "Best for: 'tailor my resume for this JD'. Different from "
-            "resume_reviewer (which critiques rather than generates). Note: "
-            "mandatory self-validation via resume_reviewer is deferred to D13."
+            "resume_reviewer (which critiques rather than generates). Output "
+            "is automatically validated by resume_reviewer (D13.5 mandatory chain) "
+            "before reaching the user; reviewer's findings surface alongside the "
+            "tailored resume."
         ),
         inputs_required=["resume_text", "job_description"],
         inputs_optional=["specific_emphasis"],
@@ -269,7 +274,7 @@ _CAPABILITIES: Final[list[AgentCapability]] = [
         typical_cost_inr=Decimal("3.50"),
         requires_entitlement=True,
         minimum_tier="standard",
-        # D12 CP1 — flipped. resume_reviewer declared for D13 mandatory chain.
+        # D12 CP1 — flipped. resume_reviewer declared for D13.5 mandatory chain.
         available_now=True,
         handoff_targets=["resume_reviewer"],
         # D12 CP3 Phase 3 (Bug 6) — full tailored_resume pipeline does
@@ -277,6 +282,15 @@ _CAPABILITIES: Final[list[AgentCapability]] = [
         # validation across 3-5 inner LLM calls. Structurally exceeds
         # the 60s formula ceiling; override to 120s.
         timeout_override_seconds=120,
+        # D13.5 — mandatory validation chain. Per D-A, the validation
+        # requirement is declared on the producing agent's capability
+        # (intrinsic to the output category, not a routing concern).
+        # Per D-D, the adapter that maps producer output → validator
+        # input is co-located here. Supervisor's chain construction
+        # auto-extends the chain to invoke resume_reviewer after this
+        # agent completes. Chain budget is sum-with-margin per D-E.
+        requires_mandatory_validation_by="resume_reviewer",
+        validation_input_adapter=_tailored_resume_to_reviewer_input,
     ),
     # ── Group E / Interview ──────────────────────────────────────────
     AgentCapability(
