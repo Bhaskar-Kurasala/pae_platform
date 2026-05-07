@@ -72,6 +72,11 @@ async def read_active_capstone(
         )
 
     try:
+        # Bug 24 fix (D15 CP3 resume): see twin patch in
+        # career_coach/read_capstone_status.py for full rationale.
+        # Adds course_entitlements JOIN to enforce active access,
+        # plus a role filter against student_role_state.current_role_id
+        # so cross-role capstones don't leak into weekly plans.
         result = await session.execute(
             text(
                 """
@@ -81,9 +86,18 @@ async def read_active_capstone(
                     (es.id IS NOT NULL) AS submitted,
                     es.score
                 FROM exercises ex
+                JOIN lessons l ON l.id = ex.lesson_id
+                JOIN courses c ON c.id = l.course_id
+                JOIN course_entitlements ce
+                    ON ce.course_id = c.id
+                    AND ce.user_id = :uid
+                    AND ce.revoked_at IS NULL
+                    AND (ce.expires_at IS NULL OR ce.expires_at > now())
+                LEFT JOIN student_role_state srs ON srs.student_id = :uid
                 LEFT JOIN exercise_submissions es
                     ON es.exercise_id = ex.id AND es.student_id = :uid
                 WHERE ex.is_capstone = true
+                  AND (c.role_id IS NULL OR c.role_id = srs.current_role_id)
                 ORDER BY es.created_at DESC NULLS LAST, ex.created_at DESC
                 LIMIT 1
                 """

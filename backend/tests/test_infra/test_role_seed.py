@@ -245,7 +245,18 @@ async def test_backfill_every_user_has_role_state(
 async def test_backfill_all_students_start_at_python_developer(
     pg_session: AsyncSession,
 ) -> None:
-    """Backfill semantics: every existing student lands at sequence_order=1."""
+    """Backfill semantics: at least the 129 backfilled students sit at
+    python_developer.
+
+    Originally written as a strict "ALL students must be at
+    python_developer" invariant — that assertion was over-strict. As
+    soon as any test or production code seeds a student at a non-
+    python_developer role (CP3 verification harnesses + future CP4 +
+    real production progression), the strict form fails. The looser
+    invariant captures the load-bearing CP1 promise (backfill landed
+    every existing user at python_developer) without forbidding
+    progression.
+    """
     from sqlalchemy import text
 
     rows = (
@@ -261,6 +272,18 @@ async def test_backfill_all_students_start_at_python_developer(
         )
     ).all()
     by_slug = {r[0]: r[1] for r in rows}
-    # No other role should have any rows yet — the backfill only writes
-    # python_developer.
-    assert set(by_slug.keys()) == {"python_developer"}
+    # The CP1 backfill seeded 129 users at python_developer. Newer
+    # students may sit at any role; the assertion is that the backfilled
+    # cohort is intact.
+    assert by_slug.get("python_developer", 0) >= 129
+    # No student should ever sit at an unknown role slug.
+    valid_slugs = {
+        "python_developer",
+        "data_analyst",
+        "data_scientist",
+        "ml_engineer",
+        "genai_engineer",
+        "senior_genai_engineer",
+    }
+    unknown = set(by_slug.keys()) - valid_slugs
+    assert not unknown, f"unknown role slugs in student_role_state: {unknown}"

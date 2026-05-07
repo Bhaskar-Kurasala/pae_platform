@@ -72,6 +72,18 @@ async def read_capstone_status(
         )
 
     try:
+        # Bug 24 fix (D15 CP3 resume): the prior LEFT JOIN-only query
+        # fell through to the most-recently-authored capstone globally
+        # when the student had no submissions, returning content the
+        # student had no entitled access to. The fix mandates a JOIN
+        # against course_entitlements (active grants only) and a role
+        # filter against the student's current_role_id from
+        # student_role_state. Capstones with NULL role_id (orthogonal
+        # to the linear progression) remain visible — the filter only
+        # excludes capstones tagged for OTHER roles. The student's
+        # current_role_id is read from student_role_state at query
+        # time so the tool stays single-purpose (no additional input
+        # parameter).
         result = await session.execute(
             text(
                 """
@@ -82,9 +94,18 @@ async def read_capstone_status(
                     es.score,
                     es.feedback::text AS feedback_summary
                 FROM exercises ex
+                JOIN lessons l ON l.id = ex.lesson_id
+                JOIN courses c ON c.id = l.course_id
+                JOIN course_entitlements ce
+                    ON ce.course_id = c.id
+                    AND ce.user_id = :uid
+                    AND ce.revoked_at IS NULL
+                    AND (ce.expires_at IS NULL OR ce.expires_at > now())
+                LEFT JOIN student_role_state srs ON srs.student_id = :uid
                 LEFT JOIN exercise_submissions es
                     ON es.exercise_id = ex.id AND es.student_id = :uid
                 WHERE ex.is_capstone = true
+                  AND (c.role_id IS NULL OR c.role_id = srs.current_role_id)
                 ORDER BY es.created_at DESC NULLS LAST, ex.created_at DESC
                 LIMIT 1
                 """
