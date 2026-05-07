@@ -44,18 +44,24 @@ Design choices honored across all five:
 
 # Import each module so its @tool decorators run at package import.
 from app.agents.tools.universal import (  # noqa: F401
+    evaluate_student_against_gate,
     log_event,
     memory_forget,
     memory_recall,
     memory_write,
     read_own_capability,
+    read_student_accessible_content,
+    read_student_role_state,
 )
 
 
 __all__ = [
+    "evaluate_student_against_gate",
     "log_event",
     "memory_forget",
     "memory_recall",
     "memory_write",
     "read_own_capability",
+    "read_student_accessible_content",
+    "read_student_role_state",
 ]

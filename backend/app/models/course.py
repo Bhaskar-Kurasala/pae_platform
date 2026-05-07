@@ -1,4 +1,7 @@
-from sqlalchemy import JSON, Integer, String, Text
+import uuid
+
+from sqlalchemy import JSON, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -17,6 +20,15 @@ class Course(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     difficulty: Mapped[str] = mapped_column(String(50), default="beginner", nullable=False)
     estimated_hours: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     github_repo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # D15 CP2b: optional FK to roles. NULL means orthogonal to the
+    # linear role progression (electives, fixtures). The hot-path
+    # query "which courses are tagged for role X" pays a partial
+    # index `WHERE role_id IS NOT NULL` — see migration 0063.
+    role_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("roles.id", ondelete="SET NULL", name="fk_courses_role_id"),
+        nullable=True,
+    )
     # Catalog-card bullets — replaces hard-coded UI outcomes. Each bullet:
     # {"text": str, "included": bool}. Empty list = use default catalog copy.
     bullets: Mapped[list[dict]] = mapped_column(
