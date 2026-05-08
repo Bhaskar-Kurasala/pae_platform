@@ -45,9 +45,15 @@ class AuditLogItem(PydanticModel):
 
 
 class StudentTimelineEvent(PydanticModel):
-    """DISC-55 — one event on a student's activity timeline."""
+    """DISC-55 — one event on a student's activity timeline.
 
-    kind: str  # "login" | "lesson_completed" | "agent_action" | "submission"
+    D16/CP3.3 added the "outreach" kind so WhatsApp / phone /
+    email / in_app contacts surface alongside agent actions. The
+    detail dict carries `channel` for the kind="outreach" case so the
+    frontend can render the right channel badge.
+    """
+
+    kind: str  # "login" | "lesson_completed" | "agent_action" | "submission" | "outreach"
     at: datetime
     summary: str
     detail: dict[str, Any] | None = None
@@ -834,6 +840,52 @@ async def get_student_timeline(
                     "exercise_id": str(sub.exercise_id),
                     "status": sub.status,
                     "score": sub.score,
+                },
+            )
+        )
+
+    # D16/CP3.3 — outreach_log entries on the timeline. Surfaces every
+    # contact (email, in_app DM, WhatsApp, phone) as a single event kind
+    # with channel in the detail dict. The frontend renders a channel
+    # badge per row so admin sees "WhatsApp · 5d ago, email · 3d ago,
+    # ghosted both" at a glance.
+    from app.models.outreach_log import OutreachLog as _OutreachLog
+
+    outreach_stmt = (
+        select(_OutreachLog)
+        .where(_OutreachLog.user_id == student_id)
+        .order_by(_OutreachLog.sent_at.desc())
+        .limit(limit)
+    )
+    if before is not None:
+        outreach_stmt = outreach_stmt.where(_OutreachLog.sent_at < before)
+    outreach_rows = (await db.execute(outreach_stmt)).scalars().all()
+    for out in outreach_rows:
+        # Summary varies by trigger source: admin_manual is a deliberate
+        # operator action (worth highlighting); system_nightly is the F9
+        # automated outreach. Channel is always in the detail dict so
+        # the frontend can pick the right badge.
+        if out.triggered_by == "admin_manual":
+            verb = "Admin contacted via" if out.channel != "in_app" else "Admin DM via"
+        else:
+            verb = "System sent via"
+        summary = f"{verb} {out.channel}"
+        if out.template_key:
+            summary += f" · {out.template_key}"
+        events.append(
+            StudentTimelineEvent(
+                kind="outreach",
+                at=out.sent_at,
+                summary=summary,
+                detail={
+                    "channel": out.channel,
+                    "triggered_by": out.triggered_by,
+                    "template_key": out.template_key,
+                    "status": out.status,
+                    "body_preview": out.body_preview,
+                    "replied_at": out.replied_at.isoformat()
+                    if out.replied_at
+                    else None,
                 },
             )
         )

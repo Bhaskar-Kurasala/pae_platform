@@ -38,7 +38,10 @@ export interface AdminStudent {
 }
 
 export interface StudentTimelineEvent {
-  kind: "login" | "lesson_completed" | "agent_action" | "submission";
+  // D16/CP3.3 — "outreach" added so WhatsApp/phone/email/in_app
+  // contacts surface alongside agent actions. detail.channel carries
+  // the channel value so the frontend renders the right badge.
+  kind: "login" | "lesson_completed" | "agent_action" | "submission" | "outreach";
   at: string;
   summary: string;
   detail: Record<string, unknown> | null;

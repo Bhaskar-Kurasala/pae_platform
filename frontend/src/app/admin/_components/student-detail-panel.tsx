@@ -85,9 +85,41 @@ function TimelineIcon({ kind }: { kind: string }) {
       return <CheckCircle2 className={base} aria-hidden="true" />;
     case "submission":
       return <FileCode2 className={base} aria-hidden="true" />;
+    case "outreach":
+      // D16/CP3.3 — outreach gets the chat icon; the channel pill below
+      // the summary distinguishes whatsapp / phone / email / in_app.
+      return <MessageCircle className={base} aria-hidden="true" />;
     default:
       return <Bot className={base} aria-hidden="true" />;
   }
+}
+
+// D16/CP3.3 — channel pill rendered inline on outreach timeline rows.
+// Color choices: WhatsApp green for whatsapp; neutral slate for phone
+// (voice has no canonical color); blue for email; muted for in_app DM.
+// All have AA-contrast text on their background in light + dark.
+function ChannelBadge({ channel }: { channel: string }) {
+  const lower = channel.toLowerCase();
+  const palette: Record<string, string> = {
+    whatsapp:
+      "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900/40",
+    phone:
+      "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-900/40 dark:text-slate-300 dark:border-slate-800",
+    email:
+      "bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-900/40",
+    in_app:
+      "bg-muted text-muted-foreground border-border",
+  };
+  const classes = palette[lower] ?? palette.in_app;
+  const label = lower === "in_app" ? "in-app" : lower;
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-1.5 py-0 text-[10px] font-medium uppercase tracking-wide ${classes}`}
+      data-testid={`channel-badge-${lower}`}
+    >
+      {label}
+    </span>
+  );
 }
 
 /**
@@ -852,7 +884,21 @@ export function StudentDetailPanel({
                           journey, so Fraunces reads truer than Inter.
                           The modal CSS picks up `.cf-activity-summary`
                           and renders it in Fraunces 16px medium. */}
-                      <p className="cf-activity-summary">{ev.summary}</p>
+                      <p className="cf-activity-summary">
+                        {ev.summary}
+                        {ev.kind === "outreach" &&
+                          typeof ev.detail?.channel === "string" && (
+                            <>
+                              {" "}
+                              <ChannelBadge channel={ev.detail.channel} />
+                              {ev.detail?.replied_at ? (
+                                <span className="ml-1 text-[10px] text-emerald-600 dark:text-emerald-400">
+                                  · replied
+                                </span>
+                              ) : null}
+                            </>
+                          )}
+                      </p>
                       <p className="cf-activity-time">
                         {new Date(ev.at).toLocaleString()}
                       </p>

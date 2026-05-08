@@ -153,6 +153,50 @@ async def test_admin_log_manual_outreach_rejects_unknown_channel(
 
 
 @pytest.mark.asyncio
+async def test_admin_log_manual_outreach_surfaces_on_timeline(
+    client: AsyncClient,
+) -> None:
+    """D16/CP3.3 — outreach_log rows surface on /students/{id}/timeline
+    with kind='outreach' and channel in the detail dict.
+
+    Verifies the round trip: log a WhatsApp contact via the CP3.2
+    endpoint, then fetch the timeline; the new event should be present
+    with the correct kind + channel, so the frontend badge renders.
+    """
+    admin_token = await _admin_token(client)
+    student_resp = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "timeline-target@example.com",
+            "full_name": "Timeline Target",
+            "password": "pass1234",
+        },
+    )
+    student_id = student_resp.json()["id"]
+
+    log_resp = await client.post(
+        f"/api/v1/admin/students/{student_id}/outreach",
+        json={"channel": "whatsapp", "body_preview": "called via WA"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert log_resp.status_code == 201
+
+    timeline_resp = await client.get(
+        f"/api/v1/admin/students/{student_id}/timeline",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert timeline_resp.status_code == 200
+    events = timeline_resp.json()
+
+    outreach_events = [e for e in events if e["kind"] == "outreach"]
+    assert len(outreach_events) >= 1
+    out = outreach_events[0]
+    assert out["detail"]["channel"] == "whatsapp"
+    assert out["detail"]["triggered_by"] == "admin_manual"
+    assert "Admin contacted via whatsapp" in out["summary"]
+
+
+@pytest.mark.asyncio
 async def test_admin_log_manual_outreach_requires_admin(
     client: AsyncClient,
 ) -> None:
