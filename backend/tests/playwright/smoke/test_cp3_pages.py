@@ -33,10 +33,11 @@ from tests.playwright.pages import (
     StudentDetailPanel,
     TodayPage,
 )
-from tests.playwright.pages._helpers import (
-    login_as_admin,
-    login_as_student,
-)
+from tests.playwright.pages._helpers import login_as_student
+
+# CP3's login_as_admin is superseded at CP5 by the admin_browser_context
+# pytest fixture (see playwright/conftest.py). Admin smoke tests below
+# request that fixture instead of calling login_as_admin directly.
 
 
 # ── No-auth surfaces ────────────────────────────────────────────────
@@ -94,36 +95,39 @@ def test_lesson_page_requires_lesson_id(page: Page) -> None:
         _ = lesson.path
 
 
-# ── Admin-auth surfaces (CP4 supersedes) ────────────────────────────
+# ── Admin-auth surfaces (CP5 supersedes via admin_browser_context) ──
+#
+# These tests previously xfailed at CP3-CP4 because there was no
+# admin user with a real bcrypt hash that could authenticate. CP5
+# ships `admin_browser_context` (in conftest.py) which composes
+# CP4's seed_admin_user_with_login with page-side JWT injection.
+# Tests use that fixture instead of the CP3 login_as_admin helper
+# (which posts to public /register and silently drops role='admin').
 
 
-@pytest.mark.xfail(
-    reason=(
-        "CP3: playwright_test template does not yet seed an admin user. "
-        "CP4 fixture-based admin auth will replace login_as_admin and "
-        "this xfail can be dropped."
-    ),
-    strict=False,
-)
-def test_admin_cockpit_page_loads(page: Page) -> None:
-    login_as_admin(page)
+def test_admin_cockpit_page_loads(admin_browser_context) -> None:
+    """Smoke: admin lands on /admin and the cockpit shell renders."""
+    context, _admin = admin_browser_context
+    page = context.new_page()
     cockpit = AdminCockpitPage(page)
     cockpit.navigate()
     cockpit.assert_loaded()
 
 
-@pytest.mark.xfail(
-    reason=(
-        "CP3: opening StudentDetailPanel requires a seeded student row "
-        "in the admin cockpit; CP4 fixtures will provide that."
-    ),
-    strict=False,
-)
-def test_student_detail_panel_opens(page: Page) -> None:
-    login_as_admin(page)
+def test_student_detail_panel_imports(admin_browser_context) -> None:
+    """Smoke: admin cockpit loads + StudentDetailPanel constructs cleanly.
+
+    Opening the panel for a real student requires a seeded admin-
+    visible student row, which is a Phase B journey concern (CP4
+    fixtures seed the student; the journey test pairs the admin
+    session with the student fixture). CP5 smoke verifies only the
+    object construction + the cockpit shell is reachable.
+    """
+    context, _admin = admin_browser_context
+    page = context.new_page()
     cockpit = AdminCockpitPage(page)
     cockpit.navigate()
     cockpit.assert_loaded()
-    # CP4 will seed at least one student here. For now just construct
-    # the panel object to verify import works.
+    # Construct the panel object — it doesn't auto-open until a
+    # row is clicked, which requires seeded students (Phase B).
     _ = StudentDetailPanel(page)

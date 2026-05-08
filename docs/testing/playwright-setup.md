@@ -257,7 +257,7 @@ to the team).
 - **CP4** — `fixtures/` extending `role_state_fixtures.py` with admin /
   payment / submission / outreach / journey fixtures ✅
 - **CP5** — `helpers/` traceability + grounding + behavior-shape + budget
-  assertion utilities
+  assertion utilities ✅
 - **CP6** — `scripts/build_and_serve.sh`, `docker-compose.playwright.yml`,
   CI config, final end-to-end smoke
 
@@ -427,3 +427,106 @@ docker compose exec -T backend sh -c \
 
 The CP3 split-run discipline still applies; CP4 doesn't add browser
 tests so this isn't a new constraint.
+
+---
+
+## CP5 — Assertion helpers + budget tracking (2026-05-08)
+
+### Layout
+
+`backend/tests/playwright/helpers/` ships four modules:
+
+  * `traceability_assertions.py` — verify side-effect rows landed in
+    DB after a Phase B journey runs an action through the UI:
+    `assert_outreach_log_entry`, `assert_agent_action_logged`,
+    `assert_student_message_thread`, `assert_student_note_count`.
+    Each emits diagnostic detail (recent rows in window) on failure
+    so investigators don't need to re-query.
+  * `grounding_assertions.py` — wraps the D15 CP3 runtime grounding
+    verifier. Two forms: explicit-titles (no DB needed) and
+    DB-grounded (re-derives accessible titles for a student).
+    Reuses `_LEGITIMATE_ROLE_REFERENCES` from D15 — single source
+    of truth for role + platform vocabulary.
+  * `behavior_shape_assertions.py` — heuristic checks calibrated
+    conservatively:
+      - `assert_response_contains_intent` (positive: keyword present)
+      - `assert_response_role_appropriate` (no other role's label)
+      - `assert_no_sycophancy` (5-phrase blocklist)
+      - `assert_no_fabricated_urgency` (5-phrase blocklist)
+    Each blocklist phrase has per-phrase calibration notes inline.
+    Word-boundary regexes; case-insensitive. False-positive guards
+    (legitimate empathy, concrete deadlines) verified in smoke.
+  * `cost_budget.py` — `TestBudgetTracker` accumulates LLM cost via
+    `agent_invocation_log.cost_inr` SUM queries. Per-test attribution
+    by timestamp window. `BudgetExceeded` raised when cumulative
+    crosses the configured ceiling (default ₹2.00; override via
+    `PLAYWRIGHT_BUDGET_INR` env var). Session-scoped fixture
+    `budget_tracker` exposed; tests opt in (no autouse — pure-DB
+    tests don't pay query overhead).
+
+### Per-helper smoke verification (21 tests, all passing in 0.97s)
+
+  * Traceability: 7 tests (positive + negative for each + dual-FK
+    edge case)
+  * Grounding: 2 tests (clean response + D-prefixed capstone
+    fabrication signature)
+  * Behavior-shape: 8 tests (5 blocklist + 2 calibration false-
+    positive guards + 1 keyword/no-other-role test)
+  * Cost budget: 3 tests (DB query, BudgetExceeded raise,
+    report format)
+
+Sync tests in this file emit a noisy "marked async but is sync"
+warning (module-level pytest.mark.asyncio applies to all). Accepted
+noise; tests still pass.
+
+### CP3 admin auth supersession
+
+CP5 retires the CP3-temporary `pages._helpers.login_as_admin`. The
+page-object-side admin auth fixture `admin_browser_context`
+(in `playwright/conftest.py`) is now canonical:
+
+  * Registers an admin via `/auth/register` (creates 'student' role).
+  * Promotes via direct asyncpg UPDATE to role='admin' (in a
+    thread-isolated asyncio.run — pytest-playwright's sync API
+    has an ambient loop on the main thread).
+  * Logs in via HTTP for a real JWT.
+  * Injects token + a `user` object with `role: "admin"` into
+    localStorage via `add_init_script`. The user object is required
+    because the admin layout's route guard checks `user?.role`;
+    a null user fails the guard regardless of `isAuthenticated`.
+
+CP3's `test_admin_cockpit_page_loads` and `test_student_detail_panel_imports`
+no longer xfail; they pass via this fixture.
+
+`AdminCockpitPage.assert_loaded()` was relaxed at CP5 from "students
+need a personal nudge" text (which only appears with seeded students)
+to the topbar's `aria-label="Admin home"` link (which mounts
+unconditionally). Phase B journeys that seed students can use
+stronger assertions.
+
+### Backend DB caveat
+
+`admin_browser_context` writes to the backend's connected DB (`platform`
+in dev), not `playwright_test`. The backend container's `DATABASE_URL`
+points at `platform` per Pattern 23 (env.py reads DATABASE_URL first);
+overlaying the backend onto `playwright_test` is a CP6 concern
+(`docker-compose.playwright.yml`). Until then, admin-driven journey
+tests share the backend's DB with the dev environment. Override via
+`PLAYWRIGHT_BACKEND_DB` env var if a different target is needed.
+
+### Pattern 22 / pre-flight calibration
+
+CP5 pre-flight verified the D15 grounding verifier has 3 public
+functions + 2 private helpers at expected location. The `_LEGITIMATE_ROLE_REFERENCES`
+set is imported (not duplicated) — Pattern 22 discipline: single
+source of truth; if D15 expands the role-name vocabulary, CP5
+helpers pick it up automatically. The negative grounding smoke test
+exercises the D-prefixed capstone fabrication pattern (Bug 24
+signature) since the extractor is intentionally conservative on
+arbitrary names.
+
+### Run convention reminder
+
+CP5 helpers smoke is async DB-only — runs in the CP2+CP4 pytest
+invocation. CP3 admin tests are sync browser — runs in the CP3
+invocation per the documented split. No new constraints at CP5.

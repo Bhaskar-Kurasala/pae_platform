@@ -190,19 +190,9 @@ def login_as_student(page: Page) -> None:
     _inject_token(page, token)
 
 
-def login_as_admin(page: Page) -> None:
-    """Authenticate `page` as an admin smoke user.
-
-    At CP3 time, the playwright_test template doesn't yet seed an
-    admin user (CP4 will). Tests that require admin auth are
-    expected to skip/xfail until that lands. This helper still
-    attempts the login so the failure mode (no admin user → 401)
-    surfaces clearly rather than silently passing.
-
-    ⚠ CP4 supersedes ⚠
-    """
-    _ensure_user(
-        ADMIN_EMAIL, ADMIN_PASSWORD, full_name="CP3 Smoke Admin", role="admin"
-    )
-    token = _fetch_token(ADMIN_EMAIL, ADMIN_PASSWORD)
-    _inject_token(page, token)
+# login_as_admin retired at CP5. The page-object-side admin auth
+# fixture `admin_browser_context` (in playwright/conftest.py) is
+# the canonical path. It composes register-via-HTTP + role
+# promotion via asyncpg + token+user injection, and yields a
+# (BrowserContext, AdminCredentials) tuple. CP3 admin smoke tests
+# now use it directly and pass without xfail markers.

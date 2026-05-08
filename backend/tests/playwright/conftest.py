@@ -207,15 +207,6 @@ async def db_session(
 #   read than a parameter. Each composite is ~5 lines of wiring.
 
 
-def _flush(session: AsyncSession) -> None:
-    """No-op kept as documentation hook — see fixture docstrings.
-
-    Originally placeholder for shared post-seed assertion logic;
-    retained to mark where future shared invariants would live.
-    """
-    return
-
-
 @pytest_asyncio.fixture
 async def python_developer_student(db_session: AsyncSession) -> AsyncGenerator:
     """Fresh python_developer student, cleaned up after the test."""
@@ -281,3 +272,225 @@ async def journey_through_data_analyst(db_session: AsyncSession) -> AsyncGenerat
     yield journey
     await cleanup_student_data(db_session, journey.student.user_id)
     await db_session.commit()
+
+
+# ── CP5: budget tracking + admin auth ───────────────────────────────
+
+
+@pytest.fixture(scope="session")
+def budget_tracker():
+    """Session-scoped TestBudgetTracker.
+
+    Tests that exercise real-LLM paths request this fixture, capture
+    a `start = datetime.now(UTC)` timestamp before the LLM call, and
+    after the call:
+
+        cost = await budget_tracker.query_test_cost(db_session, since=start)
+        await budget_tracker.record_test_cost(request.node.nodeid, cost)
+
+    `record_test_cost` raises BudgetExceeded if cumulative crosses
+    the ceiling (default ₹2.00; override via PLAYWRIGHT_BUDGET_INR).
+    pytest fails the test that pushed it over and skips subsequent
+    real-LLM tests in the same session.
+
+    Why opt-in (not autouse): pure-DB tests don't generate LLM cost
+    and shouldn't pay the query overhead. Autouse hooks would also
+    fight the asyncpg/pytest-asyncio loop juggling that CP2/CP3
+    already document. CP6 may revisit if a fully-automatic shape
+    becomes worth the complexity.
+    """
+    from tests.playwright.helpers.cost_budget import TestBudgetTracker
+
+    tracker = TestBudgetTracker()
+    yield tracker
+    # End-of-session report goes to stderr so pytest -v shows it in
+    # the run output without needing a custom reporter.
+    if tracker.per_test_cost:
+        import sys
+
+        print("\n[budget_tracker] " + tracker.report(), file=sys.stderr)
+
+
+@pytest.fixture
+def admin_browser_context(browser, playwright_db_reset):
+    """Admin-authenticated Playwright BrowserContext (sync fixture).
+
+    Supersedes the CP3-temporary `pages._helpers.login_as_admin`.
+
+    Why this fixture is SYNC (not @pytest_asyncio.fixture):
+      pytest-playwright's sync `page` / `browser` fixtures and
+      pytest-asyncio's async fixtures cannot share an event loop
+      within a single test — see
+      docs/followups/pytest-asyncio-pytest-playwright-split-runs.md.
+      Because admin browser tests need to drive Playwright (sync API),
+      the supporting auth fixture must also be sync. This means we
+      DON'T use the async db_session here; we go through HTTP for
+      seed + login, and we depend on `playwright_db_reset` only for
+      session ordering (so the template DB exists).
+
+    How admin promotion works without a DB-direct path:
+      The public /auth/register endpoint creates a 'student' role.
+      We can't promote to admin via HTTP (no admin-promotion endpoint
+      exists). For CP5, this fixture seeds via a synchronous psycopg
+      connection — `db.host` is the docker-compose service hostname,
+      reachable from inside the backend container. This deliberately
+      bypasses the SQLAlchemy async engine so we don't fight the
+      event-loop ownership.
+
+    Yields (BrowserContext, AdminCredentials) so tests can both
+    drive the page AND reference the seeded admin's email.
+    """
+    import asyncio
+    import json
+    import os
+    import threading
+    import urllib.request
+    import uuid as _uuid
+
+    import asyncpg
+
+    # ── Strategy: HTTP register + direct UPDATE to admin role ────
+    # CP5 admin auth runs against the same database the backend
+    # container is connected to. Today that's the dev `platform` DB
+    # because the backend's DATABASE_URL points there (Pattern 23
+    # finding from CP2). The CP6 docker-compose.playwright.yml
+    # overlay will reroute the backend to `playwright_test`; until
+    # then, we register an admin via the public /auth/register
+    # endpoint (which creates a 'student' role) then UPDATE the
+    # role to 'admin' via asyncpg in a thread-isolated loop.
+    #
+    # The thread isolation is required because pytest-playwright's
+    # sync API has an ambient asyncio loop on the main thread that
+    # blocks asyncio.run(); running asyncpg in a fresh thread sidesteps
+    # that. Documented at the top of
+    # docs/followups/pytest-asyncio-pytest-playwright-split-runs.md.
+    admin_id = _uuid.uuid4()
+    suffix = admin_id.hex[:12]
+    email = f"d18-cp5-admin-{suffix}@example.com"
+    password = "AdminCP5Pass123!"
+    full_name = "D18 CP5 Admin (sync fixture)"
+
+    backend_db = os.environ.get("PLAYWRIGHT_BACKEND_DB", "platform")
+
+    def _run_async(coro_fn):
+        result_box: list = []
+        exc_box: list = []
+
+        def runner() -> None:
+            try:
+                result_box.append(asyncio.run(coro_fn()))
+            except BaseException as exc:  # noqa: BLE001
+                exc_box.append(exc)
+
+        t = threading.Thread(target=runner, daemon=True)
+        t.start()
+        t.join()
+        if exc_box:
+            raise exc_box[0]
+        return result_box[0] if result_box else None
+
+    # Register via HTTP — creates a 'student' role row.
+    register_req = urllib.request.Request(
+        url="http://nginx/api/v1/auth/register",
+        data=json.dumps(
+            {"email": email, "password": password, "full_name": full_name}
+        ).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(register_req, timeout=10) as resp:
+        body = json.loads(resp.read().decode("utf-8"))
+        admin_id = _uuid.UUID(body["id"])
+
+    # Promote to admin via direct UPDATE on the backend's DB.
+    async def _promote() -> None:
+        conn = await asyncpg.connect(
+            host="db", port=5432, user="postgres", password="postgres",
+            database=backend_db,
+        )
+        try:
+            await conn.execute(
+                'UPDATE users SET "role" = $1 WHERE id = $2',
+                "admin", admin_id,
+            )
+        finally:
+            await conn.close()
+
+    _run_async(_promote)
+
+    # ── HTTP login → JWT ─────────────────────────────────────────
+    req = urllib.request.Request(
+        url="http://nginx/api/v1/auth/login",
+        data=json.dumps({"email": email, "password": password}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        token = json.loads(resp.read().decode("utf-8"))["access_token"]
+
+    # ── Browser context + token injection ────────────────────────
+    base_url_value = _base_url()
+    context = browser.new_context(
+        viewport={"width": 1920, "height": 1080},
+        base_url=base_url_value,
+    )
+    # Inject a user object with role=admin so the frontend's
+    # admin layout guard (which checks `user?.role === "admin"`)
+    # passes. The CP3 student helper got away with user=null
+    # because /today doesn't have a role guard, but /admin does.
+    encoded_token = json.dumps(token)
+    encoded_user = json.dumps(
+        {"id": str(admin_id), "email": email, "role": "admin",
+         "full_name": full_name, "is_active": True, "is_verified": True}
+    )
+    context.add_init_script(
+        f"""(() => {{
+            const token = {encoded_token};
+            const user = {encoded_user};
+            localStorage.setItem("auth_token", token);
+            localStorage.setItem("access_token", token);
+            localStorage.setItem(
+                "auth-storage",
+                JSON.stringify({{
+                    state: {{
+                        user, token, refreshToken: null,
+                        isAuthenticated: true,
+                    }},
+                    version: 0,
+                }}),
+            );
+        }})();"""
+    )
+
+    class _AdminCreds:
+        def __init__(self, uid, e, p, n):
+            self.user_id = uid
+            self.email = e
+            self.password = p
+            self.full_name = n
+
+    creds = _AdminCreds(admin_id, email, password, full_name)
+    try:
+        yield context, creds
+    finally:
+        context.close()
+
+        async def _cleanup() -> None:
+            conn = await asyncpg.connect(
+                host="db", port=5432, user="postgres", password="postgres",
+                database=backend_db,
+            )
+            try:
+                # ON DELETE CASCADE handles most tables;
+                # agent_actions.student_id has no CASCADE so explicit.
+                await conn.execute(
+                    "DELETE FROM agent_actions WHERE student_id = $1",
+                    admin_id,
+                )
+                await conn.execute(
+                    "DELETE FROM users WHERE id = $1", admin_id,
+                )
+            finally:
+                await conn.close()
+
+        _run_async(_cleanup)

@@ -82,6 +82,26 @@ resolves it.
 
 Until then: separate invocations.
 
+## CP5 — thread-isolated asyncpg pattern for sync browser fixtures
+
+Some sync browser fixtures need to write to the DB (e.g.,
+`admin_browser_context` needs to seed an admin user with role='admin'
+since the public /auth/register doesn't allow role promotion).
+asyncpg is the only sync-DB driver shipped in the venv, but
+calling `asyncio.run()` from the sync fixture's thread fails because
+pytest-playwright's sync API has an ambient asyncio loop on the
+main thread.
+
+**Pattern: run asyncpg in a fresh thread.** Spawn a thread that has
+no ambient loop, call `asyncio.run` inside it, join. Fixture in
+`backend/tests/playwright/conftest.py` calls this `_run_async()`
+helper. Industry-standard workaround when sync-Playwright + async-DB
+work need to coexist within one test.
+
+This pattern is local to CP5's admin fixture; if Phase B needs more
+sync-fixture DB writes, factor `_run_async` into a shared helper
+(probably `tests/playwright/helpers/sync_async_bridge.py`).
+
 ## Cross-references
 
 - `backend/tests/playwright/conftest.py` — function-scoped engine

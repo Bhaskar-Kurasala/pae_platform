@@ -25,12 +25,14 @@ class AdminCockpitPage(BasePage):
     path = "/admin"
 
     def assert_loaded(self) -> None:
-        # The admin landing always renders the "students need a personal
-        # nudge" tagline; mirrors the TS e2e smoke pattern.
+        # The "students need a personal nudge" tagline only appears
+        # when at least one student has triggered the flagged-roster
+        # logic — empty admin cockpits don't show it. Use the
+        # AdminTopbar "Admin home" link as the stable readiness
+        # signal instead; the topbar mounts on every admin route
+        # regardless of seed state.
         expect(
-            self.page.get_by_text(
-                "students need a personal nudge", exact=False
-            ).first
+            self.page.get_by_label("Admin home").first
         ).to_be_visible()
 
     def search_students(self, query: str) -> None:
