@@ -1,0 +1,94 @@
+# D16/CP2.l — Fly.io deploy config for the Celery beat scheduler app.
+#
+# This is the third Fly app in the Celery split: pae-platform-beat.
+# Beat is a SINGLETON scheduler — exactly one process across the whole
+# system reads the beat schedule and enqueues scheduled tasks onto
+# Redis. The worker app (fly-worker.toml) consumes them.
+#
+# Why beat is its own Fly app (not a process inside the worker app):
+#   - Beat must be a singleton. Two beats = duplicate task enqueues.
+#     A separate Fly app with min_machines_running=1 (and no scaling)
+#     guarantees exactly one process.
+#   - A runaway worker task can't crash the scheduler if scheduler
+#     runs in its own VM.
+#   - Beat is ~100 MB resident. Mixing it with the 1.5 GB worker process
+#     in one container forces the worker memory budget to flex around it.
+#
+# Setup (one-time, by the human deploying):
+#   1. fly apps create pae-platform-beat
+#   2. Mirror secrets from the worker app — beat itself doesn't need
+#      ANTHROPIC_API_KEY (it doesn't run agents), but it does need
+#      DATABASE_URL + REDIS_URL + the Settings keys that the
+#      production-required validator checks at boot. Simpler to mirror
+#      the full envelope:
+#
+#        fly secrets set --app pae-platform-beat \
+#          DATABASE_URL=postgres://...  \
+#          REDIS_URL=redis://...         \
+#          SECRET_KEY=$(openssl rand -hex 32) \
+#          ANTHROPIC_API_KEY=...         \
+#          ENVIRONMENT=production        \
+#          # ... full list in backend/.env.example
+#
+#   3. fly deploy --config fly-beat.toml --dockerfile backend/Dockerfile
+#
+#   4. AFTER deploy: scale to exactly 1 machine and DO NOT autoscale:
+#        fly scale count 1 --app pae-platform-beat
+#      Confirm with `fly status --app pae-platform-beat` that there's
+#      exactly one machine. Multiple beats = duplicate task fires =
+#      bad day for outreach throttling.
+
+app = "pae-platform-beat"
+
+primary_region = "iad"           # same region as worker + API (Redis broker latency)
+
+# Beat shutdown is fast: no in-flight tasks (those run on the worker).
+# 10s is enough to flush the schedule shelve file and exit cleanly.
+kill_signal = "SIGTERM"
+kill_timeout = "10s"
+
+[build]
+  dockerfile = "backend/Dockerfile"
+
+[env]
+  ENVIRONMENT = "production"
+
+# ─── No HTTP service ────────────────────────────────────────────────
+# Beat is purely outbound: ticks the clock, enqueues to Redis. No
+# inbound HTTP. No [http_service] block.
+
+# ─── VM sizing ──────────────────────────────────────────────────────
+# 4096MB matches the worker app per docs/followups/celery-safety-
+# memory-bump.md. Beat itself is ~100 MB, but:
+#   1. The image is shared with the worker — if a beat-only import
+#      path accidentally pulls Presidio (e.g., a model module imported
+#      at top of celery_app.py for task registration), beat memory
+#      jumps to ~1 GB. 4 GB absorbs that with margin.
+#   2. Operator reasoning is simpler when all three apps (API, worker,
+#      beat) have the same memory_mb. Tightening beat to 1024 MB later
+#      is a deliberate decision, not a default.
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 4096
+
+# ─── Process definition ─────────────────────────────────────────────
+# Beat is single-process by design (no --concurrency flag).
+# --schedule and --pidfile mirror the docker-compose mitigations
+# (DISC-1) so beat doesn't restart-loop:
+#   * --schedule=/tmp/celerybeat-schedule writes the shelve file to a
+#     writable location (the app layer is read-only on Fly).
+#   * --pidfile= (empty) skips pidfile creation; without this, a stale
+#     pidfile from a previous boot prevents start-up.
+[processes]
+  beat = "uv run celery -A app.core.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule --pidfile="
+
+# ─── Singleton enforcement ──────────────────────────────────────────
+# Per the setup notes above: AFTER first deploy, run
+#   fly scale count 1 --app pae-platform-beat
+# and verify `fly status --app pae-platform-beat` shows one machine.
+# There is no Fly-config knob for "max machines = 1"; this is an
+# operational invariant. A second beat process would duplicate every
+# scheduled task fire (risk_scoring, outreach_automation, weekly_
+# letters, growth_snapshots, inactivity_sweep), corrupting outreach
+# throttling and double-billing LLM costs. Don't get this wrong.

@@ -1,9 +1,12 @@
 # Celery worker memory bump for the safety primitive
 
-**Status:** Open — **launch-blocker for D16** (interrupt_agent + proactive runs).
+**Status:** **RESOLVED** at D16/CP2.l (2026-05-08). All three remediation
+items shipped; pre-launch smoke deploy is the only remaining operational
+step. Items (a) and (b) closed by `fly-worker.toml` + `fly-beat.toml`; item
+(c) was already closed at D9.
 **Created:** 2026-05-02 (D9 Checkpoint 1 wrap-up).
 **Blocked by:** D9 Checkpoint 3 (safety primitive wiring into
-`AgenticBaseAgent.run()`).
+`AgenticBaseAgent.run()`) — closed at 27125fa.
 
 ## The problem
 
@@ -107,14 +110,26 @@ against a real number, not a worst-case guess.
 
 ## Verification checklist (apply when the Celery fly.toml lands)
 
-- [ ] memory_mb = 4096 on both worker and beat apps
-- [ ] Worker concurrency capped (default: 2)
-- [ ] SafetyGate loaded at worker boot, not lazily
+- [x] memory_mb = 4096 on both worker and beat apps — RESOLVED at D16/CP2.l (`fly-worker.toml`, `fly-beat.toml`)
+- [x] Worker concurrency capped (default: 2) — RESOLVED at D16/CP2.l (`--concurrency=2` in `fly-worker.toml` `[processes]` block)
+- [x] SafetyGate loaded at worker boot, not lazily — RESOLVED at D9 (`backend/app/core/celery_app.py:156-182` `@worker_process_init` handler)
 - [ ] Verified worker boot takes ~5 s (Presidio + spaCy load) and
-      grace_period in fly.toml is wide enough
+      grace_period in fly.toml is wide enough _(operational; verify on first deploy)_
 - [ ] Verified resident memory ~1.5 GB at idle with concurrency=2
-- [ ] Run `interrupt_agent` synthetically against the deployed Celery
-      app; confirm no OOM, verify task completes
+      _(operational; verify on first deploy via `fly logs --app pae-platform-worker`)_
+- [ ] Run a scheduled task (`risk_scoring` or `outreach_automation`)
+      synthetically against the deployed Celery app; confirm no OOM,
+      verify task completes _(operational; pre-launch smoke)_
+
+## D16/CP2.l artifacts
+
+- `fly-worker.toml` (new) — `pae-platform-worker` Fly app config
+- `fly-beat.toml` (new) — `pae-platform-beat` Fly app config (singleton — see file header for `fly scale count 1` requirement)
+- D-A note: D16's reframe ships no new agents, so `interrupt_agent` is no
+  longer the launch-trigger; the existing scheduled tasks (`risk_scoring`,
+  `outreach_automation`, `weekly_letters`, `growth_snapshots`,
+  `inactivity_sweep`) are the workload that lands first on the new
+  Celery Fly apps. The OOM math is identical.
 
 ## Cross-references
 
@@ -131,7 +146,11 @@ against a real number, not a worst-case guess.
 
 ## Tag
 
-**Launch-blocker for D16.** Cannot deploy interrupt_agent or any
-proactive agent to production Celery without this remediation in
-place. Verifiable: any production deploy of D16 onto a default-sized
-Celery Fly app will OOM on the first scheduled run.
+**~~Launch-blocker for D16.~~ RESOLVED at D16/CP2.l (2026-05-08).** All
+three remediation items are shipped. The Celery Fly apps
+(`pae-platform-worker`, `pae-platform-beat`) are configured to mirror the
+API app's memory_mb=4096 and concurrency=2; Presidio eager-loads at worker
+boot via the existing D9 `@worker_process_init` handler. The remaining
+pre-launch step is operational: `fly apps create pae-platform-worker` +
+`fly apps create pae-platform-beat`, set secrets, deploy, smoke a
+scheduled task. No further code-side work required.
