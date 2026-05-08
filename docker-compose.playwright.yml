@@ -1,0 +1,36 @@
+# D18 Phase A CP2 — Playwright test compose override.
+#
+# Inherits from docker-compose.yml and overrides the backend's
+# DATABASE_URL (via POSTGRES_DB) so the backend reads from
+# `playwright_test` instead of the default `platform` database.
+#
+# Frontend is unchanged — D-A's "production build, not dev server" is
+# already inherent in docker-compose.yml's frontend container, which
+# runs `node server.js` from a Next.js standalone build (per
+# frontend/CLAUDE.md). No override needed for frontend.
+#
+# CP6 will extend this file with a `playwright-runner` service that
+# runs pytest inside the same docker network (avoids host↔container
+# DSN translation friction). For CP2 the override stops at the
+# DATABASE_URL routing.
+#
+# Usage:
+#   # Spin up the stack against the playwright_test database:
+#   docker compose -f docker-compose.yml -f docker-compose.playwright.yml \
+#     up -d backend frontend
+#
+#   # Tear back down to the default platform database:
+#   docker compose -f docker-compose.yml up -d backend frontend
+#
+# Pre-condition: the playwright_test database must exist (created by
+# backend/tests/playwright/db/reset_for_suite.py, which clones from
+# playwright_test_template authored by create_template.py).
+
+services:
+  backend:
+    environment:
+      # Override the database the backend reads from. The app's
+      # config.py builds DATABASE_URL from POSTGRES_HOST/PORT/DB/USER/
+      # PASSWORD; only POSTGRES_DB needs to change because host,
+      # port, user, password stay the same.
+      POSTGRES_DB: playwright_test
