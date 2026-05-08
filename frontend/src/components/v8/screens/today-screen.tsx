@@ -415,7 +415,7 @@ export function TodayScreen() {
                 <div className="small">Progress only moves when work is actually complete.</div>
               </div>
               <div className="step-row">
-                <article className={`step-card ${steps.warm}`} id="stepWarm">
+                <article className={`step-card ${steps.warm}`} id="stepWarm" data-testid="today-step-warmup">
                   <div className="step-top">
                     <div className="step-num">1</div>
                     <div className="step-state">
@@ -438,7 +438,7 @@ export function TodayScreen() {
                   </div>
                 </article>
 
-                <article className={`step-card ${steps.lesson}`} id="stepLesson">
+                <article className={`step-card ${steps.lesson}`} id="stepLesson" data-testid="today-step-lesson">
                   <div className="step-top">
                     <div className="step-num">2</div>
                     <div className="step-state">
@@ -462,7 +462,7 @@ export function TodayScreen() {
                   </div>
                 </article>
 
-                <article className={`step-card ${steps.reflect}`} id="stepReflect">
+                <article className={`step-card ${steps.reflect}`} id="stepReflect" data-testid="today-step-reflect">
                   <div className="step-top">
                     <div className="step-num">3</div>
                     <div className="step-state">
@@ -591,7 +591,7 @@ export function TodayScreen() {
                 </div>
               </section>
 
-              <section className="capstone-trailer reveal">
+              <section className="capstone-trailer reveal" data-testid="today-capstone-trailer">
                 <div className="trailer-eyebrow">
                   ★ Your capstone — the proof of {targetRole}
                 </div>

@@ -1,0 +1,94 @@
+# pytest-asyncio + pytest-playwright sync API coexistence — split runs
+
+**Status:** Open. Operational. CP3-surfaced. Affects how CI and local
+developers invoke the playwright suite.
+**Origin:** D18 Phase A CP3 (2026-05-08).
+**Created:** 2026-05-08.
+
+## What this is
+
+The Playwright suite at `backend/tests/playwright/smoke/` mixes two
+test shapes:
+
+1. **Async DB-only smoke** (CP2) — uses `@pytest_asyncio.fixture
+   db_session`, no Playwright `page` fixture. pytest-asyncio drives
+   its own event loop per test.
+2. **Sync browser smoke** (CP3 onward) — uses pytest-playwright's
+   sync `page` fixture, which internally creates a greenlet-driven
+   loop on top of the asyncio runtime.
+
+Running both in one pytest invocation triggers an event-loop conflict
+at teardown:
+
+```
+RuntimeError: Cannot run the event loop while another loop is running
+```
+
+The error surfaces during `loop.run_until_complete(loop.shutdown_asyncgens())`
+of the async DB tests, after the sync Playwright tests have run in
+the same session.
+
+Each suite passes cleanly in isolation:
+  * `pytest tests/playwright/smoke/test_cp2_db.py` — 4 passed.
+  * `pytest tests/playwright/smoke/test_cp3_pages.py` — 6 passed,
+    2 xfailed.
+
+## The convention
+
+Run the two shapes as **separate pytest invocations**:
+
+```bash
+# DB-only smoke (no browser; no PLAYWRIGHT_BASE_URL needed)
+docker compose exec -T backend sh -c \
+  "cd /app && uv run pytest tests/playwright/smoke/test_cp2_db.py"
+
+# Browser smoke (needs PLAYWRIGHT_BASE_URL because it's running
+# inside the backend container talking to the frontend service)
+docker compose exec -T backend sh -c \
+  "cd /app && PLAYWRIGHT_BASE_URL=http://frontend:3000 \
+   uv run pytest tests/playwright/smoke/test_cp3_pages.py"
+```
+
+CI must execute these as two distinct steps. A wrapper script (deferred
+to CP6) will hide the split from local developers.
+
+## Why we don't fix this with conftest gymnastics
+
+Tried at CP3 design time:
+  * **Function-scoping the async DB engine** (per-test create/dispose).
+    Necessary fix in its own right (asyncpg connections bind to the
+    creating loop), but doesn't address the session-teardown collision.
+  * **`loop_scope="session"` on pytest-asyncio.** Would force a
+    single loop, but pytest-playwright's sync API doesn't share that
+    loop — it creates its own.
+  * **Switching CP3 to async Playwright fixtures.** `pytest-playwright`
+    ships both; using the async `page` would align loops. Deferred:
+    aligns Phase A CP4 fixture authoring (we'd need to convert the
+    auth helper + every page object to async). Not a CP3-scope
+    change.
+
+The split-run convention is the industry-standard workaround when
+both plugins are installed together. Most production projects that
+mix pytest-asyncio + pytest-playwright sync API run them as separate
+jobs.
+
+## When to revisit
+
+If CP4 or later cleanly migrates DB-only tests to use `httpx`
+backend-driven assertions (no async fixtures at all — the page objects
+do all the seeding via the API), the conflict disappears. Or, if Phase
+B converges on async Playwright fixtures throughout, that also
+resolves it.
+
+Until then: separate invocations.
+
+## Cross-references
+
+- `backend/tests/playwright/conftest.py` — function-scoped engine
+  fix from CP2.
+- `backend/tests/playwright/smoke/test_cp2_db.py` — async DB shape.
+- `backend/tests/playwright/smoke/test_cp3_pages.py` — sync browser
+  shape.
+- `docs/followups/test-suite-bulk-run-oom-by-directory-workaround.md`
+  — sibling operational issue (different mechanism, also requires
+  splitting test runs).

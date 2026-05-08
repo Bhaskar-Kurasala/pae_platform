@@ -54,7 +54,10 @@ function VerdictBadge({ verdict }: { verdict: InterviewDebrief["overall_verdict"
   };
   const meta = map[verdict];
   return (
-    <span className={`rounded px-2 py-1 text-xs font-semibold ${meta.tone}`}>
+    <span
+      className={`rounded px-2 py-1 text-xs font-semibold ${meta.tone}`}
+      data-testid="interview-verdict-badge"
+    >
       {meta.label}
     </span>
   );

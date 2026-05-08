@@ -252,8 +252,8 @@ to the team).
 
 ## What CP2-CP6 will add
 
-- **CP2** — `db/` template database + per-suite reset; `db_session` fixture
-- **CP3** — `pages/` page object models for 8 surfaces
+- **CP2** — `db/` template database + per-suite reset; `db_session` fixture ✅
+- **CP3** — `pages/` page object models for 8 surfaces ✅
 - **CP4** — `fixtures/` extending `role_state_fixtures.py` with admin /
   payment / submission / outreach / journey fixtures
 - **CP5** — `helpers/` traceability + grounding + behavior-shape + budget
@@ -263,3 +263,83 @@ to the team).
 
 Each CP lands its own smoke tests under `smoke/` so the infrastructure
 verifies itself.
+
+---
+
+## CP3 — Page objects + selector conventions (2026-05-08)
+
+### Selector convention (Path C)
+
+Page objects in `backend/tests/playwright/pages/` follow these rules,
+ratified at CP3:
+
+1. **Role-first.** Use Playwright's `get_by_role`, `get_by_label`,
+   `get_by_text`. Mirrors the existing `frontend/e2e/` TS suite.
+2. **`data-testid` only where role-based selection is genuinely
+   insufficient** — state-driven elements with no accessible name,
+   dynamic disambiguation across siblings of the same role, badges
+   that share a parent role.
+3. **If a page object needs a testid the frontend doesn't have:**
+   - Trivial 1-line addition: add inline as part of the same commit
+     as the page object.
+   - Non-trivial (refactor / prop threading / conditional rendering):
+     register at `docs/followups/frontend-testid-additions-d18.md`.
+
+Per-page selector strategy is documented in each page object's module
+docstring. Phase B authors should read the docstring before writing
+new tests.
+
+### CP3 inline frontend testid additions
+
+Five 1-line additions landed in the CP3 commit:
+
+| File | Element | Testid |
+|---|---|---|
+| `frontend/src/components/v8/screens/today-screen.tsx:594` | capstone teaser `<section>` | `today-capstone-trailer` |
+| `frontend/src/components/v8/screens/today-screen.tsx:418` | step card "warmup" | `today-step-warmup` |
+| `frontend/src/components/v8/screens/today-screen.tsx:441` | step card "lesson" | `today-step-lesson` |
+| `frontend/src/components/v8/screens/today-screen.tsx:465` | step card "reflect" | `today-step-reflect` |
+| `frontend/src/app/(portal)/interview/page.tsx:57` | VerdictBadge `<span>` | `interview-verdict-badge` |
+
+### Async DB engine scoping (CP2 → CP3 carryover)
+
+`db_session` is **function-scoped, not session-scoped**. The async
+engine is created and disposed per test. Reason: asyncpg connections
+bind to the event loop that created them, and pytest-asyncio uses
+function-scoped event loops by default. A session-scoped engine would
+fail with "another operation is in progress" / "Event loop is closed"
+on the second test in a run. Phase B authors must NOT migrate to
+session-scoped engines without first changing pytest-asyncio's
+loop_scope.
+
+### Run convention — split DB-only and browser smoke
+
+pytest-asyncio (used by `db_session`) and pytest-playwright's sync API
+(used by the `page` fixture) cannot share an event loop. Running
+`tests/playwright/smoke/` in one pytest invocation triggers
+`RuntimeError: Cannot run the event loop while another loop is
+running` at teardown. Run them as **two separate pytest invocations**:
+
+```bash
+# DB-only smoke
+docker compose exec -T backend sh -c \
+  "cd /app && uv run pytest tests/playwright/smoke/test_cp2_db.py"
+
+# Browser smoke
+docker compose exec -T backend sh -c \
+  "cd /app && PLAYWRIGHT_BASE_URL=http://frontend:3000 \
+   uv run pytest tests/playwright/smoke/test_cp3_pages.py"
+```
+
+Each suite passes cleanly in isolation. CI runs them as separate
+steps. Full background at
+`docs/followups/pytest-asyncio-pytest-playwright-split-runs.md`.
+
+### CP3 auth helper — temporary
+
+`backend/tests/playwright/pages/_helpers.py` provides
+`login_as_student(page)` and `login_as_admin(page)`. Both are flagged
+as **CP4 supersedes**. The admin helper currently fails (admin user
+not seeded by the playwright_test template); CP3 admin smoke tests
+are marked `xfail` to surface the gap until CP4's admin fixture
+ships.
