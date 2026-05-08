@@ -1,21 +1,49 @@
-# D18 Phase A CP6 — Playwright suite CI workflow.
+# D18 Phase A CP6 (authored) + Phase B CP5 (extended) —
+# Playwright suite CI workflow.
 #
 # Runs the backend/tests/playwright/ suite against the full docker
 # stack with backend connected to playwright_test. Test execution
-# splits into parallel jobs by file group to dodge the bulk-suite OOM
-# follow-up (see docs/followups/test-suite-bulk-run-oom-by-directory-
-# workaround.md) and the pytest-asyncio + pytest-playwright sync API
-# split-run requirement (see docs/followups/pytest-asyncio-pytest-
-# playwright-split-runs.md).
+# splits into parallel jobs by tier to honor:
+#   * pytest-asyncio + pytest-playwright sync-API split-run requirement
+#     (docs/followups/pytest-asyncio-pytest-playwright-split-runs.md)
+#   * Bulk-suite OOM workaround
+#     (docs/followups/test-suite-bulk-run-oom-by-directory-workaround.md)
+#   * D18 Phase B CI cost shape β
+#     (docs/architecture/d18-phase-b-test-coverage-overview.md §
+#     "CI execution model")
 #
-# Job split:
-#   * playwright-db-only  — CP2 + CP4 + CP5 (async DB, no browser)
-#   * playwright-browser  — CP3 + CP6 (sync browser, page objects)
-# Phase B will add more jobs as journey tests land.
+# Job split (CI cost shape β, ratified at Phase B CP5 close):
+#   * playwright-db-only       — every PR + main + nightly
+#                                Phase A smoke + content seeders
+#                                + bridge smoke + BUG-CP1D regression
+#                                Cost: ~₹0 (no LLM).
+#   * playwright-browser-smoke — every PR + main + nightly
+#                                CP3 page-object smoke + CP6 final
+#                                loop + practice page + bridge browser
+#                                Cost: ~₹0 (no real-LLM).
+#   * playwright-critical-path — every PR (Phase B critical-path
+#                                journey tests, marker
+#                                @pytest.mark.critical_path)
+#                                Cost: ~₹15-20 per run.
+#   * playwright-full-suite    — main + nightly + manual trigger via
+#                                workflow_dispatch's `full_suite` flag
+#                                or PR comment `/run-full-suite`
+#                                (full Phase B journey suite)
+#                                Cost: ~₹40-50 per run.
 #
-# Cumulative budget enforced per-job via PLAYWRIGHT_BUDGET_INR. Phase
-# A jobs run with the default ₹2.00; Phase B real-LLM jobs will pass
-# proportional shares of the run-wide ceiling.
+# Cost shape β rationale (per Phase B CP5 closure):
+#   PR cost:    ~₹15-20 critical-path + ~₹0 smokes ≈ ~₹15-20 per PR
+#   Main:       ~₹40-50 full suite per merge
+#   Nightly:    ~₹40-50 full suite
+#   Steady-state: ~₹650/week at ~20 PRs + 7 nightlies. Sustainable
+#   for a launch-stage project.
+#
+# Two cost-cap refinements:
+#   1. PR critical-path cost cap of ₹25 — if exceeded, downgrade
+#      to low-tier-only and surface in PR comment.
+#   2. Manual full-suite trigger — workflow_dispatch with
+#      input `full_suite=true` runs the full suite for risky
+#      PRs without forcing it on all PRs.
 
 name: Playwright Tests
 
@@ -24,16 +52,33 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  schedule:
+    # Nightly full-suite run at 02:00 UTC — picks up
+    # post-merge regressions within ~24 hours of merge.
+    - cron: "0 2 * * *"
   workflow_dispatch:
+    inputs:
+      full_suite:
+        description: "Run full Phase B journey suite (vs critical-path subset)"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+env:
+  COMPOSE_FILES: "-f docker-compose.yml -f docker-compose.playwright.yml"
 
 jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Phase A smoke surface (no LLM cost, every PR)
+  # ─────────────────────────────────────────────────────────────
+
   playwright-db-only:
     name: Playwright (DB-only smoke)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       PLAYWRIGHT_BUDGET_INR: "0.50"
-      COMPOSE_FILES: "-f docker-compose.yml -f docker-compose.playwright.yml"
     steps:
       - uses: actions/checkout@v4
 
@@ -42,30 +87,30 @@ jobs:
           chmod +x backend/tests/playwright/scripts/build_and_serve.sh
           ./backend/tests/playwright/scripts/build_and_serve.sh --rebuild
 
-      - name: Run DB-only Playwright suite
-        # CP2 + CP4 + CP5 — async db_session fixtures; no browser.
+      - name: Run DB-only Playwright smoke
+        # CP2 + CP4 fixtures + CP5 helpers + content seeders +
+        # BUG-CP1D regression. Async db_session fixtures; no browser.
         run: |
           docker compose ${COMPOSE_FILES} exec -T backend sh -c \
             "cd /app && uv run pytest \
               tests/playwright/smoke/test_cp2_db.py \
               tests/playwright/smoke/test_cp4_fixtures.py \
               tests/playwright/smoke/test_cp5_helpers.py \
+              tests/playwright/smoke/test_content_seeders_smoke.py \
+              tests/playwright/smoke/test_bug_cp1d_regression.py \
               -v --tb=short"
 
       - name: Tear down stack
         if: always()
         run: docker compose ${COMPOSE_FILES} down -v
 
-  playwright-browser:
+  playwright-browser-smoke:
     name: Playwright (browser smoke)
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
       PLAYWRIGHT_BUDGET_INR: "1.50"
-      # CP6 full-loop topology guarantee — the runner can reach
-      # both nginx and frontend via the docker network.
       PLAYWRIGHT_FULL_LOOP_OK: "1"
-      COMPOSE_FILES: "-f docker-compose.yml -f docker-compose.playwright.yml"
     steps:
       - uses: actions/checkout@v4
 
@@ -75,24 +120,109 @@ jobs:
           ./backend/tests/playwright/scripts/build_and_serve.sh --rebuild
 
       - name: Build playwright-runner image
-        # Custom-built (post-CP6 retrofit) — extends upstream
-        # mcr.microsoft.com/playwright/python:v1.59.0 with project
-        # deps + test deps baked in. Replaces the previous inline
-        # pip install which was fragile (Path A pre-CP1 finding).
         run: |
           docker compose ${COMPOSE_FILES} \
             --profile playwright build playwright-runner
 
-      - name: Run browser Playwright suite via runner image
-        # CP3 page-object smoke + CP6 final loop. Runs inside the
-        # playwright-runner container so browsers + system deps are
-        # version-locked to v1.59.0 and project deps + test deps
-        # come pre-baked.
+      - name: Run browser Playwright smoke (no real-LLM)
+        # CP3 page-object smoke + CP6 final loop + practice page +
+        # sync_async_bridge. No journey tests; no LLM cost.
         run: |
           docker compose ${COMPOSE_FILES} \
             --profile playwright run --rm playwright-runner \
             "pytest tests/playwright/smoke/test_cp3_pages.py \
                     tests/playwright/smoke/test_cp6_full_loop.py \
+                    tests/playwright/smoke/test_practice_page_smoke.py \
+                    tests/playwright/smoke/test_sync_async_bridge_smoke.py \
+                    -v --tb=short"
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose ${COMPOSE_FILES} down -v
+
+  # ─────────────────────────────────────────────────────────────
+  # Phase B journey suite (CI cost shape β; ratified at Phase B CP5)
+  # ─────────────────────────────────────────────────────────────
+
+  playwright-critical-path:
+    name: Playwright (critical-path journeys, every PR)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Run on every PR + main + nightly. Skipped only when caller
+    # triggered workflow_dispatch with full_suite=true (in which
+    # case playwright-full-suite covers it).
+    if: ${{ github.event.inputs.full_suite != 'true' }}
+    env:
+      # PR critical-path cost cap (Phase B CP5 refinement #1).
+      # Tracker enforces; if cumulative cost exceeds ₹25 mid-run,
+      # the BudgetExceeded exception fires and remaining tests skip.
+      PLAYWRIGHT_BUDGET_INR: "25.00"
+      PLAYWRIGHT_FULL_LOOP_OK: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build & start stack
+        run: |
+          chmod +x backend/tests/playwright/scripts/build_and_serve.sh
+          ./backend/tests/playwright/scripts/build_and_serve.sh --rebuild
+
+      - name: Build playwright-runner image
+        run: |
+          docker compose ${COMPOSE_FILES} \
+            --profile playwright build playwright-runner
+
+      - name: Run critical-path journeys
+        # @pytest.mark.critical_path filter pulls CP1's 24 tests
+        # (the 21 passing + 3 stripe-env-gated xfail). Real-LLM
+        # tests on (e)/(d)/(f)/(c) bear cost ~₹15-20 per run.
+        run: |
+          docker compose ${COMPOSE_FILES} \
+            --profile playwright run --rm playwright-runner \
+            "pytest tests/playwright/journeys/ \
+                    -m critical_path \
+                    -v --tb=short"
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose ${COMPOSE_FILES} down -v
+
+  playwright-full-suite:
+    name: Playwright (full Phase B journey suite, main + nightly + manual)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # Triggers:
+    #   * push to main (verify post-merge regression promptly)
+    #   * scheduled nightly (catches drift overnight)
+    #   * workflow_dispatch with full_suite=true (manual trigger
+    #     for risky PRs; refinement #2 from Phase B CP5)
+    if: |
+      github.event_name == 'push' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.event.inputs.full_suite == 'true')
+    env:
+      PLAYWRIGHT_BUDGET_INR: "50.00"
+      PLAYWRIGHT_FULL_LOOP_OK: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build & start stack
+        run: |
+          chmod +x backend/tests/playwright/scripts/build_and_serve.sh
+          ./backend/tests/playwright/scripts/build_and_serve.sh --rebuild
+
+      - name: Build playwright-runner image
+        run: |
+          docker compose ${COMPOSE_FILES} \
+            --profile playwright build playwright-runner
+
+      - name: Run full Phase B journey suite
+        # All Phase B journey tests across CP1-CP4. ~58 tests;
+        # ~20-30 minute wall; ~₹40-50 cost.
+        run: |
+          docker compose ${COMPOSE_FILES} \
+            --profile playwright run --rm playwright-runner \
+            "pytest tests/playwright/journeys/ \
                     -v --tb=short"
 
       - name: Tear down stack

@@ -1,13 +1,16 @@
 # D18 Phase A — Test infrastructure overview
 
-**Status:** Phase A complete (2026-05-08). Phase B (journey tests
-authored against this infrastructure) begins on a separate prompt
-cycle.
+**Status:** Phase A complete (2026-05-08). Phase B sealed at CP5
+close (2026-05-09). D18 fully sealed.
 
-This document is the load-bearing reference for any author writing
-journey tests against the Playwright suite. Read this before writing
-new tests; if a question isn't answered here, look in the linked
-follow-up docs or open the source.
+This document is the load-bearing reference for the
+infrastructure substrate (page objects, fixtures, helpers,
+runner overlay, retrofit work). Its companion document
+[`d18-phase-b-test-coverage-overview.md`](./d18-phase-b-test-coverage-overview.md)
+holds the journey-test catalog, bug log, CI cost shape decision,
+and Phase C readiness assessment. **Read both as one canonical
+reference; this doc is "the infrastructure"; that doc is "what
+we tested".**
 
 ---
 

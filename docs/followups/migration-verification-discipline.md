@@ -823,3 +823,151 @@ D10 (billing_support) and D11 (senior_engineer) shipped before Patterns 11, 14, 
 - `llm-latency-provider-awareness.md` — Pattern 13 future scope
 - `llm-cost-tracking-silent-zero.md` — Pattern 6 cost-tracking sibling instances
 - `handoff-protocol-d11-d13.md` — Option B handoff convention used across D11 + D12
+
+---
+
+## Pattern catalog updates from D18 (Phase A + Phase B testing arc)
+
+### Pattern 22 — verify always (elevated at D18 Phase B CP5 close)
+
+**Original (D17b-era):** any artifact making schema claims must
+verify against live DB introspection at pre-flight; assume drift
+exists, prove it doesn't.
+
+**Elevated canonical (D18 Phase B CP5, 2026-05-09):**
+
+> Verify always; treat any unverified claim as suspect by default.
+> Pre-flight verification is the default discipline, not a
+> conditional one. Tool-generated negatives (Glob/Grep absences)
+> are weaker evidence than tool-generated positives (file-read
+> confirmations). Constant names hint at semantics but don't
+> define them; the value is the contract.
+
+**Bidirectional value (made explicit at CP3):**
+
+  * **Drift-detection direction** — existing claim verified
+    against live system, found wrong, fix the artifact. CP1 era
+    examples: BUG-CP1D ORM drift, BUG-CP1F missing convention,
+    CP4 retrofit nonexistent column claims.
+  * **Drift-prevention direction** — during authoring of a new
+    artifact, the author *would have* asserted incorrectly;
+    live-system check before final assertion produces the correct
+    test directly. CP2-CP3 era examples: capstone empty-code 422
+    (assumed accept; verified schema → flipped); admin DM
+    `triggered_by` taxonomy (assumed `'admin'`; verified →
+    `'admin_manual'`); mock interview audit pipeline (assumed
+    `agent_actions`; verified → `mock_cost_log` +
+    `agent_invocation_log`).
+
+**Both directions equally valuable; the drift-prevented direction
+is invisible by default (tests pass; nobody knows the author
+*would have* failed); deliberate practice surfaces it as
+caught-at-authoring corrections.**
+
+**Evidence base:** ~14 D18 instances; 6+ pre-D18 instances
+elsewhere in this doc (Patterns 11, 14, 15 referenced live-DB
+introspection as standard).
+
+### Pattern 27 vs Pattern 29 — disambiguation rule (D18 Phase B post-BUG-CP1F)
+
+  * **Pattern 27** (consumer convention drift): infrastructure
+    exists and is correctly invoked by SOME consumers; OTHER
+    consumers drift from convention. The infrastructure is right;
+    enforce the convention at consumer sites.
+  * **Pattern 29** (scaffolded-but-inert): infrastructure exists
+    but NO consumer has executed its happy path end-to-end. The
+    infrastructure may be wrong; surface it by trying. Fix
+    direction: extend or fix the infrastructure.
+
+**Diagnostic primitive — single grep across consumer sites:**
+
+  * `all consumers + 0 broken` → consumer drift / **Pattern 27**
+  * `all consumers + all broken` → infrastructure broken
+  * `some consumers + 0 broken` → coverage gap / **Pattern 29**
+
+For BUG-CP1F: `grep -c '_track_llm_usage' backend/app/agents/*.py`
+showed 5 of 10 agents at 0 calls and 5 at 1+ calls. The 5
+non-zero agents proved the infrastructure works; the 5 zero
+agents were the drift sites. Pattern 27.
+
+The diagnose-first discipline (D12 Bug 11 sibling) saved a wrong
+fix — patching the orchestrator would have been a 1-hour
+diversion that fixed nothing, since the orchestrator was already
+correct.
+
+Cross-reference:
+`docs/architecture/d18-phase-a-test-infrastructure-overview.md`
+holds the same statement with the catalog evidence.
+
+### Pattern 33 — bug-surfacing front-loading (new at D18 Phase B CP5)
+
+**Canonical:**
+
+> Bug-surfacing checkpoints should be ordered by diagnostic-clarity,
+> not by mechanical test-type. Infrastructure-layer first means
+> downstream layers test against fixed infrastructure, producing
+> clean diagnostic signal at each layer. Mixing layers from the
+> start contaminates downstream diagnostics with upstream noise.
+
+**Evidence (D18 Phase B):**
+
+  * CP1 (critical-path happy paths through real infrastructure):
+    3 infrastructure-layer bugs caught at integration cost (~₹14
+    incl. remediation).
+  * CP2 (high-value edge cases on critical paths): 0 product bugs.
+    Edges tested against fixed infrastructure ran clean.
+  * CP3 (UI→DB traceability contracts): 0 contract bugs. Same
+    reason.
+  * CP4 (error states + adversarial input): 1 distinct
+    behavioral-layer bug (BUG-CP4-LESSON-FK-500) none of the prior
+    CPs would have reached.
+
+Distribution: front-loaded infrastructure (3 at CP1) + tail
+behavioral (1 at CP4). Distribute test-authoring investment along
+this bug-class distribution rather than uniformly. The N-test
+fixed envelope produces more bugs caught when ordered by
+diagnostic-clarity.
+
+**Generalizes beyond testing arcs** — applies to any
+diagnostic-cost-sensitive engineering work where layers can be
+ordered (debugging cascading failures; root-cause analysis under
+flaky symptoms; refactoring large surface areas).
+
+### Pattern 34 — pre-flight infrastructure investment compounds (new at D18 Phase B CP5)
+
+**Canonical:**
+
+> Pre-flight infrastructure investment compounds non-linearly with
+> consumption. Per-test friction across N tests is N × per-test
+> marginal cost; pre-flight infrastructure work is one-time fixed
+> cost. Break-even is ~10-15 consumers; beyond that, infrastructure
+> investment dominates. Apply when consumption count is predictable
+> and >10.
+
+**Evidence (D18 Phase A retrofit-3 + Phase B consumption):**
+
+  * Retrofit-3 cost: ~150 LoC across `content_seeders.py` (~250
+    LoC) + `sync_async_bridge.py` (~250 LoC) + 3 smoke tests.
+    ~2 hours of authoring.
+  * Phase B consumption: 58 tests across 16 files. Without
+    retrofit-3, each file would have inlined ~50-80 LoC of
+    bridging — total ~800-1280 LoC of duplicated infrastructure
+    code across the journey suite.
+  * Phase B's 3-extension budget across CP2-CP4: 0 used. The
+    pre-flight investment covered all consumption.
+
+**Counter-example to know when not to apply:** if the consumption
+count is uncertain or low (1-3 consumers), the pre-flight
+investment doesn't break even — inline directly and keep the
+per-test code self-contained.
+
+### Cross-reference back to Phase A overview
+
+The Phase A test infrastructure overview (`docs/architecture/d18-phase-a-test-infrastructure-overview.md`)
+holds the per-pattern context with N-counts (Pattern 22 N=14+,
+Pattern 29 N=4 etc.) and the Phase B deliverable context. This
+canonical doc holds the elevated canonical statements that
+generalize beyond the testing arc. The Phase B test coverage
+overview at
+`docs/architecture/d18-phase-b-test-coverage-overview.md`
+holds the per-CP catalog and bug log.
