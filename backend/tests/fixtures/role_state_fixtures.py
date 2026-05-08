@@ -511,12 +511,318 @@ async def seed_data_analyst_with_entitlement(
     )
 
 
+# ── D17b/ITEM 3 lead-in signal seed helpers ──────────────────────────
+#
+# These extend the canonical role-state seeders with the additional
+# state required by read_student_lead_in_signals: student_risk_signals
+# (slip_type + days_since_last_session), agent_actions
+# (mock_interview verdicts), and learning_sessions (activity proxy).
+#
+# Each helper composes on top of one of the existing canonical seeders
+# (e.g., data_analyst_with_entitlement) so the role-progression
+# context is always coherent. The helpers do NOT commit; the caller
+# controls transactions.
+
+
+async def _seed_risk_signal(
+    session: AsyncSession,
+    *,
+    student_id: uuid.UUID,
+    slip_type: str,
+    days_since_last_session: int | None,
+    risk_score: int = 50,
+) -> None:
+    """Insert/update student_risk_signals. id is NOT NULL with no DB
+    default — supply explicitly."""
+    await session.execute(
+        sql_text(
+            """
+            INSERT INTO student_risk_signals
+              (id, user_id, slip_type, risk_score,
+               days_since_last_session, max_streak_ever, paid)
+            VALUES (:id, :uid, :slip, :score, :days, 0, FALSE)
+            ON CONFLICT (user_id) DO UPDATE
+            SET slip_type = EXCLUDED.slip_type,
+                risk_score = EXCLUDED.risk_score,
+                days_since_last_session =
+                  EXCLUDED.days_since_last_session
+            """
+        ),
+        {
+            "id": uuid.uuid4(),
+            "uid": student_id,
+            "slip": slip_type,
+            "score": risk_score,
+            "days": days_since_last_session,
+        },
+    )
+
+
+async def _seed_passing_mock_action(
+    session: AsyncSession,
+    *,
+    student_id: uuid.UUID,
+    hours_ago: int,
+    target_role_slug: str = "data_analyst",
+) -> None:
+    """Insert an agent_actions row simulating a passing mock_interview.
+
+    The aggregator filters on
+    output_data['session_verdict']['passed']=true. action_type is
+    NOT NULL on agent_actions; supply 'execute'.
+    """
+    output = {
+        "session_verdict": {
+            "passed": True,
+            "transition_target": {"to_role_slug": target_role_slug},
+        }
+    }
+    when = datetime.now(UTC) - timedelta(hours=hours_ago)
+    await session.execute(
+        sql_text(
+            """
+            INSERT INTO agent_actions
+              (id, agent_name, student_id, action_type, status,
+               output_data, created_at)
+            VALUES
+              (:id, 'mock_interview', :sid, 'execute', 'completed',
+               CAST(:out AS JSONB), :ts)
+            """
+        ),
+        {
+            "id": uuid.uuid4(),
+            "sid": student_id,
+            "out": json.dumps(output),
+            "ts": when,
+        },
+    )
+
+
+async def _seed_learning_session(
+    session: AsyncSession,
+    *,
+    student_id: uuid.UUID,
+    days_ago: int,
+    ordinal: int,
+) -> None:
+    """Insert a learning_sessions row at days_ago from now. Distinct
+    days within the 7-day window drive the recent_activity_days_count_7d
+    aggregator output."""
+    when = datetime.now(UTC) - timedelta(days=days_ago)
+    await session.execute(
+        sql_text(
+            """
+            INSERT INTO learning_sessions
+              (id, user_id, ordinal, started_at, created_at)
+            VALUES (:id, :uid, :ord, :ts, :ts)
+            """
+        ),
+        {
+            "id": uuid.uuid4(),
+            "uid": student_id,
+            "ord": ordinal,
+            "ts": when,
+        },
+    )
+
+
+async def seed_returning_after_absence_data_analyst(
+    session: AsyncSession,
+    *,
+    email_suffix: str | None = None,
+    days_absent: int = 7,
+) -> SeededStudent:
+    """data_analyst student who hasn't logged in for `days_absent` days.
+
+    Triggers career_coach + study_planner Rule 1
+    (days_since_last_session >= 5 → returning-after-absence framing).
+    """
+    base = await seed_data_analyst_with_entitlement(
+        session, email_suffix=email_suffix
+    )
+    # No active slip — just absence. F1 would normally classify as
+    # cold_signup or similar but for this test we want pure-absence.
+    await _seed_risk_signal(
+        session,
+        student_id=base.user_id,
+        slip_type="none",
+        days_since_last_session=days_absent,
+    )
+    return base
+
+
+async def seed_just_passed_mock_data_scientist(
+    session: AsyncSession,
+    *,
+    email_suffix: str | None = None,
+    mock_hours_ago: int = 6,
+) -> SeededStudent:
+    """data_scientist who passed a mock_interview within the last
+    `mock_hours_ago` hours.
+
+    Triggers career_coach Rule 2 (mock pass within 24h →
+    mock-progress framing).
+    """
+    base = await seed_mid_progression_data_scientist(
+        session, email_suffix=email_suffix
+    )
+    await _seed_passing_mock_action(
+        session,
+        student_id=base.user_id,
+        hours_ago=mock_hours_ago,
+        target_role_slug="ml_engineer",
+    )
+    # Recent activity so absence framing doesn't also fire.
+    await _seed_risk_signal(
+        session,
+        student_id=base.user_id,
+        slip_type="none",
+        days_since_last_session=1,
+    )
+    return base
+
+
+async def seed_just_cleared_gate_data_analyst(
+    session: AsyncSession,
+    *,
+    email_suffix: str | None = None,
+    transition_hours_ago: int = 24,
+) -> SeededStudent:
+    """data_analyst who cleared the python_developer → data_analyst
+    transition within the last `transition_hours_ago` hours.
+
+    Triggers career_coach Rule 3 (transition within 48h →
+    gate-cleared celebration framing). The base helper already seeds
+    a transitions_completed entry; this helper overrides its
+    completed_at to a fresh timestamp.
+    """
+    base = await seed_data_analyst_with_entitlement(
+        session, email_suffix=email_suffix
+    )
+    # Override transitions_completed with a recent completed_at
+    transitions = [
+        {
+            "from_slug": "python_developer",
+            "to_slug": "data_analyst",
+            "completed_at": (
+                datetime.now(UTC) - timedelta(hours=transition_hours_ago)
+            ).isoformat(),
+            "capstone_score": 0.78,
+            "mock_session_ids": [str(uuid.uuid4()), str(uuid.uuid4())],
+        }
+    ]
+    await session.execute(
+        sql_text(
+            """
+            UPDATE student_role_state
+            SET transitions_completed = CAST(:completed AS JSONB)
+            WHERE student_id = :sid
+            """
+        ),
+        {"sid": base.user_id, "completed": json.dumps(transitions)},
+    )
+    await _seed_risk_signal(
+        session,
+        student_id=base.user_id,
+        slip_type="none",
+        days_since_last_session=1,
+    )
+    return base
+
+
+async def seed_healthy_data_analyst(
+    session: AsyncSession,
+    *,
+    email_suffix: str | None = None,
+) -> SeededStudent:
+    """data_analyst with no signals warranting a lead-in.
+
+    Control fixture — verifies prompts default to no-lead-in when
+    none of Rules 1-3 match (career_coach) and no stalled/momentum
+    signal triggers (study_planner). Active recent (1 day ago) so no
+    absence; no slip; no recent transition (uses base helper's
+    days_in_role+1 backdate); no recent mock pass.
+    """
+    base = await seed_data_analyst_with_entitlement(
+        session, email_suffix=email_suffix
+    )
+    await _seed_risk_signal(
+        session,
+        student_id=base.user_id,
+        slip_type="none",
+        days_since_last_session=1,
+    )
+    return base
+
+
+async def seed_stalled_data_analyst(
+    session: AsyncSession,
+    *,
+    email_suffix: str | None = None,
+) -> SeededStudent:
+    """data_analyst with current_slip_type='capstone_stalled'.
+
+    Triggers study_planner Rule 1 (stalled → walk-through framing).
+    Caller-supplied days_since_last_session=2 so absence doesn't
+    also fire; the prompt's priority order picks stalled either way
+    (stalled > returning > momentum) but explicit avoids ambiguity.
+    """
+    base = await seed_data_analyst_with_entitlement(
+        session, email_suffix=email_suffix
+    )
+    await _seed_risk_signal(
+        session,
+        student_id=base.user_id,
+        slip_type="capstone_stalled",
+        days_since_last_session=2,
+        risk_score=72,
+    )
+    return base
+
+
+async def seed_momentum_data_analyst(
+    session: AsyncSession,
+    *,
+    email_suffix: str | None = None,
+) -> SeededStudent:
+    """data_analyst with 4 distinct active days in the last 7.
+
+    Triggers study_planner Rule 3 (momentum proxy: >=3 active days
+    in last 7 AND no slip → momentum framing). No slip; recent
+    activity present.
+    """
+    base = await seed_data_analyst_with_entitlement(
+        session, email_suffix=email_suffix
+    )
+    # 4 distinct days within the 7-day window
+    for i, days_ago in enumerate([0, 1, 3, 5]):
+        await _seed_learning_session(
+            session,
+            student_id=base.user_id,
+            days_ago=days_ago,
+            ordinal=i + 1,
+        )
+    await _seed_risk_signal(
+        session,
+        student_id=base.user_id,
+        slip_type="none",
+        days_since_last_session=0,
+    )
+    return base
+
+
 __all__ = [
     "SeededStudent",
     "seed_data_analyst_with_entitlement",
+    "seed_healthy_data_analyst",
+    "seed_just_cleared_gate_data_analyst",
+    "seed_just_passed_mock_data_scientist",
     "seed_mid_progression_data_scientist",
     "seed_ml_engineer_for_gate_prep",
     "seed_ml_engineer_with_capstone_submission",
+    "seed_momentum_data_analyst",
     "seed_python_developer_fresh",
     "seed_python_developer_with_curated_bank",
+    "seed_returning_after_absence_data_analyst",
+    "seed_stalled_data_analyst",
 ]

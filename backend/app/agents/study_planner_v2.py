@@ -209,6 +209,12 @@ class StudyPlannerAgent(AgenticBaseAgent[StudyPlannerInput]):
             self, ctx, "read_student_accessible_content", accessible_args
         )
 
+        # D17b/ITEM 3 — state-aware lead-in signals (Pattern 26).
+        lead_in_signals_data = await _safe_tool(
+            self, ctx, "read_student_lead_in_signals",
+            {"student_id": str(student_id)} if student_id else {},
+        )
+
         # Urgency detection — extends D12 mode-inference convention.
         # Looks for explicit "X days until / before [interview/exam/...]"
         # phrasing and an evergreen short-fuse keyword set. Captured here
@@ -218,6 +224,11 @@ class StudyPlannerAgent(AgenticBaseAgent[StudyPlannerInput]):
 
         # ── LLM call ──────────────────────────────────────────────
         system_prompt = _load_prompt("study_planner")
+        # D17b/ITEM 3 (Path E): the LLM does NOT see lead_in_signals;
+        # composition is post-LLM via compose_lead_in_opener (prepended
+        # to answer below). Keeps prompt size flat — avoids the
+        # timeout-drift the prompt-side approach surfaced in 7-phase
+        # verification on the 30s study_planner dispatch ceiling.
         user_block = _build_user_block(
             message=resolved_msg or "",
             mode=resolved_mode,
@@ -252,7 +263,13 @@ class StudyPlannerAgent(AgenticBaseAgent[StudyPlannerInput]):
 
         payload = output.model_dump(mode="json")
         # Projection for dispatch._extract_text.
-        payload["answer"] = _compose_answer(output)
+        # D17b/ITEM 3 (Path E) — prepend deterministic lead-in opener
+        # when state warrants. Healthy students get None; answer
+        # passes through unchanged. Patterns 26 + 30 (deterministic
+        # composition over prompt judgment).
+        composed = _compose_answer(output)
+        opener = _compose_opener_from_data(lead_in_signals_data)
+        payload["answer"] = f"{opener}\n\n{composed}" if opener else composed
 
         # ── Commit plan to memory (write path — raises on failure) ─
         await self._commit_plan(output=output, ctx=ctx)
@@ -432,6 +449,32 @@ def _detect_urgency(message: str) -> dict[str, Any] | None:
         return {"days_until": 0, "event": "interview", "signal": "today"}
 
     return None
+
+
+def _compose_opener_from_data(lead_in_signals: dict[str, Any]) -> str | None:
+    """D17b/ITEM 3 (Path E) — bridge to compose_lead_in_opener for
+    study_planner. study_planner doesn't surface gate-cleared / mock-
+    pass framings (career_coach-only triggers), so it doesn't need
+    role_state arguments — the composer's agent_name='study_planner'
+    branch ignores those fields.
+    """
+    if not isinstance(lead_in_signals, dict) or not lead_in_signals:
+        return None
+
+    from app.agents.primitives.lead_in_composer import compose_lead_in_opener
+    from app.agents.tools.universal.read_student_lead_in_signals import (
+        ReadStudentLeadInSignalsOutput,
+    )
+
+    try:
+        signals = ReadStudentLeadInSignalsOutput.model_validate(
+            lead_in_signals
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.debug("study_planner.lead_in_signal_parse_failed", error=str(exc))
+        return None
+
+    return compose_lead_in_opener(signals, agent_name="study_planner")
 
 
 def _build_user_block(

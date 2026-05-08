@@ -207,6 +207,15 @@ class CareerCoachAgent(AgenticBaseAgent[CareerCoachInput]):
             self, ctx, "read_student_role_state",
             {"student_id": str(student_id)} if student_id else {},
         )
+        # D17b/ITEM 3 — state-aware lead-in signals (Pattern 26).
+        # Aggregator returns the 5 fields the prompt branches on for
+        # whether/which lead-in to fire. Empty dict on failure → prompt
+        # treats as "no signals warrant a lead-in" and handles the
+        # question directly (graceful degradation).
+        lead_in_signals_data = await _safe_tool(
+            self, ctx, "read_student_lead_in_signals",
+            {"student_id": str(student_id)} if student_id else {},
+        )
         # Filter accessible content to the current role for the
         # default coaching path. The unfiltered union is reserved for
         # when the student asks about cross-role progression — left
@@ -252,6 +261,12 @@ class CareerCoachAgent(AgenticBaseAgent[CareerCoachInput]):
             )
 
         # ── LLM call ──────────────────────────────────────────────
+        # D17b/ITEM 3 (Path E): the LLM does NOT see lead_in_signals.
+        # Lead-in composition is deterministic and happens post-LLM
+        # via compose_lead_in_opener (prepended to answer below).
+        # Keeping signals out of the user_block avoids the tone-
+        # competition + timeout-drift issues the prompt-side approach
+        # surfaced in 7-phase verification.
         system_prompt = _load_prompt("career_coach")
         user_block = _build_user_block(
             question=resolved_q,
@@ -287,7 +302,17 @@ class CareerCoachAgent(AgenticBaseAgent[CareerCoachInput]):
         output.handoff_requests = []
 
         payload = output.model_dump(mode="json")
-        payload["answer"] = output.headline
+        # D17b/ITEM 3 (Path E) — deterministic lead-in opener.
+        # Compose from signals (already fetched above) + role-state-
+        # derived next-role brief (when available) for gate-cleared
+        # framing. Opener is None for healthy students; no change to
+        # answer in that case.
+        opener = _compose_opener_from_data(
+            lead_in_signals_data, role_state_data
+        )
+        payload["answer"] = (
+            f"{opener}\n\n{output.headline}" if opener else output.headline
+        )
 
         # Best-effort interaction memory.
         try:
@@ -362,6 +387,68 @@ async def _safe_tool(
     except Exception as exc:  # noqa: BLE001
         log.debug("career_coach.tool_skipped", tool=tool_name, error=str(exc))
         return {}
+
+
+def _compose_opener_from_data(
+    lead_in_signals: dict[str, Any],
+    role_state: dict[str, Any],
+) -> str | None:
+    """D17b/ITEM 3 (Path E) — bridge from tool-call dict outputs to the
+    deterministic compose_lead_in_opener function.
+
+    Reconstructs a StudentLeadInSignals instance from the aggregator
+    tool's dict output (which is what _safe_tool returns), pulls the
+    next-role display name + identity brief from role_state when
+    present (for the gate-cleared template's enriched form), and
+    delegates to compose_lead_in_opener.
+
+    Returns None when no lead-in fires, or when lead_in_signals is
+    empty/malformed (graceful degradation — no opener is the
+    safe-default behavior).
+    """
+    if not isinstance(lead_in_signals, dict) or not lead_in_signals:
+        return None
+
+    from app.agents.primitives.lead_in_composer import compose_lead_in_opener
+    from app.agents.tools.universal.read_student_lead_in_signals import (
+        ReadStudentLeadInSignalsOutput,
+    )
+
+    try:
+        signals = ReadStudentLeadInSignalsOutput.model_validate(
+            lead_in_signals
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.debug("career_coach.lead_in_signal_parse_failed", error=str(exc))
+        return None
+
+    # Pull next-role display name + identity brief from role_state for
+    # the gate-cleared enriched template. The aggregator's
+    # most_recent_transition_completed_at signals which transition
+    # completed; role_state.current_role is the role they JUST
+    # transitioned INTO (after the transition); so for gate-cleared
+    # framing we use current_role's display_name + description as the
+    # "new identity" the celebration references.
+    display_name: str | None = None
+    role_brief: str | None = None
+    if isinstance(role_state, dict):
+        current = role_state.get("current_role") or {}
+        if isinstance(current, dict):
+            dn = current.get("display_name")
+            desc = current.get("description")
+            if isinstance(dn, str) and dn:
+                display_name = dn
+            if isinstance(desc, str) and desc:
+                # Description may be long; take the first sentence so
+                # the opener stays compact.
+                role_brief = desc.split(".")[0].strip() or None
+
+    return compose_lead_in_opener(
+        signals,
+        agent_name="career_coach",
+        role_identity_brief=role_brief,
+        next_role_display_name=display_name,
+    )
 
 
 def _build_user_block(
