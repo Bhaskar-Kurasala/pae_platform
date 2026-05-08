@@ -100,7 +100,7 @@ additions land inline; non-trivial additions go to
 
 ---
 
-## Fixture catalog (25 total)
+## Fixture catalog (25 + content seeders at retrofit-3)
 
 ### D15+D17b origin (12)
 seed_python_developer_fresh, seed_mid_progression_data_scientist,
@@ -122,6 +122,19 @@ seed_promotion_avoidant_student, seed_cold_signup_student.
 ### CP4 admin fixtures (2)
 seed_admin_user_with_login, seed_admin_with_outreach_history.
 
+### Retrofit-3 content seeders (`tests/fixtures/content_seeders.py`)
+seed_minimal_lesson_chain, seed_minimal_capstone_bundle,
+seed_lesson_with_progress_state, cleanup_seeded_lessons.
+Per-test inline lesson + capstone seeding; the playwright_test
+template stays content-empty by design (seed what your test needs,
+clean it up). Use cases:
+  * journey (b) lesson nav + completion — seed via
+    `seed_lesson_with_progress_state(state="in_progress")`.
+  * journey (c) capstone via PracticePage — seed via
+    `seed_minimal_capstone_bundle("python-developer")`.
+  * journey (g) gate eval — seed via `seed_minimal_lesson_chain`
+    + the existing role_state + journey fixtures.
+
 ### Pytest fixtures wired in conftest.py
 python_developer_student, admin_user_with_login, paid_silent_student,
 capstone_stalled_student, journey_through_data_analyst,
@@ -130,6 +143,8 @@ admin_browser_context (CP5), budget_tracker (CP5).
 **Convention:** seed helpers don't commit; the pytest fixture wrapper
 controls transactions. Cleanup goes through `cleanup_student_data()`
 which runs DELETEs in the documented FK order (children → users).
+Content seeders use `cleanup_seeded_lessons` for lesson-id-based
+cleanup that CASCADEs to exercises + progress.
 
 ---
 
@@ -154,6 +169,16 @@ notes inline.
 `record_test_cost(...)`, `BudgetExceeded`. Session fixture
 `budget_tracker`. Default ₹2.00 ceiling; override via
 `PLAYWRIGHT_BUDGET_INR`.
+
+### sync_async_bridge (retrofit-3)
+`run_async`, `seed_student_via_db`, `mutate_student_state_via_db`,
+`register_via_http`, `fetch_token_via_http`, `inject_auth_into_context`,
+`login_as_seeded_student`, `cleanup_student_via_db`.
+Extracts the inline thread-isolated-asyncpg + HTTP-register +
+localStorage-injection patterns that CP5 admin_browser_context
+and CP1 journey-a inlined into per-fixture/per-test code. Phase B
+journeys that need DB seeding from a sync browser test should use
+this module rather than re-author the bridge.
 
 ---
 
@@ -280,17 +305,46 @@ docker compose -f docker-compose.yml -f docker-compose.playwright.yml \
 `--rebuild` always rebuilding both frontend AND runner). CI runs
 this script before the test step.
 
-### Pattern 29 evidence base extends
+### Pattern 29 evidence base extends (N=4 at retrofit-3 close)
 
 Phase A close had two Pattern 29 instances on the catalog
-(admin_console_*, runner overlay scaffolding). Path A's verification
-extends to a third: scaffolded-but-pullable is not the same as
-ready-and-executed. The runner image being pullable from CP6 close
-was misread as "infrastructure ready"; the four-layer gap surfaced
-only on first invocation. Canonical statement strengthens to:
-**infrastructure is ready when its happy-path smoke has been executed
-end-to-end at least once, not when its components have been
-authored.**
+(admin_console_*, runner overlay scaffolding). Phase B's pre-CP1
+verification (Path A) extended to N=3: scaffolded-but-pullable is
+not the same as ready-and-executed.
+
+Phase B's first journey-test authoring extended to N=4:
+single-axis-tested is not the same as multi-axis-ready.
+
+  * **N=1 admin_console_*** (D14b) — scaffolded UI flow.
+  * **N=2 runner overlay** (CP6 → retrofit-1, commits d6b2374 +
+    f84803d) — pulled image, never executed.
+  * **N=3 PracticePage assert_capstone_rail_visible** (retrofit-2,
+    commit 528a7ac) — page object's selector worked for its
+    authored case (populated bundle), failed for the cross-axis
+    case (fresh-registered student → empty bundle DOM).
+  * **N=4 playwright_test content + sync/async bridge**
+    (retrofit-3, this commit) — single-axis fixtures didn't
+    compose for multi-axis browser-test consumption.
+
+**Canonical statement (refined at retrofit-3 close):**
+*Test infrastructure is "ready" only when its happy-path smoke
+AND each cross-axis consumer scenario have been executed end-to-end
+at least once. A component that passes its own internal smoke but
+has never been used by a real consumer is scaffolded-but-unconsumed;
+expect surfaces when the first consumer arrives.*
+
+The full multi-axis retrospective is at
+`docs/followups/phase-a-spec-multi-axis-consumer-gaps.md`.
+
+### Pattern 22 negative-claim symmetry (CP1.1 finding)
+
+Phase B's CP1.1 inventory audit reported three "missing" infra
+items that all existed in the live code (admin_fixtures.py,
+lessons completion endpoint, frontend testid set on /practice).
+"Search didn't find X" is not evidence X doesn't exist; live-system
+verification required for negative claims as much as for positive
+shape claims. Documented per architect's CP1 directive; will harden
+into a canonical Pattern 22 corollary if a third instance surfaces.
 
 ---
 
@@ -409,6 +463,55 @@ Key conventions:
 - For real-LLM tests, opt into `budget_tracker` and capture
   `start = datetime.now(UTC)` before the LLM call; the tracker's
   `query_test_cost(db_session, since=start)` attributes cost.
+
+### Sync browser test patterns (retrofit-3)
+
+If your test takes the sync `page` fixture (any pytest-playwright
+test) AND needs DB-seeded state, use `sync_async_bridge` rather than
+the async pytest fixtures (which can't share an event loop with
+sync browser tests):
+
+```python
+from tests.playwright.helpers.sync_async_bridge import (
+    seed_student_via_db, register_via_http,
+    login_as_seeded_student, cleanup_student_via_db,
+)
+from tests.fixtures.role_state_fixtures import (
+    seed_mid_progression_data_scientist,
+)
+
+def test_browser_with_role_state_seeded_student(page):
+    # DB-state-seeded student (no browser session yet):
+    student = seed_student_via_db(seed_mid_progression_data_scientist)
+    # The seeded student has hashed_password='x' — can't login via HTTP.
+    # For a browser-logged-in student, register fresh via HTTP:
+    user_id = register_via_http(
+        email="...", password="...", full_name="...",
+    )
+    try:
+        login_as_seeded_student(page, user_id=user_id, ...)
+        page.goto("/today")
+        # ... drive the journey
+    finally:
+        cleanup_student_via_db(user_id)
+        cleanup_student_via_db(student.user_id)
+```
+
+If your test needs lesson content for the route under test, seed
+inline via the content seeders:
+
+```python
+from tests.playwright.helpers.sync_async_bridge import seed_student_via_db
+from tests.fixtures.content_seeders import seed_minimal_lesson_chain
+
+def test_journey_b_lesson_completion(page):
+    chain = seed_student_via_db(
+        seed_minimal_lesson_chain,
+        course_slug="python-developer",
+        n=2,
+    )
+    # chain.lesson_ids[0] is now usable in /lessons/{id}
+```
 
 ---
 
