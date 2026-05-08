@@ -313,7 +313,16 @@ even though the doc's *intent* is still correct.
 - D17a Item C (eval-row-writer column-length) — the doc named the
   audit_log column with a length constraint that was widened
   immediately after the doc was written.
-- N=2; promoted to canonical at D15 closure.
+- D16 CP1 finding (h) (inactivity_sweep docstring) — the task
+  docstring claimed `disrupt_prevention` "consumes these via the
+  chat/agents surface"; CP1 grep confirmed no consumer existed.
+  Same drift shape, different artifact (a *task module docstring*
+  rather than a follow-up doc). Extends the canonical statement:
+  framing-drift discipline applies equally to follow-up docs, task
+  docstrings, and code comments — anywhere prose makes claims about
+  code paths that future code can invalidate.
+- N=3 across follow-up docs + code comments + task docstrings;
+  canonical scope extended at D16 closure.
 
 ### Pattern 24: docker-compose volume mount asymmetry
 
@@ -491,6 +500,113 @@ fires when fixture-encoded values drift.
   regression-slice run; fixtures rebuilt at CP4 closure.
 - N=2 with different shapes (data + schema evolution); promoted to
   canonical at D15 closure.
+
+### Pattern 28: Functional audit before gap-closure for already-built infrastructure
+
+When a deliverable's prompt assumes infrastructure gaps that haven't
+been functionally verified, the deliverable risks shipping scaffolding
+on top of code that's already shipped. The work is real; the work is
+in the wrong place.
+
+**Discipline:** deliverables that touch already-built infrastructure
+should start with a functional audit (CP1-style read-only investigation),
+not assumed-gap-closure. The audit's findings determine the rest of the
+deliverable's scope. Concretely:
+
+- For each surface the deliverable plans to extend, write down the
+  pre-audit assumption ("the cockpit doesn't read X") and the audit
+  result ("the cockpit was already migrated to read X via LD-1..LD-5
+  annotations").
+- Severity-classify gaps that are confirmed (HIGH = launch blocker,
+  MEDIUM = pre-launch fix, LOW = post-launch defer). The deliverable's
+  shape is determined by the count + severity of confirmed gaps, not
+  by the pre-audit assumption.
+- Stop conditions on the audit checkpoint: too-many-HIGH gaps mean the
+  scope assumption was wrong; zero gaps mean the deliverable is
+  largely deferred (and that's fine — verification IS the deliverable).
+- Audit cost is near-zero (read-only code inspection); spending a
+  near-zero budget to right-size the engineering scope is a
+  near-infinite ROI ratio.
+
+**Why this matters:** the original D16 plan was 8+ hours of
+new-agent + new-MCP-server work that the audit revealed was already
+shipped. The reframe became: 1 launch-blocker (Celery Fly apps), 3
+small audit-trail gaps, 1 schema cleanup, plus the WhatsApp gap that
+WAS real. Without CP1, the deliverable would have shipped duplicate
+infrastructure.
+
+**Provenance:**
+- D16 CP1 (functional retention engine audit) — the original plan
+  assumed gaps in F1+F3+F4+F5+F8+F9+F10+F11; CP1 confirmed all 8
+  surfaces shipped + working. Reframed scope from "new agents +
+  Email MCP + proactive layer" to "verify what's there + close
+  targeted gaps." Engagement shape changed materially based on
+  audit findings.
+- N=1 (this engagement); promoted to canonical at D16 closure with
+  strong N=1 evidence per the founder's CP1 acknowledgement note
+  ("D16's entire shape changed because we audited first").
+- Discipline statement: "Deliverables that touch already-built
+  infrastructure should start with functional audit, not
+  assumed-gap-closure."
+
+### Pattern 29: Scaffolded-but-inert detection
+
+A schema can ship with all its tables created, models defined, and
+ORM imports wired — and still have zero data flowing into it because
+the writer code never landed (or was retired) without the schema
+being dropped. The cluster looks live (tables exist, code imports
+the models) but is functionally dead.
+
+**Two variants:**
+
+1. **No-writer-found:** the schema shipped but the writer was never
+   authored. Reader endpoints (if any) silently return empty / stale
+   data. The reader's downstream consumers degrade silently because
+   "empty rows" is a valid shape.
+2. **Writer-retired-without-drop:** the writer was authored, then
+   superseded (e.g., the cockpit migrated to read from primary tables
+   instead of the denormalized cluster). The cluster's seed/snapshot
+   data persists indefinitely, drifting from primary-table truth.
+
+**Discipline:**
+- At schema-design time, every CREATE TABLE migration commits to a
+  writer path within the same release cycle, or the migration
+  explicitly notes "demo-seed-only, no writer planned, drop migration
+  scheduled at NNNN" in the migration docstring.
+- At reader-migration time (e.g., cockpit moves from denorm to live
+  primary-table reads), the dropping-the-old-tables migration is
+  scheduled in the same PR or as an explicit follow-up doc with a
+  pre-drop checklist.
+- CI improvement candidate: a check that grep-asserts every model in
+  `app/models/` has at least one writer call site under
+  `app/services/` or `app/tasks/`. Any model with zero writers is
+  surfaced; if intentional (demo seed, future-proofing), it goes on
+  an allowlist in the check.
+- Every architectural audit run (Pattern 28-style functional audit)
+  should explicitly check for this shape: for each table cluster the
+  audit covers, grep for the writer; if absent, classify as
+  scaffolded-but-inert and severity-rate (HIGH if a reader silently
+  returns wrong data; MEDIUM if dormant-but-cleanup-pending; LOW if
+  documented intent).
+
+**Why this matters:** scaffolded-but-inert tables are a slow-burn
+correctness risk. The reader endpoint returns 200 OK; the response
+shape is well-formed; consumers degrade based on "empty cohort" or
+"stale snapshot" assumptions that may not hold. The bug doesn't
+surface in tests because the test fixtures populate the tables. It
+surfaces in production when an admin sees a cohort count that doesn't
+match what they know is true.
+
+**Provenance:**
+- D16 CP1 finding (d) — `admin_console_*` cluster (8 tables, mig 0039)
+  identified as scaffolded-but-inert. CP2.d verification confirmed
+  the reader at `/api/v1/admin/console/v1` was already migrated to
+  read from primary tables (LD-1..LD-5 annotations). This is the
+  variant-2 case (writer-retired-without-drop). Drop migration tracked
+  at `d16-followup-admin-console-drop-migration.md`.
+- N=1; promoted to candidate (not yet canonical) at D16 closure.
+  Pattern firmness depends on observing the same shape in another
+  cluster — CI check would generate the dataset.
 
 ## Application guide
 
