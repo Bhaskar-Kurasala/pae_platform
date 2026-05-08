@@ -1,36 +1,95 @@
-# D18 Phase A CP2 — Playwright test compose override.
+# D18 Phase A — Playwright test compose override.
 #
-# Inherits from docker-compose.yml and overrides the backend's
-# DATABASE_URL (via POSTGRES_DB) so the backend reads from
-# `playwright_test` instead of the default `platform` database.
+# Inherits from docker-compose.yml. Two responsibilities:
 #
-# Frontend is unchanged — D-A's "production build, not dev server" is
-# already inherent in docker-compose.yml's frontend container, which
-# runs `node server.js` from a Next.js standalone build (per
-# frontend/CLAUDE.md). No override needed for frontend.
+#   1. Reroute the backend onto playwright_test database.
+#      The app's config.py builds its DATABASE_URL from POSTGRES_*
+#      fields, so overriding POSTGRES_DB redirects the running
+#      FastAPI app. Note alembic's env.py reads DATABASE_URL first
+#      (Pattern 23 finding from CP2), so subprocess invocations
+#      (create_template.py, reset_for_suite.py) override DATABASE_URL
+#      directly. Once the running backend is up, only POSTGRES_DB
+#      matters for it.
 #
-# CP6 will extend this file with a `playwright-runner` service that
-# runs pytest inside the same docker network (avoids host↔container
-# DSN translation friction). For CP2 the override stops at the
-# DATABASE_URL routing.
+#   2. Provide a `playwright-runner` service (CP6) for executing
+#      tests inside the docker network — avoids host↔container DSN
+#      translation friction and the MSYS path-mangling that surfaces
+#      when running pytest from Git Bash. Image is the upstream
+#      mcr.microsoft.com/playwright/python:v1.59.0 (~2.3 GB; browser
+#      binaries pre-bundled, version-locked to the Python SDK
+#      installed in backend's venv at CP1 — see the
+#      playwright-browser-system-deps follow-up).
 #
 # Usage:
-#   # Spin up the stack against the playwright_test database:
+#   # Spin up stack against playwright_test:
 #   docker compose -f docker-compose.yml -f docker-compose.playwright.yml \
-#     up -d backend frontend
+#       up -d backend frontend
+#
+#   # Run the full Playwright suite (one-shot):
+#   docker compose -f docker-compose.yml -f docker-compose.playwright.yml \
+#       --profile playwright run --rm playwright-runner
 #
 #   # Tear back down to the default platform database:
 #   docker compose -f docker-compose.yml up -d backend frontend
 #
-# Pre-condition: the playwright_test database must exist (created by
-# backend/tests/playwright/db/reset_for_suite.py, which clones from
-# playwright_test_template authored by create_template.py).
+# Pre-condition: playwright_test_template must exist. Author it via:
+#   docker compose exec backend uv run python \
+#       /app/tests/playwright/db/create_template.py
 
 services:
   backend:
     environment:
-      # Override the database the backend reads from. The app's
-      # config.py builds DATABASE_URL from POSTGRES_HOST/PORT/DB/USER/
-      # PASSWORD; only POSTGRES_DB needs to change because host,
-      # port, user, password stay the same.
+      # Override the database the running backend reads from.
       POSTGRES_DB: playwright_test
+      # Force DATABASE_URL too — .env sets it explicitly, and any
+      # subprocess (alembic, scripts) reads DATABASE_URL first.
+      # Forcing the URL keeps both the running app AND subprocesses
+      # on the same target.
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/playwright_test
+
+  playwright-runner:
+    # Upstream-maintained image. Browser binaries (chromium, firefox,
+    # webkit) and OS-level system deps are pre-installed and
+    # version-locked to Python SDK v1.59.0 — matches CP1.
+    image: mcr.microsoft.com/playwright/python:v1.59.0
+    profiles: ["playwright"]  # Don't auto-start with `up`.
+    depends_on:
+      backend:
+        condition: service_started
+      frontend:
+        condition: service_started
+      db:
+        condition: service_started
+    environment:
+      # Point pytest-playwright's base_url at in-network frontend.
+      PLAYWRIGHT_BASE_URL: "http://frontend:3000"
+      # Backend HTTP for fixture-side admin auth + auth helper.
+      PLAYWRIGHT_API_BASE: "http://backend:8000/api/v1"
+      # CP4-introduced env var: which DB the backend's HTTP path
+      # writes to. With this overlay it's playwright_test.
+      PLAYWRIGHT_BACKEND_DB: playwright_test
+      # Suite-wide LLM cost ceiling. Default ₹2.00 from CP5; CI can
+      # override per-job to give parallel workers proportional shares.
+      PLAYWRIGHT_BUDGET_INR: "2.00"
+      # Affirms the network topology supports the CP6 full-loop
+      # smoke (chromium-in-runner can reach the frontend bundle's
+      # API URL via the docker network). The smoke test auto-skips
+      # without this — running from inside the backend container
+      # with the dev frontend image hits the bundle's baked-in
+      # localhost:8080 URL, which isn't reachable cross-container.
+      PLAYWRIGHT_FULL_LOOP_OK: "1"
+      # Test DSN for direct-DB fixtures (CP2 conftest reads this).
+      PLAYWRIGHT_TEST_DSN: postgresql+asyncpg://postgres:postgres@db:5432/playwright_test
+      PYTHONPATH: "/app"
+    working_dir: /app
+    volumes:
+      # Mount the entire backend tree (app/, alembic/, tests/) so
+      # tests can import app.* modules and tests/* fixtures, AND
+      # edits to test files propagate without an image rebuild.
+      # Closes the operational tests-not-bind-mounted follow-up.
+      - ./backend:/app
+    # No default command — invoke via `compose run --rm
+    # playwright-runner pytest <args>` so CI can scope per-job.
+    # If invoked without a command, image's default is a shell.
+    entrypoint: ["bash", "-lc"]
+    command: ["pytest tests/playwright/ -v --tb=short"]

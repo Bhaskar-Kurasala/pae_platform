@@ -1,0 +1,94 @@
+# D18 Phase A CP6 — Playwright suite CI workflow.
+#
+# Runs the backend/tests/playwright/ suite against the full docker
+# stack with backend connected to playwright_test. Test execution
+# splits into parallel jobs by file group to dodge the bulk-suite OOM
+# follow-up (see docs/followups/test-suite-bulk-run-oom-by-directory-
+# workaround.md) and the pytest-asyncio + pytest-playwright sync API
+# split-run requirement (see docs/followups/pytest-asyncio-pytest-
+# playwright-split-runs.md).
+#
+# Job split:
+#   * playwright-db-only  — CP2 + CP4 + CP5 (async DB, no browser)
+#   * playwright-browser  — CP3 + CP6 (sync browser, page objects)
+# Phase B will add more jobs as journey tests land.
+#
+# Cumulative budget enforced per-job via PLAYWRIGHT_BUDGET_INR. Phase
+# A jobs run with the default ₹2.00; Phase B real-LLM jobs will pass
+# proportional shares of the run-wide ceiling.
+
+name: Playwright Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  playwright-db-only:
+    name: Playwright (DB-only smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PLAYWRIGHT_BUDGET_INR: "0.50"
+      COMPOSE_FILES: "-f docker-compose.yml -f docker-compose.playwright.yml"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build & start stack against playwright_test
+        run: |
+          chmod +x backend/tests/playwright/scripts/build_and_serve.sh
+          ./backend/tests/playwright/scripts/build_and_serve.sh --rebuild
+
+      - name: Run DB-only Playwright suite
+        # CP2 + CP4 + CP5 — async db_session fixtures; no browser.
+        run: |
+          docker compose ${COMPOSE_FILES} exec -T backend sh -c \
+            "cd /app && uv run pytest \
+              tests/playwright/smoke/test_cp2_db.py \
+              tests/playwright/smoke/test_cp4_fixtures.py \
+              tests/playwright/smoke/test_cp5_helpers.py \
+              -v --tb=short"
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose ${COMPOSE_FILES} down -v
+
+  playwright-browser:
+    name: Playwright (browser smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PLAYWRIGHT_BUDGET_INR: "1.50"
+      # CP6 full-loop topology guarantee — the runner can reach
+      # both nginx and frontend via the docker network.
+      PLAYWRIGHT_FULL_LOOP_OK: "1"
+      COMPOSE_FILES: "-f docker-compose.yml -f docker-compose.playwright.yml"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build & start stack against playwright_test
+        run: |
+          chmod +x backend/tests/playwright/scripts/build_and_serve.sh
+          ./backend/tests/playwright/scripts/build_and_serve.sh --rebuild
+
+      - name: Pull playwright-runner image
+        run: docker compose ${COMPOSE_FILES} --profile playwright pull playwright-runner
+
+      - name: Run browser Playwright suite via runner image
+        # CP3 page-object smoke + CP6 final loop. Runs inside the
+        # playwright-runner container so browsers + system deps are
+        # version-locked to v1.59.0.
+        run: |
+          docker compose ${COMPOSE_FILES} \
+            --profile playwright run --rm playwright-runner \
+            "pip install --quiet pytest pytest-asyncio pytest-playwright sqlalchemy[asyncio] asyncpg passlib[bcrypt] && \
+             pytest tests/playwright/smoke/test_cp3_pages.py \
+                    tests/playwright/smoke/test_cp6_full_loop.py \
+                    -v --tb=short"
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose ${COMPOSE_FILES} down -v
