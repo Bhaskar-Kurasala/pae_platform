@@ -30,6 +30,7 @@ import {
   Clock,
   FileCode2,
   LogIn,
+  MessageCircle,
   MessageSquare,
   NotebookPen,
   Play,
@@ -38,6 +39,7 @@ import {
 import {
   useAdminStudents,
   useCreateStudentNote,
+  useLogManualOutreach,
   useRefundOffers,
   useRiskPanels,
   useSendRefundOffer,
@@ -45,6 +47,7 @@ import {
   useStudentTimeline,
   useStudentTimelineOlder,
   useTriggerAgent,
+  type ManualOutreachChannel,
   type StudentTimelineEvent,
 } from "@/lib/hooks/use-admin";
 import {
@@ -222,6 +225,13 @@ export function StudentDetailPanel({
   const [refundFlash, setRefundFlash] = useState<string | null>(null);
   const [dmDraft, setDmDraft] = useState<string>("");
 
+  // D16/CP3.2 — manual outreach (WhatsApp / phone) state.
+  const logOutreach = useLogManualOutreach(studentId);
+  const [outreachChannel, setOutreachChannel] =
+    useState<ManualOutreachChannel>("whatsapp");
+  const [outreachNote, setOutreachNote] = useState<string>("");
+  const [outreachFlash, setOutreachFlash] = useState<string | null>(null);
+
   // F14 — pagination state for older timeline events.
   const PAGE_SIZE = 50;
   const [cursorStack, setCursorStack] = useState<string[]>([]);
@@ -301,6 +311,28 @@ export function StudentDetailPanel({
       setDmDraft("");
     } catch {
       // global toast handles failure
+    }
+  }
+
+  // D16/CP3.2 — admin recorded a manual outreach (WhatsApp / phone).
+  // Body preview optional; channel defaults to whatsapp because that's
+  // the founder-reframe primary use case. The deep link itself opens
+  // in a new tab via the wa.me anchor — this handler only writes the
+  // outreach_log row for audit.
+  async function handleLogOutreach() {
+    if (!studentId) return;
+    setOutreachFlash(null);
+    try {
+      const row = await logOutreach.mutateAsync({
+        channel: outreachChannel,
+        body_preview: outreachNote.trim() || undefined,
+      });
+      setOutreachNote("");
+      setOutreachFlash(
+        `Logged ${row.channel} contact · ${new Date(row.sent_at).toLocaleString()}`,
+      );
+    } catch (err) {
+      setOutreachFlash(`Failed: ${(err as Error).message}`);
     }
   }
 
@@ -469,6 +501,86 @@ export function StudentDetailPanel({
               <CalendarPlus className="h-3.5 w-3.5" aria-hidden="true" />
               Schedule call
             </a>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* D16/CP3.2 — Manual outreach card (WhatsApp + phone). Distinct
+          from in-app DM because the contact happens outside the platform;
+          the admin clicks the wa.me deep link (their own WhatsApp opens),
+          types the message there, then records what happened here so the
+          retention audit + timeline see the contact. */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardEyebrowHeader
+            eyebrow="Manual outreach · WhatsApp / phone"
+            title="Reach out off-platform"
+            icon={<MessageCircle className="h-4 w-4" aria-hidden="true" />}
+            description={
+              student?.whatsapp_number
+                ? "Open WhatsApp directly, or log a phone call after the fact. Either records to outreach_log so the timeline + retention engine see the contact."
+                : "No WhatsApp number on file for this student. Phone calls can still be logged below."
+            }
+          />
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {student?.whatsapp_number && (
+            <a
+              href={`https://wa.me/${student.whatsapp_number.replace(/\D/g, "")}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 h-9 rounded-lg border border-emerald-500/40 bg-emerald-50 px-3 text-sm font-medium text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-300 dark:hover:bg-emerald-950/50"
+              data-testid="whatsapp-deep-link"
+            >
+              <MessageCircle className="h-3.5 w-3.5" aria-hidden="true" />
+              Open WhatsApp · {student.whatsapp_number}
+            </a>
+          )}
+          <div className="flex items-center gap-2 text-xs">
+            <label htmlFor="outreach-channel" className="text-muted-foreground">
+              Channel
+            </label>
+            <select
+              id="outreach-channel"
+              value={outreachChannel}
+              onChange={(e) =>
+                setOutreachChannel(e.target.value as ManualOutreachChannel)
+              }
+              className="h-8 rounded-md border border-border bg-background px-2"
+              disabled={logOutreach.isPending}
+            >
+              <option value="whatsapp">WhatsApp</option>
+              <option value="phone">Phone call</option>
+            </select>
+          </div>
+          <textarea
+            value={outreachNote}
+            onChange={(e) => setOutreachNote(e.target.value)}
+            placeholder="What happened? (optional, max 200 chars)"
+            maxLength={200}
+            rows={2}
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+            aria-label="Outreach note"
+            disabled={logOutreach.isPending}
+          />
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-muted-foreground">
+              Goes to outreach_log; respects throttle for future system sends.
+            </span>
+            <button
+              type="button"
+              onClick={() => void handleLogOutreach()}
+              disabled={logOutreach.isPending || !studentId}
+              className="rounded-lg bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+              data-testid="log-outreach-button"
+            >
+              {logOutreach.isPending ? "Logging…" : "Log this contact"}
+            </button>
+          </div>
+          {outreachFlash && (
+            <p className="text-xs text-muted-foreground" role="status">
+              {outreachFlash}
+            </p>
           )}
         </CardContent>
       </Card>

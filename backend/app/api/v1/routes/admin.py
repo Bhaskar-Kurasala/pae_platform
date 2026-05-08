@@ -303,6 +303,8 @@ async def list_students(
                 "lessons_completed": lessons_completed,
                 "agent_interactions": agent_interactions,
                 "is_active": student.is_active,
+                # D16/CP3.2 — feeds the cockpit's wa.me deep-link button.
+                "whatsapp_number": student.whatsapp_number,
             }
         )
 
@@ -1175,6 +1177,9 @@ class AdminConsoleStudent(PydanticModel):
     capstones: int
     purchases: int
     risk_reason: str | None = None
+    # D16/CP3.2 — manual-WhatsApp outreach destination. Empty/None ⇒
+    # cockpit hides the wa.me deep-link button on the per-student panel.
+    whatsapp_number: str | None = None
 
 
 class AdminConsolePulseCard(PydanticModel):
@@ -2116,6 +2121,7 @@ async def get_admin_console(
                 capstones=0,
                 purchases=0,
                 risk_reason=risk.risk_reason if risk else None,
+                whatsapp_number=u.whatsapp_number,
             )
         )
     students.sort(key=lambda s: s.risk, reverse=True)
@@ -2240,3 +2246,92 @@ async def admin_list_messages(
         db, student_id=student_id
     )
     return [_admin_msg_to_read(m) for m in msgs]
+
+
+# ── D16/CP3.2 — Manual outreach logging (WhatsApp / phone) ───────────
+
+
+_ALLOWED_MANUAL_OUTREACH_CHANNELS = {"whatsapp", "phone"}
+
+
+class _AdminLogOutreach(PydanticModel):
+    # whatsapp | phone — defaults to whatsapp because that's the primary
+    # use case from the founder reframe; phone is the secondary value
+    # for voice-call outreach the admin wants to record after the fact.
+    channel: str = "whatsapp"
+    # Free-form note about what was discussed. Stored as body_preview
+    # on outreach_log (truncated to 200 chars in the service layer).
+    body_preview: str = ""
+
+
+class _AdminOutreachLogRead(PydanticModel):
+    id: str
+    user_id: str
+    channel: str
+    triggered_by: str
+    triggered_by_user_id: str | None
+    body_preview: str | None
+    sent_at: str
+    status: str
+
+
+@router.post(
+    "/students/{student_id}/outreach",
+    response_model=_AdminOutreachLogRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def admin_log_manual_outreach(
+    student_id: uuid.UUID,
+    payload: _AdminLogOutreach,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(_require_admin),
+) -> _AdminOutreachLogRead:
+    """D16/CP3.2 — record a manual admin outreach (WhatsApp or phone).
+
+    Per locked decision D-B: outreach_log is canonical for admin
+    contact records. The admin clicks the wa.me/{number} deep link
+    (their own WhatsApp opens) or makes a phone call, then taps "Log
+    this contact" to capture what happened. We write a single
+    outreach_log row with channel='whatsapp' (or 'phone'),
+    triggered_by='admin_manual', triggered_by_user_id=<admin>, and
+    status='sent' — the network step happened outside the platform,
+    so we go straight to 'sent' (no 'pending' → 'sent' flip).
+    """
+    from app.services import outreach_service
+
+    channel = payload.channel.lower().strip()
+    if channel not in _ALLOWED_MANUAL_OUTREACH_CHANNELS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"channel must be one of {sorted(_ALLOWED_MANUAL_OUTREACH_CHANNELS)} "
+                f"(got '{payload.channel}')"
+            ),
+        )
+
+    student = await _require_student(db, student_id)
+
+    entry = await outreach_service.record(
+        db,
+        user_id=student.id,
+        channel=channel,
+        template_key=None,
+        slip_type=None,
+        triggered_by="admin_manual",
+        triggered_by_user_id=admin.id,
+        body_preview=payload.body_preview or None,
+        status="sent",
+    )
+    # outreach_service.record() already commits + refreshes.
+    return _AdminOutreachLogRead(
+        id=str(entry.id),
+        user_id=str(entry.user_id),
+        channel=entry.channel,
+        triggered_by=entry.triggered_by,
+        triggered_by_user_id=str(entry.triggered_by_user_id)
+        if entry.triggered_by_user_id
+        else None,
+        body_preview=entry.body_preview,
+        sent_at=entry.sent_at.isoformat(),
+        status=entry.status,
+    )

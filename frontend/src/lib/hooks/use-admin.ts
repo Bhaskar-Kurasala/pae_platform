@@ -32,6 +32,9 @@ export interface AdminStudent {
   lessons_completed: number;
   agent_interactions: number;
   is_active: boolean;
+  // D16/CP3.2 — when set, cockpit renders the wa.me deep link button
+  // on the per-student panel.
+  whatsapp_number?: string | null;
 }
 
 export interface StudentTimelineEvent {
@@ -382,6 +385,50 @@ export function useSendRefundOffer(studentId: string | null) {
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: ["admin", "refund-offers", studentId],
+      });
+    },
+  });
+}
+
+// D16/CP3.2 — manual outreach logging (WhatsApp / phone).
+// Records that the admin reached out via an external channel (their
+// own WhatsApp, a phone call) so the cockpit timeline + retention
+// audit see the contact even though it didn't fire through the platform.
+
+export interface OutreachLogRow {
+  id: string;
+  user_id: string;
+  channel: string;
+  triggered_by: string;
+  triggered_by_user_id: string | null;
+  body_preview: string | null;
+  sent_at: string;
+  status: string;
+}
+
+export type ManualOutreachChannel = "whatsapp" | "phone";
+
+export function useLogManualOutreach(studentId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation<
+    OutreachLogRow,
+    Error,
+    { channel: ManualOutreachChannel; body_preview?: string }
+  >({
+    mutationFn: ({ channel, body_preview }) =>
+      api.post<OutreachLogRow>(
+        `/api/v1/admin/students/${studentId}/outreach`,
+        { channel, body_preview: body_preview ?? "" },
+      ),
+    onSuccess: () => {
+      // Invalidate timeline so the new contact surfaces immediately.
+      void queryClient.invalidateQueries({
+        queryKey: ["admin", "students", studentId, "timeline"],
+      });
+      // Invalidate the cockpit roster — the calls/events panels read
+      // from the same /admin/console/v1 source.
+      void queryClient.invalidateQueries({
+        queryKey: ["admin", "console"],
       });
     },
   });
