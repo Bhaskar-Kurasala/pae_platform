@@ -74,18 +74,24 @@ jobs:
           chmod +x backend/tests/playwright/scripts/build_and_serve.sh
           ./backend/tests/playwright/scripts/build_and_serve.sh --rebuild
 
-      - name: Pull playwright-runner image
-        run: docker compose ${COMPOSE_FILES} --profile playwright pull playwright-runner
+      - name: Build playwright-runner image
+        # Custom-built (post-CP6 retrofit) — extends upstream
+        # mcr.microsoft.com/playwright/python:v1.59.0 with project
+        # deps + test deps baked in. Replaces the previous inline
+        # pip install which was fragile (Path A pre-CP1 finding).
+        run: |
+          docker compose ${COMPOSE_FILES} \
+            --profile playwright build playwright-runner
 
       - name: Run browser Playwright suite via runner image
         # CP3 page-object smoke + CP6 final loop. Runs inside the
         # playwright-runner container so browsers + system deps are
-        # version-locked to v1.59.0.
+        # version-locked to v1.59.0 and project deps + test deps
+        # come pre-baked.
         run: |
           docker compose ${COMPOSE_FILES} \
             --profile playwright run --rm playwright-runner \
-            "pip install --quiet pytest pytest-asyncio pytest-playwright sqlalchemy[asyncio] asyncpg passlib[bcrypt] && \
-             pytest tests/playwright/smoke/test_cp3_pages.py \
+            "pytest tests/playwright/smoke/test_cp3_pages.py \
                     tests/playwright/smoke/test_cp6_full_loop.py \
                     -v --tb=short"
 

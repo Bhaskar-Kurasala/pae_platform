@@ -229,6 +229,71 @@ The overlay + CI workflow set this var to opt in.
 
 ---
 
+## Runner overlay end-to-end verification (post-CP6 retrofit, 2026-05-08)
+
+CP6 ratified the `playwright-runner` service in
+`docker-compose.playwright.yml` but never executed it end-to-end —
+the upstream image was pulled and verified pullable, never invoked
+against the live stack. Phase B's pre-CP1 verification (Path A) was
+the first end-to-end run, and surfaced four layered gaps that are
+now resolved:
+
+| Gap                                                   | Fix |
+|-------------------------------------------------------|-----|
+| Upstream runner image has no pytest / project deps    | `backend/tests/playwright/Dockerfile.runner` extends the upstream image with `uv sync --frozen` (prod deps) + `uv pip install` (dev deps via uv-quirk workaround) |
+| Frontend bundle bakes `localhost:8080` API URL        | Overlay rebuilds frontend with `NEXT_PUBLIC_API_URL=http://nginx`; pinning pnpm@10.5.0 was a prerequisite to enable the rebuild (`fix(frontend)` commit `d6b2374`) |
+| Bind mount `./backend:/app` shadowed runner `.venv`   | Narrowed mount to `./backend/tests:/app/tests` only; runner's baked `.venv` survives |
+| Same-origin policy blocked browser→`http://nginx` API | `PLAYWRIGHT_BASE_URL=http://nginx` (was `http://frontend:3000`); page + API now share origin |
+
+After all four fixes, the full Phase A baseline runs cleanly through
+the runner overlay:
+
+  * `test_cp2_db.py` — 4 passed (DB-only)
+  * `test_cp3_pages.py` — 8 passed (browser, page objects)
+  * `test_cp4_fixtures.py` — 15 passed (DB-only)
+  * `test_cp5_helpers.py` — 21 passed (DB-only)
+  * `test_cp6_full_loop.py` — **2 passed** (was auto-skipping at
+    CP6 close; first end-to-end pass at retrofit verification)
+
+Total: **50 passed, 0 skipped, 0 failures.**
+
+### Build + run commands (canonical)
+
+```bash
+# One-time per host (or after pyproject.toml/uv.lock changes):
+docker compose -f docker-compose.yml -f docker-compose.playwright.yml \
+    --profile playwright build playwright-runner
+docker compose -f docker-compose.yml -f docker-compose.playwright.yml \
+    build frontend
+
+# Bring up stack against playwright_test:
+docker compose -f docker-compose.yml -f docker-compose.playwright.yml \
+    up -d backend frontend nginx
+
+# Run any test suite via the runner:
+docker compose -f docker-compose.yml -f docker-compose.playwright.yml \
+    --profile playwright run --rm playwright-runner \
+    "pytest tests/playwright/smoke/test_cp6_full_loop.py -v"
+```
+
+`build_and_serve.sh` automates the first three commands (with
+`--rebuild` always rebuilding both frontend AND runner). CI runs
+this script before the test step.
+
+### Pattern 29 evidence base extends
+
+Phase A close had two Pattern 29 instances on the catalog
+(admin_console_*, runner overlay scaffolding). Path A's verification
+extends to a third: scaffolded-but-pullable is not the same as
+ready-and-executed. The runner image being pullable from CP6 close
+was misread as "infrastructure ready"; the four-layer gap surfaced
+only on first invocation. Canonical statement strengthens to:
+**infrastructure is ready when its happy-path smoke has been executed
+end-to-end at least once, not when its components have been
+authored.**
+
+---
+
 ## Three-layer admin auth pattern (CP5)
 
 The `admin_browser_context` fixture is canonical for any browser test

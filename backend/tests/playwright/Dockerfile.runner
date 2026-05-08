@@ -1,0 +1,84 @@
+# D18 Phase A retrofit (post-CP6) — playwright-runner image.
+#
+# Bakes the project's prod deps + test deps into the upstream
+# Playwright Python image so `pytest` can run inside the runner
+# without an inline pip-install at compose-run time.
+#
+# Why upstream + a custom build instead of FROM python:3.12-slim
+# and installing playwright ourselves: the upstream image ships
+# version-locked browser binaries + the system libs they need
+# (libnss3, libatk-bridge, etc.). Reinventing that on python:slim
+# is a distribution-specific dependency rabbit hole.
+#
+# The runner is a one-shot test container — no entrypoint hooks,
+# no health checks. Compose's `run --rm playwright-runner <cmd>`
+# exec's whatever pytest invocation the caller wants.
+#
+# Two install steps, mirroring the backend Dockerfile's layer
+# caching (deps then project), with one workaround:
+#
+#   * `uv sync --frozen` installs the project's prod deps. Mirrors
+#     backend/Dockerfile lines 9-12.
+#   * `uv pip install --system playwright pytest pytest-asyncio
+#     pytest-playwright pytest-cov httpx` installs dev-group deps
+#     directly. Workaround: `uv sync --frozen --group dev` against
+#     this project's pyproject.toml + uv.lock combination silently
+#     skips playwright + pytest-playwright. Investigated end-to-end
+#     during the retrofit; uv resolution reports "Resolved 169
+#     packages" but the actual install set is 166 (the missing 3
+#     are playwright + pytest-playwright + pytest-base-url, which
+#     pytest-playwright pulls). `uv pip install` works fine for the
+#     same packages, so we use that as the documented workaround.
+#     A separate follow-up tracks whether this is a uv bug or a
+#     project-config issue worth resolving upstream.
+#
+# Image size: ~3.0 GB after this build (upstream 2.3 GB + project
+# venv ~0.7 GB). First build ~2-3 min on a fresh host; cached
+# rebuilds <30s when only test files change (deps layer is cached).
+
+FROM mcr.microsoft.com/playwright/python:v1.59.0
+
+WORKDIR /app
+
+# Install uv (matches backend image; same source for version parity)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+# Layer 1: prod deps (cache-friendly — changes rarely)
+# Copy the manifest files first so deps install layer is cached
+# until pyproject.toml or uv.lock change.
+COPY pyproject.toml uv.lock /app/
+RUN uv sync --frozen --no-install-project
+
+# Layer 2: dev-group test deps (the uv-quirk workaround)
+# Versions floored to match the dev group declaration in
+# backend/pyproject.toml. The runner image is rebuilt whenever
+# those bumps happen (cached layer invalidates).
+RUN uv pip install --python /app/.venv/bin/python \
+    "playwright>=1.55.0" \
+    "pytest>=9.0.3" \
+    "pytest-asyncio>=1.3.0" \
+    "pytest-playwright>=0.7.1" \
+    "pytest-cov>=7.1.0" \
+    "httpx>=0.28.1"
+
+# Layer 3: project source (last; bind-mounted at runtime, but
+# baked here too so the image is self-sufficient if run without
+# a mount — useful for ad-hoc CI invocations).
+COPY . /app/
+RUN uv sync --frozen --no-editable && \
+    uv pip install --python /app/.venv/bin/python \
+    "playwright>=1.55.0" \
+    "pytest>=9.0.3" \
+    "pytest-asyncio>=1.3.0" \
+    "pytest-playwright>=0.7.1" \
+    "pytest-cov>=7.1.0" \
+    "httpx>=0.28.1"
+
+# Make uv-managed venv the default Python for plain `pytest`
+# invocations. Tests can also be run via `uv run pytest ...`.
+ENV PATH="/app/.venv/bin:${PATH}" \
+    VIRTUAL_ENV="/app/.venv" \
+    PYTHONPATH="/app"
+
+# Default command — overridden by `compose run` at invocation time.
+CMD ["pytest", "tests/playwright/", "-v", "--tb=short"]
