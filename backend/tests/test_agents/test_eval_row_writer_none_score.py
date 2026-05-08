@@ -392,3 +392,69 @@ def test_eval_failure_class_enum_values_match_db_check_constraint() -> None:
         "Update both the enum AND the migration that drops + re-adds "
         "the agent_evaluations_failure_class_enum CHECK."
     )
+
+
+# ── D17b/ITEM 4.B — _try_insert_eval_artifact shared envelope ────────
+
+
+async def test_try_insert_eval_artifact_returns_id_on_success() -> None:
+    """Happy path: session.add + flush succeed → returns row.id."""
+    from app.agents.primitives.evaluation import _try_insert_eval_artifact
+
+    session = MagicMock(spec=AsyncSession)
+    session.flush = AsyncMock()
+
+    # Stub row with an id attribute the helper returns on success.
+    expected_id = uuid.uuid4()
+    fake_row = MagicMock()
+    fake_row.id = expected_id
+
+    result = await _try_insert_eval_artifact(
+        session=session,
+        row=fake_row,
+        writer="_write_evaluation_row",
+        agent_name="mock_interview",
+        failure_event="evaluate.write_evaluation_failed",
+    )
+
+    assert result == expected_id
+    assert session.add.called
+    session.add.assert_called_once_with(fake_row)
+    session.flush.assert_awaited_once()
+
+
+async def test_try_insert_eval_artifact_returns_none_on_flush_failure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When flush raises (DB constraint / IntegrityError / etc.), the
+    helper swallows the exception, logs the failure_event with the
+    writer + agent + error, and returns None — preserving the
+    existing fail-open semantics both writers had pre-consolidation.
+    """
+    from app.agents.primitives.evaluation import _try_insert_eval_artifact
+
+    session = MagicMock(spec=AsyncSession)
+    # Simulate a flush-time DB error.
+    session.flush = AsyncMock(
+        side_effect=RuntimeError("simulated IntegrityError on flush")
+    )
+
+    fake_row = MagicMock()
+    fake_row.id = uuid.uuid4()
+
+    result = await _try_insert_eval_artifact(
+        session=session,
+        row=fake_row,
+        writer="_write_escalation_row",
+        agent_name="senior_engineer",
+        failure_event="evaluate.write_escalation_failed",
+    )
+
+    assert result is None
+    captured = capsys.readouterr()
+    # The structlog event must surface enough context for an operator
+    # to find the writer + agent + underlying error without re-running.
+    assert "evaluate.write_escalation_failed" in captured.out
+    assert "_write_escalation_row" in captured.out
+    assert "senior_engineer" in captured.out
+    assert "simulated IntegrityError" in captured.out

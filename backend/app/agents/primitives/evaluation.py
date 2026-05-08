@@ -1116,6 +1116,45 @@ def _truncate_with_warning(
     return value[:max_len]
 
 
+async def _try_insert_eval_artifact(
+    *,
+    session: AsyncSession,
+    row: Any,
+    writer: str,
+    agent_name: str,
+    failure_event: str,
+) -> uuid.UUID | None:
+    """D17b/ITEM 4.B — shared insert+flush+log helper for the two eval-
+    row writers (_write_evaluation_row, _write_escalation_row).
+
+    Both writers share the same trail-of-side-effects: session.add the
+    pre-built row, flush to surface DB constraint failures synchronously,
+    return row.id on success. On any exception, swallow + log a structlog
+    warning that names the writer, agent, and the underlying error so an
+    operator can debug.
+
+    The row is built by the caller because the two writers target
+    different tables (AgentEvaluation, AgentEscalation) with different
+    columns; only the persistence + failure-handling envelope is shared.
+    `failure_event` is the structlog event name so the existing
+    "evaluate.write_evaluation_failed" / "evaluate.write_escalation_failed"
+    contract is preserved (downstream log parsers may pin those exact
+    event strings).
+    """
+    try:
+        session.add(row)
+        await session.flush()
+        return row.id
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            failure_event,
+            error=str(exc),
+            agent=agent_name,
+            writer=writer,
+        )
+        return None
+
+
 async def _write_evaluation_row(
     *,
     session: AsyncSession,
@@ -1144,39 +1183,41 @@ async def _write_evaluation_row(
     (str-subclass; bind cleanly to the TEXT column with CHECK
     constraint enforcing the 4-value enum at the DB layer per
     migration 0066_eval_failure_class).
+
+    D17b/ITEM 4.B: persistence + failure-handling envelope extracted
+    to _try_insert_eval_artifact. This function builds the row; the
+    helper handles session.add + flush + structlog warning on
+    insert-time exception. failure_event="evaluate.write_evaluation_failed"
+    preserves the existing log-event contract.
     """
     score_for_clamp = 0.0 if total_score is None else total_score
-    try:
-        row = AgentEvaluation(
+    row = AgentEvaluation(
+        agent_name=agent_name,
+        user_id=user_id,
+        call_chain_id=call_chain_id,
+        attempt_number=attempt_number,
+        accuracy_score=verdict.accuracy if verdict else None,
+        helpful_score=verdict.helpful if verdict else None,
+        complete_score=verdict.complete if verdict else None,
+        total_score=max(0.0, min(1.0, score_for_clamp)),
+        threshold=threshold,
+        passed=passed,
+        critic_reasoning=_truncate_with_warning(
+            critic_reasoning,
+            _REASONING_MAX_LEN,
+            writer="_write_evaluation_row",
+            field="critic_reasoning",
             agent_name=agent_name,
-            user_id=user_id,
-            call_chain_id=call_chain_id,
-            attempt_number=attempt_number,
-            accuracy_score=verdict.accuracy if verdict else None,
-            helpful_score=verdict.helpful if verdict else None,
-            complete_score=verdict.complete if verdict else None,
-            total_score=max(0.0, min(1.0, score_for_clamp)),
-            threshold=threshold,
-            passed=passed,
-            critic_reasoning=_truncate_with_warning(
-                critic_reasoning,
-                _REASONING_MAX_LEN,
-                writer="_write_evaluation_row",
-                field="critic_reasoning",
-                agent_name=agent_name,
-            ),
-            failure_class=failure_class.value,
-        )
-        session.add(row)
-        await session.flush()
-        return row.id
-    except Exception as exc:  # noqa: BLE001
-        log.warning(
-            "evaluate.write_evaluation_failed",
-            error=str(exc),
-            agent=agent_name,
-        )
-        return None
+        ),
+        failure_class=failure_class.value,
+    )
+    return await _try_insert_eval_artifact(
+        session=session,
+        row=row,
+        writer="_write_evaluation_row",
+        agent_name=agent_name,
+        failure_event="evaluate.write_evaluation_failed",
+    )
 
 
 async def _write_escalation_row(
@@ -1189,32 +1230,34 @@ async def _write_escalation_row(
     best_attempt: dict[str, Any],
     notified_admin: bool,
 ) -> uuid.UUID | None:
-    """Insert one agent_escalations row."""
-    try:
-        row = AgentEscalation(
+    """Insert one agent_escalations row.
+
+    D17b/ITEM 4.B: persistence envelope shared with
+    _write_evaluation_row via _try_insert_eval_artifact.
+    failure_event="evaluate.write_escalation_failed" preserves the
+    existing log-event contract.
+    """
+    row = AgentEscalation(
+        agent_name=agent_name,
+        user_id=user_id,
+        call_chain_id=call_chain_id,
+        reason=_truncate_with_warning(
+            reason,
+            _REASONING_MAX_LEN,
+            writer="_write_escalation_row",
+            field="reason",
             agent_name=agent_name,
-            user_id=user_id,
-            call_chain_id=call_chain_id,
-            reason=_truncate_with_warning(
-                reason,
-                _REASONING_MAX_LEN,
-                writer="_write_escalation_row",
-                field="reason",
-                agent_name=agent_name,
-            ) or "",
-            best_attempt=best_attempt,
-            notified_admin=notified_admin,
-        )
-        session.add(row)
-        await session.flush()
-        return row.id
-    except Exception as exc:  # noqa: BLE001
-        log.warning(
-            "evaluate.write_escalation_failed",
-            error=str(exc),
-            agent=agent_name,
-        )
-        return None
+        ) or "",
+        best_attempt=best_attempt,
+        notified_admin=notified_admin,
+    )
+    return await _try_insert_eval_artifact(
+        session=session,
+        row=row,
+        writer="_write_escalation_row",
+        agent_name=agent_name,
+        failure_event="evaluate.write_escalation_failed",
+    )
 
 
 def _to_str(value: Any) -> str:
@@ -1256,6 +1299,7 @@ __all__ = [
     "DEFAULT_MAX_RETRIES",
     "DEFAULT_THRESHOLD",
     "EscalationLimiter",
+    "EvalFailureClass",
     "RedisEscalationLimiter",
     "escalation_limiter",
     "evaluate_with_retry",
