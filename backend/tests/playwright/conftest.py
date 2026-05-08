@@ -60,6 +60,41 @@ def browser_context_args(browser_context_args: dict) -> dict:
     }
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    """Register D18 Phase B test categorization markers.
+
+    Markers also live in backend/pyproject.toml [tool.pytest.ini_options]
+    for non-runner pytest invocations, but the runner image's pyproject
+    is baked at image-build time. Registering here too means iterative
+    test edits don't require a runner image rebuild just to silence
+    marker-not-registered warnings.
+    """
+    config.addinivalue_line(
+        "markers",
+        "critical_path: CP1 critical-path happy-path journey; runs every PR.",
+    )
+    config.addinivalue_line(
+        "markers",
+        "edge_case: CP2 high-value edge-case variant on a critical path.",
+    )
+    config.addinivalue_line(
+        "markers",
+        "traceability: CP3 UI action -> backend row verification.",
+    )
+    config.addinivalue_line(
+        "markers",
+        "error_state: CP4 error-path coverage.",
+    )
+    config.addinivalue_line(
+        "markers",
+        "comprehensive: CP4 nice-to-have coverage; nightly only.",
+    )
+    config.addinivalue_line(
+        "markers",
+        "cost: per-test cost class. Use as @pytest.mark.cost('low'|'medium'|'high').",
+    )
+
+
 @pytest.fixture(autouse=True)
 def _set_default_timeout(request: pytest.FixtureRequest) -> Generator[None, None, None]:
     """30s default per-action timeout for tests that use Playwright's `page`.

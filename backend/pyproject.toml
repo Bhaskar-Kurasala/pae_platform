@@ -74,6 +74,15 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 markers = [
     "real_llm: opt-in tests that require a live LLM call (MINIMAX_API_KEY in env). Run with -m real_llm.",
+    # D18 Phase B test categorization (per d18b-prompt.md D-A and D-E).
+    # Tier markers determine CI splitting; cost marker flags real-LLM
+    # cost class for the session-scope budget tracker.
+    "critical_path: CP1 critical-path happy-path journey; runs every PR.",
+    "edge_case: CP2 high-value edge-case variant on a critical path.",
+    "traceability: CP3 UI action -> backend row verification.",
+    "error_state: CP4 error-path coverage.",
+    "comprehensive: CP4 nice-to-have coverage; nightly only.",
+    "cost: per-test cost class. Use as @pytest.mark.cost('low'|'medium'|'high') aligned to the D12-D17b per-agent cost table.",
 ]
 
 [tool.ruff]
