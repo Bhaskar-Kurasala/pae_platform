@@ -43,6 +43,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from enum import Enum
 from typing import Any, Awaitable, Callable, Protocol, runtime_checkable
 
 import structlog
@@ -886,6 +887,9 @@ async def evaluate_with_retry(
                 threshold=threshold,
                 passed=False,
                 critic_reasoning=verdict_reasoning,
+                # D17b/ITEM 4.A — agent's run() raised before the
+                # Critic could score (D13 Bug 22 path).
+                failure_class=EvalFailureClass.AGENT_RAISED,
             )
             attempts.append(
                 (
@@ -914,6 +918,18 @@ async def evaluate_with_retry(
             and score is not None
             and score >= threshold
         )
+        # D17b/ITEM 4.A — discriminate the three Critic-ran outcomes:
+        #   * passed=True      → NONE (success)
+        #   * verdict is None  → CRITIC_FLAKED (parsed_ok=False; reasoning
+        #                        starts with "critic flaked: ")
+        #   * else             → BELOW_THRESHOLD (verdict parsed; score
+        #                        < threshold)
+        if passed:
+            failure_class = EvalFailureClass.NONE
+        elif critic_result.verdict is None:
+            failure_class = EvalFailureClass.CRITIC_FLAKED
+        else:
+            failure_class = EvalFailureClass.BELOW_THRESHOLD
         evaluation_id = await _write_evaluation_row(
             session=session,
             agent_name=agent_name,
@@ -929,6 +945,7 @@ async def evaluate_with_retry(
                 if critic_result.verdict is not None
                 else f"critic flaked: {critic_result.raw_response[:300]}"
             ),
+            failure_class=failure_class,
         )
         attempts.append((output, critic_result))
         if score is not None:
@@ -1043,6 +1060,34 @@ async def evaluate_with_retry(
 _REASONING_MAX_LEN = 2000
 
 
+# D17b/ITEM 4.A — explicit failure-class discriminator on
+# agent_evaluations rows. Replaces the prefix-substring contract on
+# `critic_reasoning` text shape with a queryable column.
+#
+# Values mirror the four distinct outcomes evaluate_with_retry's
+# write paths produce; CHECK constraint at the DB layer (migration
+# 0066_eval_failure_class) enforces the same set.
+#
+# str-subclass enum so the value passes through to SQL bindings
+# unchanged (SQLAlchemy treats it as text). Consumers comparing values
+# can use either the enum member (EvalFailureClass.AGENT_RAISED) or
+# the literal string ("agent_raised") — both work because of the
+# str-subclass contract.
+class EvalFailureClass(str, Enum):
+    """Discriminator for *why* an agent_evaluations row landed."""
+
+    # passed=True, score >= threshold; success path
+    NONE = "none"
+    # Critic returned a parsed verdict but score < threshold
+    BELOW_THRESHOLD = "below_threshold"
+    # Critic LLM ran but parsed_ok=False (verdict shape failure;
+    # reasoning starts with "critic flaked: " in legacy text)
+    CRITIC_FLAKED = "critic_flaked"
+    # Agent's run() raised before the Critic could score (D13 Bug 22
+    # path — reasoning is "agent raised X: ...")
+    AGENT_RAISED = "agent_raised"
+
+
 def _truncate_with_warning(
     value: str | None,
     max_len: int,
@@ -1083,6 +1128,7 @@ async def _write_evaluation_row(
     threshold: float,
     passed: bool,
     critic_reasoning: str,
+    failure_class: EvalFailureClass,
 ) -> uuid.UUID | None:
     """Insert one agent_evaluations row. Returns its id.
 
@@ -1091,6 +1137,13 @@ async def _write_evaluation_row(
     the Critic could score anything. Treat None as 0.0 (below-threshold,
     matches Critic's parsed_ok=False semantics) so the row writes
     cleanly. See docs/followups/eval-row-writer-defensive-fix.md.
+
+    D17b/ITEM 4.A: failure_class is required — it's the queryable
+    discriminator that replaces the legacy prefix-substring contract
+    on critic_reasoning text. Values are EvalFailureClass enum members
+    (str-subclass; bind cleanly to the TEXT column with CHECK
+    constraint enforcing the 4-value enum at the DB layer per
+    migration 0066_eval_failure_class).
     """
     score_for_clamp = 0.0 if total_score is None else total_score
     try:
@@ -1112,6 +1165,7 @@ async def _write_evaluation_row(
                 field="critic_reasoning",
                 agent_name=agent_name,
             ),
+            failure_class=failure_class.value,
         )
         session.add(row)
         await session.flush()

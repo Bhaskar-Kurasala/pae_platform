@@ -55,6 +55,13 @@ class AgentEvaluation(Base, UUIDMixin):
     threshold: Mapped[float] = mapped_column(Float, nullable=False)
     passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
     critic_reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # D17b/ITEM 4.A — explicit failure-class discriminator. Mirrors
+    # EvalFailureClass in app/agents/primitives/evaluation.py. Nullable
+    # for backfill compatibility (pre-D17b rows have no signal); new
+    # writes always supply a value via _write_evaluation_row's required
+    # parameter. CHECK constraint at the DB layer enforces the enum
+    # (see migration 0066_eval_failure_class).
+    failure_class: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -66,5 +73,13 @@ class AgentEvaluation(Base, UUIDMixin):
         ),
         CheckConstraint(
             "attempt_number >= 1", name="agent_evaluations_attempt_pos"
+        ),
+        # The failure_class enum CHECK is added in migration 0066 with
+        # the same name; declared here for SQLAlchemy metadata parity
+        # so model-driven schema validation matches the migrated DB.
+        CheckConstraint(
+            "failure_class IS NULL OR failure_class IN "
+            "('none', 'below_threshold', 'critic_flaked', 'agent_raised')",
+            name="agent_evaluations_failure_class_enum",
         ),
     )

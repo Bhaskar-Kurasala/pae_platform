@@ -38,7 +38,10 @@ async def test_write_evaluation_row_handles_none_total_score() -> None:
     Reproduces the exact call shape from evaluate_with_retry's
     agent-call-failed branch (line 859-870).
     """
-    from app.agents.primitives.evaluation import _write_evaluation_row
+    from app.agents.primitives.evaluation import (
+        EvalFailureClass,
+        _write_evaluation_row,
+    )
 
     # Stub session — we don't care about the actual insert here, only
     # that the clamp logic doesn't crash on None. session.add() is sync;
@@ -57,6 +60,7 @@ async def test_write_evaluation_row_handles_none_total_score() -> None:
         threshold=0.6,
         passed=False,
         critic_reasoning="agent raised ValidationError: handoff_request.suggested_context",
+        failure_class=EvalFailureClass.AGENT_RAISED,
     )
 
     # Pre-fix: this assertion never runs because the function crashes
@@ -77,7 +81,10 @@ async def test_write_evaluation_row_handles_none_total_score() -> None:
 
 async def test_write_evaluation_row_handles_zero_score() -> None:
     """Sanity: explicit 0.0 score still works post-fix."""
-    from app.agents.primitives.evaluation import _write_evaluation_row
+    from app.agents.primitives.evaluation import (
+        EvalFailureClass,
+        _write_evaluation_row,
+    )
 
     session = MagicMock(spec=AsyncSession)
     session.flush = AsyncMock()
@@ -93,6 +100,7 @@ async def test_write_evaluation_row_handles_zero_score() -> None:
         threshold=0.6,
         passed=False,
         critic_reasoning="x",
+        failure_class=EvalFailureClass.CRITIC_FLAKED,
     )
     added_row = session.add.call_args[0][0]
     assert added_row.total_score == 0.0
@@ -100,7 +108,10 @@ async def test_write_evaluation_row_handles_zero_score() -> None:
 
 async def test_write_evaluation_row_clamps_score_above_one() -> None:
     """Sanity: clamping logic still works post-fix (score > 1.0 → 1.0)."""
-    from app.agents.primitives.evaluation import _write_evaluation_row
+    from app.agents.primitives.evaluation import (
+        EvalFailureClass,
+        _write_evaluation_row,
+    )
 
     session = MagicMock(spec=AsyncSession)
     session.flush = AsyncMock()
@@ -116,6 +127,7 @@ async def test_write_evaluation_row_clamps_score_above_one() -> None:
         threshold=0.6,
         passed=True,
         critic_reasoning="x",
+        failure_class=EvalFailureClass.NONE,
     )
     added_row = session.add.call_args[0][0]
     assert added_row.total_score == 1.0
@@ -132,7 +144,10 @@ async def test_write_evaluation_row_short_reasoning_round_trips_clean(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Reasoning under the cap passes through unchanged with no warning."""
-    from app.agents.primitives.evaluation import _write_evaluation_row
+    from app.agents.primitives.evaluation import (
+        EvalFailureClass,
+        _write_evaluation_row,
+    )
 
     session = MagicMock(spec=AsyncSession)
     session.flush = AsyncMock()
@@ -150,6 +165,7 @@ async def test_write_evaluation_row_short_reasoning_round_trips_clean(
         threshold=0.6,
         passed=False,
         critic_reasoning=short_text,
+        failure_class=EvalFailureClass.BELOW_THRESHOLD,
     )
     added_row = session.add.call_args[0][0]
     assert added_row.critic_reasoning == short_text
@@ -167,7 +183,10 @@ async def test_write_evaluation_row_long_reasoning_truncates_with_warning(
     captured stdout JSON event rather than caplog (which only sees stdlib
     logging records).
     """
-    from app.agents.primitives.evaluation import _write_evaluation_row
+    from app.agents.primitives.evaluation import (
+        EvalFailureClass,
+        _write_evaluation_row,
+    )
 
     session = MagicMock(spec=AsyncSession)
     session.flush = AsyncMock()
@@ -185,6 +204,7 @@ async def test_write_evaluation_row_long_reasoning_truncates_with_warning(
         threshold=0.6,
         passed=False,
         critic_reasoning=long_text,
+        failure_class=EvalFailureClass.BELOW_THRESHOLD,
     )
     added_row = session.add.call_args[0][0]
     assert added_row.critic_reasoning is not None
@@ -223,3 +243,152 @@ async def test_write_escalation_row_long_reason_truncates_with_warning(
     assert "evaluate.row_field_truncated" in captured.out
     assert "4096" in captured.out
     assert "reason" in captured.out
+
+
+# ── D17b/ITEM 4.A — failure_class enum threading ─────────────────────
+
+
+async def test_write_evaluation_row_persists_failure_class_agent_raised() -> None:
+    """The Bug 22 path now records failure_class=AGENT_RAISED on the row.
+
+    Replaces the prefix-substring contract on critic_reasoning text
+    ("agent raised X: ...") with a queryable column.
+    """
+    from app.agents.primitives.evaluation import (
+        EvalFailureClass,
+        _write_evaluation_row,
+    )
+
+    session = MagicMock(spec=AsyncSession)
+    session.flush = AsyncMock()
+
+    await _write_evaluation_row(
+        session=session,
+        agent_name="mock_interview",
+        user_id=None,
+        call_chain_id=None,
+        attempt_number=1,
+        verdict=None,
+        total_score=None,
+        threshold=0.6,
+        passed=False,
+        critic_reasoning="agent raised RuntimeError: simulated failure",
+        failure_class=EvalFailureClass.AGENT_RAISED,
+    )
+    added_row = session.add.call_args[0][0]
+    assert added_row.failure_class == "agent_raised"
+
+
+async def test_write_evaluation_row_persists_failure_class_critic_flaked() -> None:
+    """Critic LLM ran but parsed_ok=False → failure_class=CRITIC_FLAKED."""
+    from app.agents.primitives.evaluation import (
+        EvalFailureClass,
+        _write_evaluation_row,
+    )
+
+    session = MagicMock(spec=AsyncSession)
+    session.flush = AsyncMock()
+
+    await _write_evaluation_row(
+        session=session,
+        agent_name="mock_interview",
+        user_id=None,
+        call_chain_id=None,
+        attempt_number=1,
+        verdict=None,
+        total_score=0.0,
+        threshold=0.6,
+        passed=False,
+        critic_reasoning="critic flaked: malformed JSON in verdict",
+        failure_class=EvalFailureClass.CRITIC_FLAKED,
+    )
+    added_row = session.add.call_args[0][0]
+    assert added_row.failure_class == "critic_flaked"
+
+
+async def test_write_evaluation_row_persists_failure_class_below_threshold() -> None:
+    """Critic returned valid verdict but score < threshold →
+    failure_class=BELOW_THRESHOLD."""
+    from app.agents.primitives.evaluation import (
+        CriticVerdict,
+        EvalFailureClass,
+        _write_evaluation_row,
+    )
+
+    session = MagicMock(spec=AsyncSession)
+    session.flush = AsyncMock()
+
+    verdict = CriticVerdict(
+        accuracy=0.4, helpful=0.5, complete=0.3, reasoning="weak response"
+    )
+
+    await _write_evaluation_row(
+        session=session,
+        agent_name="mock_interview",
+        user_id=None,
+        call_chain_id=None,
+        attempt_number=1,
+        verdict=verdict,
+        total_score=0.4,
+        threshold=0.6,
+        passed=False,
+        critic_reasoning="weak response",
+        failure_class=EvalFailureClass.BELOW_THRESHOLD,
+    )
+    added_row = session.add.call_args[0][0]
+    assert added_row.failure_class == "below_threshold"
+    # Sanity: verdict scores still flow through
+    assert added_row.accuracy_score == 0.4
+
+
+async def test_write_evaluation_row_persists_failure_class_none_on_pass() -> None:
+    """Successful eval (passed=True) records failure_class=NONE."""
+    from app.agents.primitives.evaluation import (
+        CriticVerdict,
+        EvalFailureClass,
+        _write_evaluation_row,
+    )
+
+    session = MagicMock(spec=AsyncSession)
+    session.flush = AsyncMock()
+
+    verdict = CriticVerdict(
+        accuracy=0.8, helpful=0.9, complete=0.85, reasoning="strong response"
+    )
+
+    await _write_evaluation_row(
+        session=session,
+        agent_name="mock_interview",
+        user_id=None,
+        call_chain_id=None,
+        attempt_number=1,
+        verdict=verdict,
+        total_score=0.85,
+        threshold=0.6,
+        passed=True,
+        critic_reasoning="strong response",
+        failure_class=EvalFailureClass.NONE,
+    )
+    added_row = session.add.call_args[0][0]
+    assert added_row.failure_class == "none"
+    assert added_row.passed is True
+
+
+def test_eval_failure_class_enum_values_match_db_check_constraint() -> None:
+    """Pin the enum value set against the migration's CHECK constraint.
+
+    Adding a new EvalFailureClass member without a corresponding
+    migration that updates the agent_evaluations_failure_class_enum
+    CHECK would cause runtime IntegrityError on insert. This test
+    catches the drift at unit-test time.
+    """
+    from app.agents.primitives.evaluation import EvalFailureClass
+
+    expected = {"none", "below_threshold", "critic_flaked", "agent_raised"}
+    actual = {member.value for member in EvalFailureClass}
+    assert actual == expected, (
+        f"EvalFailureClass values drifted from migration 0066's CHECK "
+        f"constraint set. Expected {expected}, got {actual}. "
+        "Update both the enum AND the migration that drops + re-adds "
+        "the agent_evaluations_failure_class_enum CHECK."
+    )
