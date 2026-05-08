@@ -191,11 +191,18 @@ class ProjectEvaluatorAgent(AgenticBaseAgent[ProjectEvaluatorInput]):
         submission_id = input.project_submission_id
 
         # ── Step 1: read submission ──────────────────────────────
+        # D17b/ITEM 2.A — pass student_id (ctx.user_id) so the tool can
+        # gate `AND es.student_id = :student_id`. Closes the cross-
+        # student leak vector flagged at d12-d14c-read-tool-entitlement-
+        # leakage-audit MEDIUM finding.
         submission = await _safe_tool(
             self,
             ctx,
             "read_capstone_submission_content",
-            {"submission_id": str(submission_id)},
+            {
+                "submission_id": str(submission_id),
+                "student_id": str(ctx.user_id),
+            },
         )
 
         # ── Step 2: D-4 early exit ───────────────────────────────

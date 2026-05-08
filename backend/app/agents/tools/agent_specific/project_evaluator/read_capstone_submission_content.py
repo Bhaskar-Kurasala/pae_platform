@@ -48,6 +48,22 @@ class ReadCapstoneSubmissionContentInput(BaseModel):
             "for D-4 dual-rail routing in the agent."
         ),
     )
+    # D17b/ITEM 2.A — entitlement gate. The tool's previous shape
+    # (submission_id only) allowed cross-student leak: an agent invoked
+    # with a submission_id from another student would return that
+    # submission's content. Caller passes ctx.user_id; SQL gates
+    # `AND es.student_id = :student_id`. Mismatched ownership returns
+    # found=False (single error mode — does NOT distinguish "not found"
+    # from "not yours" so the caller can't probe existence).
+    student_id: uuid.UUID = Field(
+        description=(
+            "The student the agent is acting on behalf of (typically "
+            "ctx.user_id). The tool returns found=False if the submission "
+            "is not owned by this student — closes the cross-student leak "
+            "vector flagged in d12-d14c-read-tool-entitlement-leakage-audit "
+            "(MEDIUM finding, D17b/ITEM 2.A)."
+        ),
+    )
 
 
 class ReadCapstoneSubmissionContentOutput(BaseModel):
@@ -143,9 +159,13 @@ async def read_capstone_submission_content(
                 FROM exercise_submissions es
                 JOIN exercises e ON es.exercise_id = e.id
                 WHERE es.id = :submission_id
+                  AND es.student_id = :student_id
                 """
             ),
-            {"submission_id": args.submission_id},
+            {
+                "submission_id": args.submission_id,
+                "student_id": args.student_id,
+            },
         )
         row = result.fetchone()
     except Exception as exc:  # noqa: BLE001
