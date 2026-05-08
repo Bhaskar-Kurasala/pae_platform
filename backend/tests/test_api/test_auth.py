@@ -27,6 +27,29 @@ async def test_register_duplicate_email(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_register_with_whatsapp_number(client: AsyncClient) -> None:
+    """D16/CP3.1 — optional whatsapp_number persists and surfaces on UserResponse."""
+    payload = {**REGISTER_PAYLOAD, "whatsapp_number": "+919876543210"}
+    resp = await client.post("/api/v1/auth/register", json=payload)
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["whatsapp_number"] == "+919876543210"
+
+
+@pytest.mark.asyncio
+async def test_register_without_whatsapp_number_is_none(client: AsyncClient) -> None:
+    """D16/CP3.1 — omitting whatsapp_number stores NULL (renders as None in response).
+
+    Empty string is NOT the same as missing — the auth service explicitly
+    skips the field when falsy so the DB stores NULL, not an empty string.
+    """
+    resp = await client.post("/api/v1/auth/register", json=REGISTER_PAYLOAD)
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["whatsapp_number"] is None
+
+
+@pytest.mark.asyncio
 async def test_login_success(client: AsyncClient) -> None:
     await client.post("/api/v1/auth/register", json=REGISTER_PAYLOAD)
     resp = await client.post(

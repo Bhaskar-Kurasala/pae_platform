@@ -256,6 +256,10 @@ export interface UserResponse {
   is_verified: boolean;
   github_username?: string;
   avatar_url?: string;
+  // D16/CP3.1 — manual-WhatsApp outreach destination. Rendered on the
+  // admin cockpit per-student panel as a wa.me/{number} deep link
+  // when set.
+  whatsapp_number?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -388,8 +392,13 @@ export interface PeerSubmissionItem {
 }
 
 export const authApi = {
-  register: (body: { email: string; full_name: string; password: string }) =>
-    api.post<UserResponse>("/api/v1/auth/register", body),
+  register: (body: {
+    email: string;
+    full_name: string;
+    password: string;
+    // D16/CP3.1 — optional, E.164 recommended (e.g. "+919876543210").
+    whatsapp_number?: string;
+  }) => api.post<UserResponse>("/api/v1/auth/register", body),
   login: (body: { email: string; password: string }) =>
     api.post<TokenResponse>("/api/v1/auth/login", body),
   refresh: (body: { refresh_token: string }) =>

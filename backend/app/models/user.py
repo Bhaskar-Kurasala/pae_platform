@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Boolean, DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -26,6 +26,11 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         DateTime(timezone=True), nullable=True
     )
     promoted_to_role: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # D16/CP3.1 — manual-WhatsApp outreach destination. Free-form text
+    # (E.164 hint in schemas/user.py); admin sources at signup or
+    # backfills via /api/v1/admin/students/{id}/whatsapp_number. Empty
+    # / NULL means no WhatsApp deep-link rendered on the cockpit panel.
+    whatsapp_number: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     enrollments: Mapped[list["Enrollment"]] = relationship(back_populates="student", lazy="select")
     submissions: Mapped[list["ExerciseSubmission"]] = relationship(

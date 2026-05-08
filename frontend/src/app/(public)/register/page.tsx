@@ -10,6 +10,7 @@ function RegisterForm() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [whatsappNumber, setWhatsappNumber] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const { register, isAuthenticated, _hasHydrated } = useAuthStore();
@@ -34,7 +35,7 @@ function RegisterForm() {
     }
     setLoading(true);
     try {
-      await register(email, fullName, password);
+      await register(email, fullName, password, whatsappNumber.trim() || undefined);
       router.replace(postRegisterLanding);
     } catch (err) {
       if (err instanceof ApiError) {
@@ -112,6 +113,24 @@ function RegisterForm() {
               placeholder="Min 8 characters"
               className="w-full h-10 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/50 transition"
             />
+          </div>
+
+          <div className="space-y-1.5">
+            <label htmlFor="whatsappNumber" className="text-sm font-medium">
+              WhatsApp number <span className="text-muted-foreground font-normal">(optional)</span>
+            </label>
+            <input
+              id="whatsappNumber"
+              type="tel"
+              autoComplete="tel"
+              value={whatsappNumber}
+              onChange={(e) => setWhatsappNumber(e.target.value)}
+              placeholder="+919876543210"
+              className="w-full h-10 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/50 transition"
+            />
+            <p className="text-xs text-muted-foreground">
+              Lets the team reach out directly on WhatsApp if you go quiet. We never auto-message.
+            </p>
           </div>
 
           <button

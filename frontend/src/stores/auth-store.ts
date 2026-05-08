@@ -23,7 +23,12 @@ interface AuthState {
   setAuth: (user: User, token: string, refreshToken: string) => void;
   clearAuth: () => void;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, fullName: string, password: string) => Promise<void>;
+  register: (
+    email: string,
+    fullName: string,
+    password: string,
+    whatsappNumber?: string,
+  ) => Promise<void>;
   logout: () => void;
   refreshMe: () => Promise<boolean>;
   setHasHydrated: (v: boolean) => void;
@@ -111,8 +116,16 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      register: async (email, fullName, password) => {
-        await authApi.register({ email, full_name: fullName, password });
+      register: async (email, fullName, password, whatsappNumber) => {
+        await authApi.register({
+          email,
+          full_name: fullName,
+          password,
+          // D16/CP3.1 — only include the field when non-empty so the
+          // backend stores NULL (not an empty string) when student
+          // skips the optional input.
+          ...(whatsappNumber ? { whatsapp_number: whatsappNumber } : {}),
+        });
         const tokens = await authApi.login({ email, password });
         set({
           token: tokens.access_token,

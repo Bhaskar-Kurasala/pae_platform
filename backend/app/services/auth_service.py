@@ -24,14 +24,17 @@ class AuthService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Email already registered",
             )
-        user = await self.repo.create(
-            {
-                "email": payload.email,
-                "full_name": payload.full_name,
-                "hashed_password": hash_password(payload.password),
-                "role": payload.role,
-            }
-        )
+        # D16/CP3.1 — pass whatsapp_number through if collected at signup;
+        # admins can backfill later via PATCH /admin/students/{id} otherwise.
+        create_payload = {
+            "email": payload.email,
+            "full_name": payload.full_name,
+            "hashed_password": hash_password(payload.password),
+            "role": payload.role,
+        }
+        if payload.whatsapp_number:
+            create_payload["whatsapp_number"] = payload.whatsapp_number
+        user = await self.repo.create(create_payload)
         log.info("auth.register", user_id=str(user.id))
 
         # Emit a real cohort_event so the admin "Live event feed" on
