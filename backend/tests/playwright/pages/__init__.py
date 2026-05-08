@@ -20,6 +20,7 @@ from .chat_page import ChatPage
 from .lesson_page import LessonPage
 from .login_page import LoginPage
 from .mock_interview_page import MockInterviewPage
+from .practice_page import PracticePage
 from .student_detail_panel import StudentDetailPanel
 from .today_page import TodayPage
 
@@ -31,6 +32,7 @@ __all__ = [
     "LessonPage",
     "LoginPage",
     "MockInterviewPage",
+    "PracticePage",
     "StudentDetailPanel",
     "TodayPage",
 ]
