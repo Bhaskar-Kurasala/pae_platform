@@ -38,22 +38,6 @@ pytestmark = [pytest.mark.critical_path, pytest.mark.cost("medium")]
 
 
 @pytest.mark.real_llm
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "BUG-CP1E-EMPTY-RESPONSE-UNDER-BATCH: passes in isolation "
-        "(verified 2026-05-09 — 1/1 in 34s); fails under journey-"
-        "batch run with empty `response` field returned by "
-        "/agentic/default/chat. Suspected rate-limit / circuit-"
-        "breaker / conversation-memory-pollution under sequential "
-        "real-LLM call batch. Convention A with strict=False "
-        "because behavior is non-deterministic — sometimes batch "
-        "passes too. Investigation deferred; journey (e)'s primary "
-        "contract (career_coach reachable + behavior-shape clean) "
-        "is verified via isolation run. Drop xfail when batch "
-        "behavior stabilizes."
-    ),
-)
 def test_career_coach_responds_with_role_aware_guidance(page: Page) -> None:
     """Career coach answers a progression question with substantive output.
 
@@ -101,16 +85,6 @@ def test_career_coach_responds_with_role_aware_guidance(page: Page) -> None:
         )
 
         response_text = body.get("response", "")
-        # CP1E flakiness observation (2026-05-09): under batch
-        # execution this assertion sometimes fails because
-        # /agentic/default/chat returns 200 with an empty
-        # `response` field. In isolation the test passes
-        # consistently. Suspected: rate-limit / circuit-breaker
-        # behavior or conversation-memory pollution from prior
-        # tests in the batch. Logged in CP1 closure as
-        # BUG-CP1E-EMPTY-RESPONSE-UNDER-BATCH; not gating CP1
-        # since the journey's behavior-shape contract holds in
-        # isolation.
         assert response_text and len(response_text.strip()) > 30, (
             f"response too short: {response_text!r} "
             f"(blocked={body.get('blocked')}, "

@@ -1,11 +1,13 @@
 # BUG-CP1F — cost_inr=0 on /agentic/default/chat path
 
-**Status:** Open. **Severity: MEDIUM** (cost tracking regression;
-not blocking, but invalidates D17b ITEM 1's contract for the
-supervisor-orchestrated path).
+**Status:** ✅ **CLOSED** at pre-CP2 bug remediation 2026-05-09 (commit B).
+**Severity at discovery:** MEDIUM (cost tracking regression;
+invalidated D17b ITEM 1's contract for the supervisor-orchestrated path).
 **Origin:** D18 Phase B CP1 journey (f) authoring, 2026-05-09.
 **Surfaced by:** test_cp1_journey_f_resume_reviewer.py
 (@pytest.mark.xfail strict=True, Convention A).
+**Closed by:** Adding `_track_llm_usage(ctx, response)` calls after
+`llm.ainvoke(...)` in 4 v2/agentic agents.
 
 ## What this is
 
@@ -69,14 +71,79 @@ The CP4 pre-flight verified `agent_invocation_log.cost_inr` populates
 on direct HTTP agent calls. Phase B should verify whether this also
 holds for `/agentic/default/chat` — the answer determines fix scope.
 
-## Verification when fix lands
+## Resolution (2026-05-09)
 
-1. Drop `@pytest.mark.xfail` from
-   `test_cp1_journey_f_resume_reviewer.py::test_resume_reviewer_records_cost_inr_for_real_llm_call`.
-2. Run under runner overlay; expect PASS with `cost_inr > 0`.
-3. Add a CP3 traceability test that asserts
-   `agent_invocation_log.cost_inr` ALSO populates for the /agentic/*
-   path (separate from `agent_actions.cost_inr`).
+Diagnosis-before-fix per architect's directive surfaced the actual
+root cause was NOT in the supervisor orchestration layer at all —
+it was in the v2 agent implementations themselves.
+
+`agentic_base._finalize_action_log` correctly computes `cost_inr` from
+`ctx.extra["_llm_usage"]` accumulator. `agentic_base._track_llm_usage`
+correctly pushes onto that accumulator from a response. But **5 of
+8 v2/agentic agents never call `_track_llm_usage`** after their
+`llm.ainvoke(...)` rounds, leaving the accumulator empty:
+
+| Agent                 | _track_llm_usage calls | Status before fix |
+|-----------------------|-----------------------:|-------------------|
+| resume_reviewer_v2    | 0                      | broken            |
+| career_coach_v2       | 0                      | broken            |
+| study_planner_v2      | 0                      | broken            |
+| example_learning_coach| 0                      | broken (2 sites)  |
+| tailored_resume_v2    | 0                      | OK (deterministic; no LLM call) |
+| billing_support       | 3                      | ✅                |
+| senior_engineer       | 4                      | ✅                |
+| mock_interview        | 1                      | ✅                |
+| practice_curator      | 1                      | ✅                |
+| project_evaluator     | 2                      | ✅                |
+
+The pattern is per-agent: `_track_llm_usage` is opt-in instrumentation
+each agent must call after its own LLM rounds. D17b ITEM 1 added
+the canonical accumulator-+-finalize machinery; agents authored
+without applying the convention end up with cost_inr=0.
+
+### Fix applied
+
+5 sites patched (+1 in resume_reviewer_v2, +1 in career_coach_v2,
++1 in study_planner_v2, +2 in example_learning_coach):
+
+```python
+response = await llm.ainvoke(messages)
+self._track_llm_usage(ctx, response)  # ← BUG-CP1F fix
+```
+
+### Verification
+
+  * journey (f) `test_resume_reviewer_records_cost_inr_for_real_llm_call`:
+    xfail dropped; passes with cost_inr > 0.
+  * journey (e) `test_career_coach_responds_with_role_aware_guidance`:
+    xfail-loose dropped; passes consistently in batch (BUG-CP1E
+    auto-resolved by this fix).
+  * Full CP1 journey suite: 21 passed + 3 xfailed (only stripe
+    env-gated remain), up from 18 passed + 5 xfailed pre-fix.
+
+### Pattern 22 / Pattern 29 angle (refined)
+
+Initial hypothesis (orchestrator missing instrumentation) was
+wrong. The actual shape is **per-agent author discipline drift**:
+each agent must opt into cost-tracking by calling _track_llm_usage,
+and 5 of 8 agents missed the convention. This is closer to Pattern
+27 (test-fixture staleness as code evolves) at the agent-author
+layer than Pattern 29 — the instrumentation infrastructure is
+correct and ready; the consumers (agent authors) didn't all apply it.
+
+Worth adding to the AgenticBaseAgent docstring (and any agent-
+authoring doc) that `_track_llm_usage` MUST be called after every
+`llm.ainvoke` for cost-tracking to work. Also worth a smoke test
+that catches future authors missing the call (CP2-CP3 candidate).
+
+## Cross-references
+
+  * `backend/tests/playwright/journeys/test_cp1_journey_f_resume_reviewer.py` — verified.
+  * `backend/app/agents/{resume_reviewer_v2,career_coach_v2,study_planner_v2,example_learning_coach}.py` — fixed.
+  * `backend/app/agents/agentic_base.py` — the instrumentation
+    machinery (correct as-is; just needed callers to use it).
+  * D17b ITEM 1 closure — original cost-tracking contract;
+    extended by this fix to cover all v2/agentic agents.
 
 ## Cross-references
 

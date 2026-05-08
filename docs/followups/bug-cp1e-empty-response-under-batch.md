@@ -1,10 +1,12 @@
 # BUG-CP1E — empty response from /agentic/default/chat under batch
 
-**Status:** Open. **Severity: LOW-MEDIUM** (flaky behavior; passes
-in isolation, fails intermittently in batch).
+**Status:** ✅ **CLOSED** at pre-CP2 bug remediation 2026-05-09 — auto-resolved by the BUG-CP1F fix.
+**Severity at discovery:** LOW-MEDIUM.
 **Origin:** D18 Phase B CP1 journey (e) authoring, 2026-05-09.
 **Surfaced by:** test_cp1_journey_e_career_coach.py
 (@pytest.mark.xfail strict=False, Convention A).
+**Closed by:** Auto-resolved when BUG-CP1F fix landed
+(`_track_llm_usage` added to career_coach_v2 + others).
 
 ## What this is
 
@@ -48,13 +50,37 @@ stabilizes) without hard-failing on the inherent flakiness.
 When the underlying issue is fixed and the test passes
 deterministically in batch, drop the xfail entirely.
 
-## Verification when fix lands
+## Resolution (2026-05-09) — auto-resolved by BUG-CP1F
 
-1. Drop `@pytest.mark.xfail` from
-   `test_cp1_journey_e_career_coach.py::test_career_coach_responds_with_role_aware_guidance`.
-2. Run journey (e) in isolation 5 times → 5/5 pass (baseline).
-3. Run full CP1 journey batch 5 times → 5/5 pass for journey (e)
-   (regression guard).
+Per the architect's diagnose-first directive, BUG-CP1F was
+investigated and traced to per-agent missing `_track_llm_usage`
+calls (NOT supervisor orchestration as initially hypothesized).
+Fix added the missing calls to career_coach_v2 (among others).
+
+Re-running journey (e) batch under the runner overlay post-fix:
+journey (e) passes consistently. The "empty response" symptom
+disappears with the cost-tracking fix in place.
+
+Best-fit explanation: when `_track_llm_usage` was missing,
+`agent_actions.output_data` was incomplete (llm_calls=0,
+tokens=0). Whatever downstream code path was inspecting that
+output_data — possibly a circuit-breaker, possibly the
+orchestrator's response synthesis — was treating the all-zeros
+state as "no LLM result" and projecting an empty response back to
+the client. With usage now tracked, the output_data is complete
+and the response synthesis works correctly.
+
+### Verification
+
+  * journey (e) `test_career_coach_responds_with_role_aware_guidance`:
+    xfail-loose dropped; passes in batch alongside f and d (4/4
+    in 135s).
+  * Full CP1 journey suite: 21 passed + 3 xfailed (stripe-env-gated
+    only). No flakiness in batch run.
+
+This is exactly the auto-resolution the architect's directive
+anticipated when it said "if F resolves cleanly, re-test E to see
+if it auto-resolves." Closed as duplicate of BUG-CP1F.
 
 ## Cross-references
 

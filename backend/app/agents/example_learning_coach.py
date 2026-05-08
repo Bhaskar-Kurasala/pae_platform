@@ -592,6 +592,10 @@ class LearningCoach(AgenticBaseAgent[LearningCoachInput]):
 
         llm = self._build_llm(max_tokens=1024)
         response = await llm.ainvoke(messages)
+        # BUG-CP1F fix (2026-05-09): track LLM usage for cost_inr
+        # population in _finalize_action_log. See
+        # docs/followups/bug-cp1f-cost-tracking-zero-on-agentic-path.md.
+        self._track_llm_usage(ctx, response)
         return self._extract_text(response.content)
 
     async def _draft_nightly_nudge(
@@ -635,6 +639,9 @@ class LearningCoach(AgenticBaseAgent[LearningCoachInput]):
         ]
         llm = self._build_llm(max_tokens=300)
         response = await llm.ainvoke(messages)
+        # BUG-CP1F fix (2026-05-09): track LLM usage for cost_inr
+        # population in _finalize_action_log.
+        self._track_llm_usage(ctx, response)
         return self._extract_text(response.content)
 
     async def _post_inbox_nudge(

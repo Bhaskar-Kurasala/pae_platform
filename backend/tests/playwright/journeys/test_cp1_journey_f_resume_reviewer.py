@@ -176,19 +176,6 @@ def test_resume_reviewer_enforces_handoff_request_none_and_substantive_output(
 
 
 @pytest.mark.real_llm
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "BUG-CP1F-COST-TRACKING: agent_actions.cost_inr = 0.0 + "
-        "output_data.llm_calls = 0 for a real LLM call via "
-        "/agentic/default/chat. Synthesized answer landed (real "
-        "LLM ran) but cost-tracking pipeline reports zero. "
-        "Surfaced at CP1F authoring 2026-05-09. Adjacent to D17b "
-        "ITEM 1 cost-tracking fix; does not block journey (f)'s "
-        "primary regression guard. Convention A: xfail strict=True; "
-        "drop xfail when fix lands."
-    ),
-)
 def test_resume_reviewer_records_cost_inr_for_real_llm_call(
     page: Page,
 ) -> None:

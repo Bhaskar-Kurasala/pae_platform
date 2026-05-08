@@ -196,6 +196,12 @@ class ResumeReviewerAgent(AgenticBaseAgent[ResumeReviewerInput]):
                 {"role": "user", "content": user_block},
             ]
         )
+        # BUG-CP1F fix (2026-05-09): track LLM usage so
+        # _finalize_action_log can compute cost_inr. Without this,
+        # agent_actions.cost_inr is 0.0 for every supervisor-
+        # orchestrated invocation — invalidates D17b ITEM 1's
+        # cost-tracking contract for the /agentic/* path.
+        self._track_llm_usage(ctx, response)
         raw = _extract_text(response)
         output = _parse_output(raw)
 

@@ -255,6 +255,10 @@ class StudyPlannerAgent(AgenticBaseAgent[StudyPlannerInput]):
                 {"role": "user", "content": user_block},
             ]
         )
+        # BUG-CP1F fix (2026-05-09): track LLM usage so
+        # _finalize_action_log can compute cost_inr. See
+        # docs/followups/bug-cp1f-cost-tracking-zero-on-agentic-path.md.
+        self._track_llm_usage(ctx, response)
         raw = _extract_text(response)
         output = _parse_output(raw)
 
