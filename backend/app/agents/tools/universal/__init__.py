@@ -50,6 +50,7 @@ from app.agents.tools.universal import (  # noqa: F401
     memory_recall,
     memory_write,
     read_own_capability,
+    read_role_transition_gate,
     read_student_accessible_content,
     read_student_role_state,
 )
@@ -62,6 +63,7 @@ __all__ = [
     "memory_recall",
     "memory_write",
     "read_own_capability",
+    "read_role_transition_gate",
     "read_student_accessible_content",
     "read_student_role_state",
 ]

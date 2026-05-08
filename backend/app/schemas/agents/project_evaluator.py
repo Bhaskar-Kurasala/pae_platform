@@ -140,6 +140,77 @@ class DimensionScore(BaseModel):
     )
 
 
+class TransitionGateStatus(BaseModel):
+    """D15 CP4 / D-G — gate-context awareness for capstone evaluation.
+
+    Populated when the evaluated submission is a real (non-refusal-path)
+    capstone AND the student is at a non-terminal role AND
+    read_role_transition_gate succeeded. None otherwise:
+      * Refusal paths (D-E rubric_unavailable, D-4 non_capstone) →
+        transition_gate_status = None.
+      * Student at terminal role (senior_genai_engineer) →
+        transition_gate_status = None (no further transition exists).
+      * Student's role state unreachable / transition lookup failed →
+        transition_gate_status = None.
+
+    The runtime backstop in run() forces consistency: if
+    transition_gate_status is populated, capstone_score_achieved MUST
+    equal overall_score, and passes_threshold MUST equal
+    (overall_score >= capstone_threshold_required). The schema field
+    is the canonical source — the LLM populates it from the rubric +
+    gate context, but the agent's run() asserts consistency before
+    emitting.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    transition_from_role: str = Field(
+        max_length=64,
+        description="Slug of the role the student is transitioning OUT of.",
+    )
+    transition_to_role: str = Field(
+        max_length=64,
+        description="Slug of the role the student is transitioning INTO.",
+    )
+    capstone_threshold_required: float = Field(
+        ge=0.0,
+        le=1.0,
+        description=(
+            "From role_transitions.capstone_threshold for this pair. "
+            "Echoed as authoritative — the LLM reads this from the user "
+            "block and copies it through; the runtime backstop verifies."
+        ),
+    )
+    capstone_score_achieved: float = Field(
+        ge=0.0,
+        le=1.0,
+        description=(
+            "MUST equal ProjectEvaluatorOutput.overall_score. The "
+            "schema duplicates the value here so callers (gate "
+            "evaluators, dashboards) can read transition_gate_status as "
+            "self-contained without joining back to the parent. The "
+            "agent's run() asserts equality before emitting."
+        ),
+    )
+    passes_threshold: bool = Field(
+        description=(
+            "True iff capstone_score_achieved >= "
+            "capstone_threshold_required. Computed by the agent at "
+            "run-time and asserted by the runtime backstop for "
+            "consistency with the score fields."
+        ),
+    )
+    gate_message: str = Field(
+        max_length=1_000,
+        description=(
+            "Human-readable summary suitable for narrative_feedback or "
+            "student-facing copy. Format the agent uses by default: "
+            "'this evaluation [does/does not] pass the gate threshold "
+            "for [from→to]; achieved [score] vs required [threshold]'."
+        ),
+    )
+
+
 class PortfolioEntryDraft(BaseModel):
     """Draft portfolio entry passed to D17 portfolio_builder.
 
@@ -266,6 +337,18 @@ class ProjectEvaluatorOutput(BaseModel):
             "work. Otherwise None."
         ),
     )
+    transition_gate_status: TransitionGateStatus | None = Field(
+        default=None,
+        description=(
+            "D15 CP4 / D-G: structured gate-context result for the "
+            "student's current → next role transition. None on refusal "
+            "paths (D-E / D-4) AND when the student is at the terminal "
+            "role (no further transition exists). Otherwise populated "
+            "with the threshold + score + pass/fail boolean. See "
+            "TransitionGateStatus for the consistency invariants the "
+            "runtime backstop enforces."
+        ),
+    )
 
 
 __all__ = [
@@ -273,4 +356,5 @@ __all__ = [
     "PortfolioEntryDraft",
     "ProjectEvaluatorInput",
     "ProjectEvaluatorOutput",
+    "TransitionGateStatus",
 ]

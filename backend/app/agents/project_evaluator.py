@@ -63,6 +63,7 @@ from app.schemas.agents.project_evaluator import (
     PortfolioEntryDraft,
     ProjectEvaluatorInput,
     ProjectEvaluatorOutput,
+    TransitionGateStatus,
 )
 
 log = structlog.get_logger().bind(layer="project_evaluator")
@@ -250,6 +251,42 @@ class ProjectEvaluatorAgent(AgenticBaseAgent[ProjectEvaluatorInput]):
             else {}
         )
 
+        # ── D15 CP4 / D-G — role state + transition gate ─────────
+        # Fetched via the submission's student_id (NOT ctx.user_id, which
+        # is the caller — for instructor-driven evaluations the student
+        # being evaluated is identified by the submission row). Skip
+        # the transition gate read when the student is at the terminal
+        # role; transition_gate_status stays None in that case.
+        role_state = (
+            await _safe_tool(
+                self,
+                ctx,
+                "read_student_role_state",
+                {"student_id": student_id} if student_id else {},
+            )
+            if student_id
+            else {}
+        )
+        gate_def: dict[str, Any] = {}
+        next_role_slug: str | None = None
+        current_role_slug: str | None = None
+        if isinstance(role_state, dict) and role_state.get("found"):
+            current = role_state.get("current_role") or {}
+            current_role_slug = current.get("slug") if isinstance(current, dict) else None
+            nt = role_state.get("next_transition")
+            if isinstance(nt, dict):
+                next_role_slug = nt.get("target_role_slug")
+        if current_role_slug and next_role_slug:
+            gate_def = await _safe_tool(
+                self,
+                ctx,
+                "read_role_transition_gate",
+                {
+                    "from_role_slug": current_role_slug,
+                    "to_role_slug": next_role_slug,
+                },
+            )
+
         # ── Step 6: LLM call ─────────────────────────────────────
         marker = (
             RUBRIC_UNAVAILABLE_MARKER
@@ -267,6 +304,8 @@ class ProjectEvaluatorAgent(AgenticBaseAgent[ProjectEvaluatorInput]):
             capstone_marker=None,  # gate passed
             progress=progress,
             prior_capstone=prior_capstone,
+            role_state=role_state,
+            gate_def=gate_def,
         )
 
         # max_tokens=8192 — output is a multi-paragraph narrative +
@@ -299,6 +338,22 @@ class ProjectEvaluatorAgent(AgenticBaseAgent[ProjectEvaluatorInput]):
         # contradiction — load the canonical hard-stop signal.
         if output.rubric_available and not output.dimension_scores:
             output.rubric_available = False
+
+        # ── D15 CP4 / D-G runtime backstop ───────────────────────
+        # transition_gate_status is None unless ALL of:
+        #   • This is the rubric-grounded path (rubric_available=True).
+        #   • Student state is reachable AND non-terminal.
+        #   • read_role_transition_gate returned found=True for the
+        #     current → next pair.
+        # When populated, force consistency: capstone_score_achieved
+        # MUST equal overall_score; passes_threshold MUST equal
+        # (overall_score >= capstone_threshold_required); the message
+        # is regenerated to canonical shape if the LLM drifted.
+        output.transition_gate_status = _enforce_gate_status(
+            output=output,
+            role_state=role_state,
+            gate_def=gate_def,
+        )
 
         # ── Step 8: answer projection ────────────────────────────
         payload = output.model_dump(mode="json")
@@ -352,6 +407,10 @@ class ProjectEvaluatorAgent(AgenticBaseAgent[ProjectEvaluatorInput]):
             ),
             progress=progress or {},
             prior_capstone=prior_capstone or {},
+            # D15 CP4: refusal paths have no gate context — pass empty
+            # dicts so the user_block omits those sections cleanly.
+            role_state={},
+            gate_def={},
         )
 
         llm = build_llm(max_tokens=2048, tier="smart")
@@ -375,6 +434,9 @@ class ProjectEvaluatorAgent(AgenticBaseAgent[ProjectEvaluatorInput]):
         # prompt instructs to populate).
         if marker == RUBRIC_UNAVAILABLE_MARKER:
             output.handoff_request = None
+
+        # D15 CP4 / D-G: refusal paths NEVER carry transition_gate_status.
+        output.transition_gate_status = None
 
         payload = output.model_dump(mode="json")
         payload["answer"] = _compose_answer(output)
@@ -486,6 +548,8 @@ def _build_user_block(
     capstone_marker: str | None,
     progress: dict[str, Any],
     prior_capstone: dict[str, Any],
+    role_state: dict[str, Any],
+    gate_def: dict[str, Any],
 ) -> str:
     """Compose the user_block the prompt consumes.
 
@@ -548,6 +612,18 @@ def _build_user_block(
             f"```json\n{json.dumps(prior_capstone, indent=2, default=str)}\n```"
         )
 
+    # ── D15 CP4 / D-G: gate context (rubric-grounded path only) ──
+    if role_state and role_state.get("found"):
+        parts.append(
+            "## Student role state\n\n"
+            f"```json\n{json.dumps(role_state, indent=2, default=str)}\n```"
+        )
+    if gate_def and gate_def.get("found"):
+        parts.append(
+            "## Transition gate (current → next adjacent role)\n\n"
+            f"```json\n{json.dumps(gate_def, indent=2, default=str)}\n```"
+        )
+
     # ── Closing instruction ──────────────────────────────────────
     parts.append(
         "## Instructions\n\n"
@@ -555,6 +631,66 @@ def _build_user_block(
         "No markdown fences, no preamble."
     )
     return "\n\n".join(parts)
+
+
+# ── D15 CP4 / D-G runtime backstop ─────────────────────────────────
+
+
+def _enforce_gate_status(
+    *,
+    output: ProjectEvaluatorOutput,
+    role_state: dict[str, Any],
+    gate_def: dict[str, Any],
+) -> TransitionGateStatus | None:
+    """Compute the canonical transition_gate_status from authoritative
+    runtime data, ignoring whatever the LLM emitted.
+
+    Returns None when:
+      • Refusal path (rubric_available=False on output).
+      • Student role state unreachable / not found.
+      • Student at terminal role (no next_transition).
+      • Gate definition unreachable / not found.
+
+    Returns a populated TransitionGateStatus when all three sources
+    align. The shape is reproducible given the same inputs, so
+    consistency is enforced by replacing the LLM's value rather than
+    asserting/raising on drift.
+    """
+    if not output.rubric_available:
+        return None
+    if not isinstance(role_state, dict) or not role_state.get("found"):
+        return None
+    current = role_state.get("current_role") or {}
+    if not isinstance(current, dict):
+        return None
+    if current.get("is_terminal"):
+        return None
+    nt = role_state.get("next_transition") or {}
+    if not isinstance(nt, dict):
+        return None
+    target_to_role = nt.get("target_role_slug")
+    current_slug = current.get("slug")
+    if not target_to_role or not current_slug:
+        return None
+    if not isinstance(gate_def, dict) or not gate_def.get("found"):
+        return None
+
+    threshold = float(gate_def.get("capstone_threshold", 0.0))
+    score = float(output.overall_score)
+    passed = score >= threshold
+    msg = (
+        f"this evaluation {'passes' if passed else 'does not pass'} "
+        f"the gate threshold for {current_slug}→{target_to_role}; "
+        f"achieved {score:.2f} vs required {threshold:.2f}"
+    )
+    return TransitionGateStatus(
+        transition_from_role=current_slug,
+        transition_to_role=target_to_role,
+        capstone_threshold_required=threshold,
+        capstone_score_achieved=score,
+        passes_threshold=passed,
+        gate_message=msg,
+    )
 
 
 def _compose_answer(output: ProjectEvaluatorOutput) -> str:

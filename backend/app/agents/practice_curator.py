@@ -172,6 +172,30 @@ class PracticeCuratorAgent(AgenticBaseAgent[PracticeCuratorInput]):
             {"student_id": str(student_id), "days": 14} if student_id else {},
         )
 
+        # ── D15 CP4 — role-state grounding ─────────────────────────
+        # Two reads: role identity for voice + accessible_curated_problems
+        # for the bank-vs-generative D-E decision rule. The prompt's
+        # decision rule fires on the latter: when accessible problems
+        # match the request, SELECT from bank; when empty/no match,
+        # GENERATE per D14b behavior.
+        role_state = await _safe_tool(
+            self, ctx, "read_student_role_state",
+            {"student_id": str(student_id)} if student_id else {},
+        )
+        current_role_slug = (
+            (role_state.get("current_role") or {}).get("slug")
+            if isinstance(role_state, dict)
+            else None
+        )
+        accessible_args: dict[str, Any] = (
+            {"student_id": str(student_id)} if student_id else {}
+        )
+        if current_role_slug:
+            accessible_args["role_slug"] = current_role_slug
+        accessible_content = await _safe_tool(
+            self, ctx, "read_student_accessible_content", accessible_args
+        )
+
         # ── LLM call ──────────────────────────────────────────────
         system_prompt = _load_prompt("practice_curator")
         user_block = _build_user_block(
@@ -183,6 +207,8 @@ class PracticeCuratorAgent(AgenticBaseAgent[PracticeCuratorInput]):
             weaknesses=weaknesses,
             progress=progress,
             session_history=session_history,
+            role_state=role_state,
+            accessible_content=accessible_content,
         )
 
         # max_tokens=8192 matches D12+D13 v2 calibration. Exercise output
@@ -204,6 +230,25 @@ class PracticeCuratorAgent(AgenticBaseAgent[PracticeCuratorInput]):
         # this; this is the runtime backstop.
         if not _student_requested_evaluation(student_message):
             output.handoff_request = None
+
+        # D15 CP4 / D-E backstop — set exercise.source to a non-null
+        # value reflecting the bank-vs-generative decision, even when
+        # the LLM omits it. Heuristic:
+        #   • If accessible_curated_problems had any items AND the LLM's
+        #     exercise.title matches one of those titles (case-folded
+        #     equality OR substring match in either direction), tag as
+        #     "curated" and copy curated_exercise_id from the matched
+        #     bank entry.
+        #   • Otherwise tag as "generated".
+        # When the LLM populated source itself, preserve its value; the
+        # backstop only fires when source is None.
+        if output.exercise.source is None:
+            inferred_source, inferred_id = _infer_exercise_source(
+                output.exercise.title, accessible_content
+            )
+            output.exercise.source = inferred_source
+            if inferred_id is not None:
+                output.exercise.curated_exercise_id = inferred_id
 
         payload = output.model_dump(mode="json")
         payload["answer"] = _compose_answer(output)
@@ -338,6 +383,8 @@ def _build_user_block(
     weaknesses: list[dict[str, Any]],
     progress: dict[str, Any],
     session_history: dict[str, Any],
+    role_state: dict[str, Any],
+    accessible_content: dict[str, Any],
 ) -> str:
     parts: list[str] = []
 
@@ -354,6 +401,19 @@ def _build_user_block(
 
     if student_message:
         parts.append(f"## Student message\n\n{student_message}")
+
+    # D15 CP4 — role identity frames the exercise's scope; accessible
+    # curated problems drive the D-E bank-vs-generative decision.
+    if role_state and role_state.get("found"):
+        parts.append(
+            "## Role state\n\n"
+            f"```json\n{json.dumps(role_state, indent=2, default=str)}\n```"
+        )
+    if accessible_content and accessible_content.get("found") is not None:
+        parts.append(
+            "## Accessible content (filtered to current role)\n\n"
+            f"```json\n{json.dumps(accessible_content, indent=2, default=str)}\n```"
+        )
 
     # Target role.
     target_role_text: str | None = None
@@ -423,6 +483,49 @@ def _student_requested_evaluation(student_message: str | None) -> bool:
         return False
     lowered = student_message.lower()
     return any(pat in lowered for pat in _EVAL_REQUEST_PATTERNS)
+
+
+def _infer_exercise_source(
+    exercise_title: str,
+    accessible_content: dict[str, Any],
+) -> tuple[str, str | None]:
+    """D15 CP4 backstop — infer (source, curated_exercise_id) from
+    runtime state when the LLM omitted the source field.
+
+    Returns ("curated", <exercise_id>) when the agent's emitted title
+    matches a title in accessible_curated_problems (case-folded equality
+    or substring match in either direction). Returns ("generated", None)
+    otherwise.
+
+    The matching is permissive (substring) so the LLM doesn't have to
+    quote the curated title byte-for-byte — paraphrased or
+    role-descriptor-prefixed titles still match. False positives here
+    are unlikely because the input space is constrained to the
+    student's actual entitled bank for the requested role.
+    """
+    if not isinstance(accessible_content, dict):
+        return "generated", None
+    problems = accessible_content.get("accessible_curated_problems") or []
+    if not isinstance(problems, list) or not problems:
+        return "generated", None
+    if not exercise_title:
+        return "generated", None
+    title_norm = exercise_title.strip().lower()
+    for prob in problems:
+        if not isinstance(prob, dict):
+            continue
+        bank_title = (prob.get("title") or "").strip()
+        if not bank_title:
+            continue
+        bank_norm = bank_title.lower()
+        if (
+            title_norm == bank_norm
+            or title_norm in bank_norm
+            or bank_norm in title_norm
+        ):
+            eid = prob.get("exercise_id")
+            return "curated", str(eid) if eid is not None else None
+    return "generated", None
 
 
 def _compose_answer(output: PracticeCuratorOutput) -> str:

@@ -71,10 +71,43 @@ async def pg_session(_pg_available: bool) -> AsyncGenerator[AsyncSession, None]:
 
     async with engine.begin() as conn:
         await conn.exec_driver_sql(f'SET search_path TO "{schema_name}", public')
+        # D15 CP3 (Bug 24 fix) added courses/lessons/entitlements/roles
+        # JOINs to read_active_capstone. The throwaway schema mirrors
+        # those tables minimally so the SQL parses + executes. Schema
+        # was originally exercises + exercise_submissions only;
+        # extended at D15 CP4 closure to cover the full join-graph.
+        await conn.exec_driver_sql(
+            """
+            CREATE TABLE roles (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                slug TEXT UNIQUE NOT NULL,
+                sequence_order INT NOT NULL,
+                is_terminal BOOLEAN NOT NULL DEFAULT false
+            )
+            """
+        )
+        await conn.exec_driver_sql(
+            """
+            CREATE TABLE courses (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                slug VARCHAR(500) NOT NULL,
+                role_id UUID NULL REFERENCES roles(id) ON DELETE SET NULL
+            )
+            """
+        )
+        await conn.exec_driver_sql(
+            """
+            CREATE TABLE lessons (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                course_id UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE
+            )
+            """
+        )
         await conn.exec_driver_sql(
             """
             CREATE TABLE exercises (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                lesson_id UUID NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
                 title VARCHAR(500) NOT NULL,
                 is_capstone BOOLEAN NOT NULL DEFAULT false,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -89,6 +122,26 @@ async def pg_session(_pg_available: bool) -> AsyncGenerator[AsyncSession, None]:
                 exercise_id UUID NOT NULL REFERENCES exercises(id),
                 score INT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+        await conn.exec_driver_sql(
+            """
+            CREATE TABLE course_entitlements (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id UUID NOT NULL,
+                course_id UUID NOT NULL REFERENCES courses(id),
+                revoked_at TIMESTAMPTZ NULL,
+                expires_at TIMESTAMPTZ NULL
+            )
+            """
+        )
+        await conn.exec_driver_sql(
+            """
+            CREATE TABLE student_role_state (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                student_id UUID NOT NULL UNIQUE,
+                current_role_id UUID NOT NULL REFERENCES roles(id)
             )
             """
         )
@@ -134,27 +187,68 @@ async def test_query_executes_against_real_schema_no_data(
     assert result.capstone is None
 
 
+async def _seed_entitled_capstone(
+    session: AsyncSession,
+    *,
+    student_id: uuid.UUID,
+    title: str,
+    score: int | None = None,
+) -> uuid.UUID:
+    """Helper: insert role + course + lesson + entitlement +
+    capstone exercise (and optional submission) so the entitlement-
+    filtered SQL returns the row.
+    """
+    course_id = uuid.uuid4()
+    lesson_id = uuid.uuid4()
+    exercise_id = uuid.uuid4()
+    await session.execute(
+        sql_text(
+            "INSERT INTO courses (id, slug, role_id) "
+            "VALUES (:cid, :slug, NULL)"
+        ),
+        {"cid": course_id, "slug": f"course-{course_id.hex[:6]}"},
+    )
+    await session.execute(
+        sql_text(
+            "INSERT INTO lessons (id, course_id) VALUES (:lid, :cid)"
+        ),
+        {"lid": lesson_id, "cid": course_id},
+    )
+    await session.execute(
+        sql_text(
+            "INSERT INTO exercises (id, lesson_id, title, is_capstone) "
+            "VALUES (:eid, :lid, :t, true)"
+        ),
+        {"eid": exercise_id, "lid": lesson_id, "t": title},
+    )
+    await session.execute(
+        sql_text(
+            "INSERT INTO course_entitlements (user_id, course_id) "
+            "VALUES (:uid, :cid)"
+        ),
+        {"uid": student_id, "cid": course_id},
+    )
+    if score is not None:
+        await session.execute(
+            sql_text(
+                "INSERT INTO exercise_submissions "
+                "(student_id, exercise_id, score) "
+                "VALUES (:uid, :eid, :score)"
+            ),
+            {"uid": student_id, "eid": exercise_id, "score": score},
+        )
+    return exercise_id
+
+
 async def test_returns_capstone_with_submission(
     pg_session: AsyncSession,
 ) -> None:
     """End-to-end with seeded data; ORDER BY created_at picks the most
-    recent."""
+    recent. Post-Bug-24-fix the throwaway schema includes
+    course_entitlements + student_role_state JOINs."""
     uid = uuid.uuid4()
-    exercise_id = uuid.uuid4()
-
-    await pg_session.execute(
-        sql_text(
-            "INSERT INTO exercises (id, title, is_capstone) "
-            "VALUES (:eid, :t, true)"
-        ),
-        {"eid": exercise_id, "t": "Active Capstone"},
-    )
-    await pg_session.execute(
-        sql_text(
-            "INSERT INTO exercise_submissions "
-            "(student_id, exercise_id, score) VALUES (:uid, :eid, 75)"
-        ),
-        {"uid": uid, "eid": exercise_id},
+    await _seed_entitled_capstone(
+        pg_session, student_id=uid, title="Active Capstone", score=75,
     )
     await pg_session.flush()
 
@@ -173,12 +267,8 @@ async def test_unsubmitted_capstone_has_remaining_hours(
     """A capstone with no submission shows submitted=False and the
     8-hour estimate."""
     uid = uuid.uuid4()
-    await pg_session.execute(
-        sql_text(
-            "INSERT INTO exercises (title, is_capstone) "
-            "VALUES (:t, true)"
-        ),
-        {"t": "Unsubmitted"},
+    await _seed_entitled_capstone(
+        pg_session, student_id=uid, title="Unsubmitted", score=None,
     )
     await pg_session.flush()
 

@@ -278,6 +278,188 @@ async def seed_mid_progression_data_scientist(
     )
 
 
+async def seed_python_developer_with_curated_bank(
+    session: AsyncSession,
+    *,
+    email_suffix: str | None = None,
+    days_in_role: int = 6,
+) -> SeededStudent:
+    """python_developer student with access to the curated bank.
+
+    Entitled to BOTH `python-developer` (the role-named course, no
+    exercises) AND `python-foundations` (tributary, mapped to
+    python_developer at CP2b, holds 32 exercises + 1 capstone).
+    accessible_curated_problems is non-empty for this student — used
+    by CP4 Phase 1 to verify practice_curator's bank-selection path.
+    """
+    user_id, email = await _insert_user(
+        session,
+        email_suffix=email_suffix,
+        full_name="D15 CP4 Python Developer (with bank)",
+    )
+    started = datetime.now(UTC) - timedelta(days=days_in_role)
+    role_id = await _upsert_role_state(
+        session,
+        student_id=user_id,
+        role_slug="python_developer",
+        role_started_at=started,
+    )
+    for slug in ("python-developer", "python-foundations"):
+        await _grant_entitlement(session, student_id=user_id, course_slug=slug)
+    return SeededStudent(
+        user_id=user_id,
+        email=email,
+        full_name="D15 CP4 Python Developer (with bank)",
+        current_role_slug="python_developer",
+        current_role_id=role_id,
+        entitled_course_slugs=["python-developer", "python-foundations"],
+        transitions_completed_count=0,
+    )
+
+
+async def seed_ml_engineer_with_capstone_submission(
+    session: AsyncSession,
+    *,
+    email_suffix: str | None = None,
+    days_in_role: int = 22,
+    capstone_score: int = 78,
+) -> tuple[SeededStudent, str]:
+    """ml_engineer student who has submitted the D12 CP3 RAG Capstone
+    (intro-ai-engineering, genai_engineer-tagged, has rubric).
+
+    The capstone's parent course is genai_engineer-tagged per CP2b
+    backfill. The student is at ml_engineer, so:
+      • role progression next = genai_engineer (sequence_order 4 → 5).
+      • capstone is the gate's load-bearing artifact — submitting it
+        is exactly the action the gate evaluates.
+      • rubric is present (D14c CP3 verified), so D-E
+        rubric_available=True path fires.
+      • transition_gate_status populates with capstone_threshold=0.75.
+
+    Returns (student, exercise_submissions.id). Used by CP4 Phase 3 to
+    drive project_evaluator on a real capstone with the gate-context
+    sections fully populated.
+    """
+    student = await seed_ml_engineer_for_gate_prep(
+        session,
+        email_suffix=email_suffix,
+        days_in_role=days_in_role,
+    )
+    cap_row = (
+        await session.execute(
+            sql_text(
+                """
+                SELECT e.id
+                FROM exercises e
+                JOIN lessons l ON l.id = e.lesson_id
+                JOIN courses c ON c.id = l.course_id
+                WHERE c.slug = 'intro-ai-engineering'
+                  AND e.is_capstone = TRUE
+                  AND e.title = 'D12 CP3 RAG Capstone'
+                LIMIT 1
+                """
+            )
+        )
+    ).first()
+    if cap_row is None:
+        raise RuntimeError("D12 CP3 RAG Capstone not found on dev DB")
+    exercise_id = cap_row[0]
+
+    submission_row = (
+        await session.execute(
+            sql_text(
+                """
+                INSERT INTO exercise_submissions
+                    (id, student_id, exercise_id, status, score,
+                     attempt_number, code, self_explanation)
+                VALUES (
+                    gen_random_uuid(), :sid, :eid, 'evaluated', :score,
+                    1,
+                    '# RAG implementation: hybrid retrieval + reranker\n'
+                    'def retrieve(query, k=10):\n'
+                    '    bm25_hits = bm25.search(query, k=k*2)\n'
+                    '    dense_hits = vec.search(query, k=k*2)\n'
+                    '    return rrf(bm25_hits, dense_hits, k=k)',
+                    'I built a hybrid retrieval pipeline: BM25 for '
+                    'lexical recall, dense embeddings (text-embedding-3) '
+                    'for semantic, RRF fusion for ranking. Eval harness '
+                    'measures recall@10 and answer fidelity on a held-out '
+                    'set; production deploy uses FAISS HNSW for hot tier '
+                    'and a managed vector DB for warm.'
+                )
+                RETURNING id
+                """
+            ),
+            {"sid": student.user_id, "eid": exercise_id, "score": capstone_score},
+        )
+    ).first()
+    if submission_row is None:
+        raise RuntimeError("INSERT exercise_submissions returned no id")
+    submission_id = str(submission_row[0])
+    return student, submission_id
+
+
+async def seed_ml_engineer_for_gate_prep(
+    session: AsyncSession,
+    *,
+    email_suffix: str | None = None,
+    days_in_role: int = 22,
+) -> SeededStudent:
+    """ml_engineer student preparing for the ml_engineer→genai_engineer gate.
+
+    Entitled to ml-engineer + production-rag + intro-ai-engineering
+    (the latter two are genai_engineer-tagged courses; entitled here
+    so the student has read access to the genai-adjacent reference
+    material while practicing the gate). Used by CP4 Phase 4 to
+    verify mock_interview's gate-prep verdict path.
+    """
+    user_id, email = await _insert_user(
+        session,
+        email_suffix=email_suffix,
+        full_name="D15 CP4 ML Engineer",
+    )
+    started = datetime.now(UTC) - timedelta(days=days_in_role)
+    transitions = []
+    for from_slug, to_slug, score in (
+        ("python_developer", "data_analyst", 0.78),
+        ("data_analyst", "data_scientist", 0.74),
+        ("data_scientist", "ml_engineer", 0.76),
+    ):
+        transitions.append(
+            {
+                "from_slug": from_slug,
+                "to_slug": to_slug,
+                "completed_at": (
+                    datetime.now(UTC) - timedelta(days=days_in_role + 30)
+                ).isoformat(),
+                "capstone_score": score,
+                "mock_session_ids": [str(uuid.uuid4()), str(uuid.uuid4())],
+            }
+        )
+    role_id = await _upsert_role_state(
+        session,
+        student_id=user_id,
+        role_slug="ml_engineer",
+        role_started_at=started,
+        transitions_completed=transitions,
+    )
+    for slug in ("ml-engineer", "production-rag", "intro-ai-engineering"):
+        await _grant_entitlement(session, student_id=user_id, course_slug=slug)
+    return SeededStudent(
+        user_id=user_id,
+        email=email,
+        full_name="D15 CP4 ML Engineer",
+        current_role_slug="ml_engineer",
+        current_role_id=role_id,
+        entitled_course_slugs=[
+            "ml-engineer",
+            "production-rag",
+            "intro-ai-engineering",
+        ],
+        transitions_completed_count=3,
+    )
+
+
 async def seed_data_analyst_with_entitlement(
     session: AsyncSession,
     *,
@@ -333,5 +515,8 @@ __all__ = [
     "SeededStudent",
     "seed_data_analyst_with_entitlement",
     "seed_mid_progression_data_scientist",
+    "seed_ml_engineer_for_gate_prep",
+    "seed_ml_engineer_with_capstone_submission",
     "seed_python_developer_fresh",
+    "seed_python_developer_with_curated_bank",
 ]

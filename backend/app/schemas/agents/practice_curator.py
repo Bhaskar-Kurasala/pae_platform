@@ -30,6 +30,10 @@ ExerciseType = Literal[
     "evaluation_rubric",
 ]
 DifficultyLevel = Literal["easy", "medium", "hard"]
+# D15 CP4: D-E bank-vs-generative source flag. Optional metadata so
+# downstream observability can distinguish curated bank selections from
+# generative fallback. None on legacy / pre-D15 rows.
+ExerciseSource = Literal["curated", "generated"]
 
 
 # ── Input ──────────────────────────────────────────────────────────
@@ -214,6 +218,27 @@ class Exercise(BaseModel):
             "performance characteristics not visible to the student."
         ),
     )
+    source: ExerciseSource | None = Field(
+        default=None,
+        description=(
+            "D15 CP4 metadata: 'curated' when the exercise was selected "
+            "from the student's accessible_curated_problems bank; "
+            "'generated' when the agent generated it (D14b fallback "
+            "behavior). None on legacy rows / when the agent didn't "
+            "decide. Downstream observability reads this to track the "
+            "bank-vs-generative ratio."
+        ),
+    )
+    curated_exercise_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "When source='curated', the exercises.id of the selected "
+            "platform exercise. None when source='generated'. Lets "
+            "downstream consumers (orchestrator, portfolio_builder) "
+            "link the practice attempt to the canonical exercise."
+        ),
+    )
 
 
 # ── Output ─────────────────────────────────────────────────────────
@@ -301,6 +326,7 @@ class PracticeCuratorOutput(BaseModel):
 __all__ = [
     "DifficultyLevel",
     "Exercise",
+    "ExerciseSource",
     "ExerciseType",
     "Hint",
     "PracticeCuratorInput",

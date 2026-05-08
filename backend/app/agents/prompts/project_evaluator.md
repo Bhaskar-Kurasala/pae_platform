@@ -19,8 +19,22 @@ Your input may include any of these sections:
 - **`## Prior capstone status`** — JSON dump from `read_capstone_status`.
 - **`## Caller-supplied`** — `project_submission_id` (always present), `specific_concerns` (list; weight when set).
 - **`## Student message`** — what the student said when invoking; may be empty.
+- **`## Student role state`** — D15 CP4: the student's current role + completed transitions + next_transition. Present on rubric-grounded evaluations only.
+- **`## Transition gate (current → next adjacent role)`** — D15 CP4: the gate definition (capstone_threshold, capstone_count_required, mock_interview_dimensions, mock_interview_pass_threshold). Present when the student is non-terminal AND the gate read succeeded.
 
 Sections may be absent if data is empty. Treat missing data as "not enough info to ground that dimension" — don't invent.
+
+## Gate-context awareness (D-G)
+
+When BOTH `## Student role state` AND `## Transition gate` sections are present:
+
+- Mention the gate threshold in `narrative_feedback`. Quote the threshold from the gate definition; do not invent. Phrase like "this transition requires a capstone score of [X.XX]; this submission scored [overall_score]."
+- Populate `transition_gate_status` with the structured fields: `transition_from_role` (current role slug), `transition_to_role` (next adjacent role slug), `capstone_threshold_required` (echo from gate), `capstone_score_achieved` (MUST equal `overall_score`), `passes_threshold` (MUST equal `overall_score >= capstone_threshold_required`), `gate_message` (short human-readable summary).
+- The runtime backstop will RECOMPUTE `transition_gate_status` from authoritative sources after parsing — your value is informative but not load-bearing. Still, populate it consistently (the backstop preserves the LLM's value when it agrees).
+
+When EITHER section is absent (or `## Capstone gate` is `NON_CAPSTONE_SUBMISSION`, or `## Rubric` is `RUBRIC_UNAVAILABLE`):
+
+- Set `transition_gate_status` = `null`. The runtime backstop enforces this on refusal paths regardless.
 
 ## Rubric-grounding (load-bearing)
 

@@ -181,6 +181,137 @@ class SessionSummary(BaseModel):
     )
 
 
+class MockInterviewDimensionScore(BaseModel):
+    """D15 CP4 / D-D — one rubric dimension scored on a session verdict.
+
+    The four standard dimensions (clarity_of_questioning,
+    directional_adherence, complexity_adaptation,
+    technical_correctness) come from the role_transitions row's
+    mock_interview_dimensions JSONB; the weights are mirrored from
+    that row so the agent's aggregation is reproducible.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        max_length=200,
+        description=(
+            "Dimension name from the gate's mock_interview_dimensions "
+            "(e.g., 'clarity_of_questioning'). MUST match a key the "
+            "agent received in user_block; the runtime backstop "
+            "verifies coverage at session_summary turns."
+        ),
+    )
+    weight: float = Field(
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Per-dimension weight echoed from the gate definition. "
+            "Across all dimensions in dimension_scores, weights MUST "
+            "sum to 1.0 (the runtime backstop verifies; if the LLM "
+            "drifts, the agent normalizes before emitting)."
+        ),
+    )
+    score: float = Field(
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Score on this dimension. 0.0 = not demonstrated; 1.0 = "
+            "exemplary. The agent grounds each score in evidence drawn "
+            "from the session's prior turns."
+        ),
+    )
+    evidence: str = Field(
+        max_length=1_000,
+        description=(
+            "Specific evidence from the session backing this score. "
+            "Cites concrete moments (e.g., 'in turn 3 the candidate "
+            "asked clarifying questions about latency budget before "
+            "designing'); not generic praise/criticism."
+        ),
+    )
+
+
+class TransitionTarget(BaseModel):
+    """Slug pair identifying the gate this session evaluates against."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    from_role_slug: str = Field(
+        max_length=64,
+        description="Slug of the role being transitioned OUT of.",
+    )
+    to_role_slug: str = Field(
+        max_length=64,
+        description="Slug of the role being transitioned INTO.",
+    )
+
+
+class SessionVerdict(BaseModel):
+    """D15 CP4 / D-D — multi-dimensional session-end verdict.
+
+    Populated ONLY at session END (turn_kind='session_summary') AND
+    only when the candidate's user_message indicated gate-prep intent
+    so the agent fetched read_role_transition_gate. None otherwise:
+
+      * General-practice sessions (no gate-prep intent) →
+        session_verdict = None on every turn.
+      * Mid-session turns (turn_kind != session_summary) →
+        session_verdict = None (the verdict is computed at session END).
+      * Gate lookup failed (transition not found / not adjacent) →
+        session_verdict = None; the agent falls back to
+        SessionSummary's existing 0-100 scoring.
+
+    Aggregation rule (the runtime backstop verifies):
+      weighted_score = sum(d.weight * d.score for d in dimension_scores)
+      passed = weighted_score >= mock_interview_pass_threshold
+
+    evaluate_student_against_gate (CP2) reads
+    output_data.session_verdict.passed AND
+    output_data.session_verdict.transition_target.to_role_slug to
+    decide whether this session counts toward the
+    'sessions_passed_in_window' aggregate. The metadata coupling that
+    Pattern 18b flagged at CP2 resolves at this checkpoint.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    weighted_score: float = Field(
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Aggregated weighted score: sum(weight * score) across all "
+            "dimensions in dimension_scores. The runtime backstop "
+            "asserts weights sum to 1.0 and weighted_score equals the "
+            "computed sum within float tolerance."
+        ),
+    )
+    passed: bool = Field(
+        description=(
+            "weighted_score >= the gate's mock_interview_pass_threshold."
+        ),
+    )
+    dimension_scores: list[MockInterviewDimensionScore] = Field(
+        default_factory=list,
+        max_length=10,
+        description=(
+            "Per-dimension breakdown. Length matches the gate's "
+            "mock_interview_dimensions count (4 in v1: "
+            "clarity_of_questioning, directional_adherence, "
+            "complexity_adaptation, technical_correctness)."
+        ),
+    )
+    transition_target: TransitionTarget | None = Field(
+        default=None,
+        description=(
+            "The gate this session targets. None when general-practice "
+            "(no gate-prep intent detected). evaluate_student_against_"
+            "gate reads to_role_slug to filter sessions for the "
+            "passes-in-window aggregate."
+        ),
+    )
+
+
 # ── Output ─────────────────────────────────────────────────────────
 
 
@@ -228,15 +359,31 @@ class MockInterviewOutput(BaseModel):
             "deliverable per D-2."
         ),
     )
+    session_verdict: SessionVerdict | None = Field(
+        default=None,
+        description=(
+            "D15 CP4 / D-D: structured multi-dimensional verdict for "
+            "gate-prep sessions. Populated ONLY at "
+            "turn_kind='session_summary' AND when the user_message "
+            "indicated gate-prep intent (so the agent fetched the "
+            "transition's mock_interview_dimensions). None otherwise. "
+            "evaluate_student_against_gate reads passed + "
+            "transition_target.to_role_slug to count this session "
+            "toward 'sessions_passed_in_window'."
+        ),
+    )
 
 
 __all__ = [
     "DifficultyLevel",
     "InterviewFormat",
     "InterviewQuestion",
+    "MockInterviewDimensionScore",
     "MockInterviewInput",
     "MockInterviewOutput",
     "SessionSummary",
+    "SessionVerdict",
+    "TransitionTarget",
     "TurnEvaluation",
     "TurnFeedback",
     "TurnKind",

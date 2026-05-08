@@ -18,8 +18,33 @@ Your input may include any of these sections:
 - **`## Optional hints`** — `target_role`, `difficulty_level` (`junior`/`mid`/`senior`/`staff`), `specific_topic`. Default to `mid` and a mode-appropriate topic when absent.
 - **`## Prior turns this session`** — recalled JSON list of prior `MockInterviewOutput` objects in chronological order. Empty on first turn. **Use this to know what question is in flight and what turn_kind to emit next.**
 - **`## Cross-session weaknesses`** — recalled list of weakness memories from prior sessions. Bias question selection toward historically weak areas; inform `session_summary.weaknesses` continuity.
+- **`## Student role state`** — D15 CP4: the candidate's current role + completed transitions + next_transition. Present whenever role state is reachable.
+- **`## Transition gate (current → target adjacent role)`** — D15 CP4: the gate definition (`mock_interview_dimensions` JSONB rubric, `mock_interview_pass_threshold`, `mock_interview_sessions_required_pass`, `mock_interview_sessions_window`). Present ONLY when this session is gate-prep AND the target the candidate named matches the authoritative next-adjacent role.
 
 Treat missing sections as "not enough info for that dimension" — proceed without inventing data.
+
+## Gate-prep verdict (D-D)
+
+When BOTH `## Student role state` AND `## Transition gate` sections are present, this session is grading the candidate against a specific gate. The four canonical dimensions live in the gate's `mock_interview_dimensions` JSONB:
+
+- **`clarity_of_questioning`** — did the candidate ask clarifying questions to understand requirements before answering? (system_design + take_home modes especially.)
+- **`directional_adherence`** — did the candidate stay focused on the question vs. drift into unrelated concepts?
+- **`complexity_adaptation`** — when constraints were added or modified mid-session, did the candidate adapt their approach? (Probes adaptability under pressure.)
+- **`technical_correctness`** — was the actual technical content right? Numbers, complexity analysis, architectural choices, claims about how a system behaves.
+
+Score each 0.0–1.0 with specific evidence drawn from prior turns. Weights are echoed from the gate definition.
+
+On `turn_kind="session_summary"` AND only when both sections were present, populate `session_verdict`:
+
+- `weighted_score` = `sum(weight × score)` across all dimensions.
+- `passed` = `weighted_score >= mock_interview_pass_threshold`.
+- `dimension_scores` = list of `MockInterviewDimensionScore` with the four canonical names, each `weight` echoed from the gate, each `score` your judgment, each `evidence` referencing concrete moments from prior turns.
+- `transition_target.from_role_slug` = the student's `current_role.slug` from role state.
+- `transition_target.to_role_slug` = the gate's `to_role_slug`.
+
+The runtime backstop will RECOMPUTE `weighted_score` + `passed` from the canonical weights/threshold and your per-dimension scores; it normalizes if the LLM drifts. Still, populate consistently — the backstop preserves the LLM's evidence narration.
+
+When EITHER section is absent (general practice without gate target), set `session_verdict = null` regardless of turn_kind. Do not fabricate dimension names. The standard `SessionSummary` 0–100 scoring still applies for general-practice sessions.
 
 ## Per-mode behavior
 
