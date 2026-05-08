@@ -1,10 +1,11 @@
 # BUG-CP1D — interview_sessions.updated_at NOT NULL violation
 
-**Status:** Open. **Severity: LAUNCH-BLOCKER candidate** (if production
-schema matches `playwright_test`).
+**Status:** ✅ **CLOSED** at pre-CP2 bug remediation 2026-05-09 (commit A).
+**Severity at discovery:** LAUNCH-BLOCKER candidate.
 **Origin:** D18 Phase B CP1 journey (d) authoring, 2026-05-09.
 **Surfaced by:** test_cp1_journey_d_mock_interview.py
 (@pytest.mark.xfail strict=True, Convention A).
+**Closed by:** Option α (server_default on ORM column).
 
 ## What this is
 
@@ -72,13 +73,43 @@ session = InterviewSession(
 Option α is the canonical fix (matches the schema; doesn't require
 service awareness).
 
-## Verification when fix lands
+## Resolution (2026-05-09)
 
-1. Drop `@pytest.mark.xfail` from
-   `test_cp1_journey_d_mock_interview.py::test_mock_interview_session_starts_and_accepts_one_answer`.
-2. Re-run under runner overlay; expect PASS in 30-60s with real LLM cost.
-3. Verify dev `platform` DB also has the NOT NULL migration applied
-   (otherwise this drift recurs the next time a fresh DB is provisioned).
+Option α applied:
+
+```python
+# backend/app/models/interview_session.py:55-66
+updated_at: Mapped[datetime] = mapped_column(
+    sa.DateTime(timezone=True),
+    server_default=sa.func.now(),
+    onupdate=sa.func.now(),
+    nullable=False,
+)
+```
+
+Pattern 22 sweep across ALL ORM models: zero sibling instances of the
+exact BUG-CP1D shape (`nullable=True` + no `default` + no
+`server_default` on a NOT NULL DEFAULT timestamp column). The
+`interview_sessions.updated_at` column was uniquely broken.
+
+Most other timestamp columns use Python-side `default=lambda: datetime.now(UTC)`
+which works correctly (SA evaluates the lambda on INSERT and supplies
+a non-NULL value). Some use `server_default=func.now()`. Only
+interview_sessions had the broken combination.
+
+Verification:
+  * `backend/tests/playwright/smoke/test_bug_cp1d_regression.py` —
+    two model-level regression tests:
+      1. raw-SQL INSERT omitting `updated_at` → DB default fires.
+      2. ORM `InterviewSession(...)` without `updated_at` → SA omits
+         from INSERT, default fires.
+    Both pass post-fix.
+  * `test_cp1_journey_d_mock_interview.py` xfail-strict marker
+    dropped; test passes in ~30s with real LLM cost.
+
+Note: dev `platform` DB still has `updated_at nullable` (older
+migration state). If `platform` is migrated forward to match
+`playwright_test`, this fix is still required (and now in place).
 
 ## Cross-references
 

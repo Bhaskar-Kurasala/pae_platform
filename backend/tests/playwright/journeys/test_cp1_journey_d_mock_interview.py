@@ -34,27 +34,6 @@ pytestmark = [pytest.mark.critical_path, pytest.mark.cost("high")]
 
 
 @pytest.mark.real_llm
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "BUG-CP1D-INTERVIEW-SESSIONS-UPDATED-AT: Mock interview "
-        "start path raises NotNullViolationError on "
-        "interview_sessions.updated_at. Live playwright_test schema "
-        "has updated_at NOT NULL with server_default=now(); ORM "
-        "model at backend/app/models/interview_session.py:55 has "
-        "nullable=True without server_default, so SQLAlchemy "
-        "INSERTs explicit NULL (overrides the DB default). "
-        "Service writes a row without setting updated_at; INSERT "
-        "fails with 500. Note: dev `platform` DB has updated_at "
-        "nullable (older migration state), masking the bug there. "
-        "Surfaced at CP1D authoring 2026-05-09. LAUNCH-BLOCKER if "
-        "production DB matches playwright_test schema. Convention "
-        "A: xfail strict=True; remove when fix lands. Fix scope: "
-        "either add server_default=sa.func.now() to the ORM "
-        "model's updated_at column, or change service to set "
-        "updated_at=datetime.now(UTC) on INSERT."
-    ),
-)
 def test_mock_interview_session_starts_and_accepts_one_answer(
     page: Page,
 ) -> None:
