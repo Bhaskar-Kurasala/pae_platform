@@ -46,6 +46,25 @@ class ReadRubricForCapstoneInput(BaseModel):
             "exercise_id FK."
         ),
     )
+    # D17b/ITEM 2.B — entitlement gate. Without this filter the tool
+    # returns rubric content for any exercise_id the caller supplies,
+    # including capstones in courses the student isn't entitled to.
+    # Caller passes ctx.user_id; SQL joins through
+    # exercises → lessons → courses → course_entitlements with
+    # active-entitlement filter (revoked_at IS NULL AND
+    # (expires_at IS NULL OR expires_at > now())). Mismatched
+    # entitlement returns found=False (single error mode — same
+    # shape as "exercise not found").
+    student_id: uuid.UUID = Field(
+        description=(
+            "The student the agent is acting on behalf of (typically "
+            "ctx.user_id). The tool returns found=False if the student "
+            "is not entitled to the capstone's parent course — closes "
+            "the cross-entitlement leak vector flagged in "
+            "d12-d14c-read-tool-entitlement-leakage-audit (MEDIUM "
+            "finding, D17b/ITEM 2.B)."
+        ),
+    )
 
 
 class ReadRubricForCapstoneOutput(BaseModel):
@@ -119,10 +138,19 @@ async def read_rubric_for_capstone(
                     e.is_capstone,
                     e.title AS exercise_title
                 FROM exercises e
+                JOIN lessons l ON l.id = e.lesson_id
+                JOIN course_entitlements ce
+                  ON ce.course_id = l.course_id
+                 AND ce.user_id = :student_id
+                 AND ce.revoked_at IS NULL
+                 AND (ce.expires_at IS NULL OR ce.expires_at > now())
                 WHERE e.id = :exercise_id
                 """
             ),
-            {"exercise_id": args.exercise_id},
+            {
+                "exercise_id": args.exercise_id,
+                "student_id": args.student_id,
+            },
         )
         row = result.fetchone()
     except Exception as exc:  # noqa: BLE001

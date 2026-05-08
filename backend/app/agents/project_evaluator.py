@@ -222,13 +222,20 @@ class ProjectEvaluatorAgent(AgenticBaseAgent[ProjectEvaluatorInput]):
             )
 
         # ── Step 3: read rubric ──────────────────────────────────
+        # D17b/ITEM 2.B — pass student_id (ctx.user_id) so the tool
+        # can JOIN through course_entitlements and refuse rubric reads
+        # for capstones the student isn't entitled to. Closes the
+        # cross-entitlement leak flagged at d12-d14c MEDIUM finding.
         exercise_id = submission.get("exercise_id")
         rubric = (
             await _safe_tool(
                 self,
                 ctx,
                 "read_rubric_for_capstone",
-                {"exercise_id": exercise_id},
+                {
+                    "exercise_id": exercise_id,
+                    "student_id": str(ctx.user_id),
+                },
             )
             if exercise_id
             else {}
