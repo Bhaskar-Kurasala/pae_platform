@@ -336,6 +336,37 @@ expect surfaces when the first consumer arrives.*
 The full multi-axis retrospective is at
 `docs/followups/phase-a-spec-multi-axis-consumer-gaps.md`.
 
+### Pattern 27 vs 29 disambiguation (Phase B CP1F-remediation finding)
+
+BUG-CP1F's diagnosis (initial hypothesis: orchestration missing
+instrumentation; actual root cause: 5 of 8 agent authors didn't
+call the existing `_track_llm_usage` hook) clarified the dividing
+line between Pattern 27 and Pattern 29:
+
+  * **Pattern 29** (scaffolded-but-inert): infrastructure exists
+    but **no** consumer has executed its happy path end-to-end.
+    The infrastructure may be wrong; surface it by trying. Fix
+    direction: extend or fix the infrastructure.
+  * **Pattern 27** (consumer convention drift): infrastructure
+    exists and is correctly invoked by **some** consumers; other
+    consumers drift from convention. The infrastructure is right;
+    enforce the convention at consumer sites.
+
+**Diagnostic primitive — a single grep across consumer sites:**
+
+  * `all consumers + 0 broken` → consumer drift / **Pattern 27**
+  * `all consumers + all broken` → infrastructure broken
+  * `some consumers + 0 broken` → coverage gap / **Pattern 29**
+
+For BUG-CP1F: `grep -c '_track_llm_usage' backend/app/agents/*.py`
+showed 5 of 10 agents at 0 calls and 5 at 1+ calls. The 5
+non-zero agents proved the infrastructure works; the 5 zero
+agents were the drift sites. Pattern 27.
+
+The diagnose-first discipline (D12 Bug 11) saved a wrong fix —
+patching the orchestrator would have been a 1-hour diversion
+that fixed nothing, since the orchestrator was already correct.
+
 ### Pattern 22 negative-claim symmetry (CP1.1 finding)
 
 Phase B's CP1.1 inventory audit reported three "missing" infra
