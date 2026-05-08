@@ -52,6 +52,7 @@ from app.agents.tools.universal import (  # noqa: F401
     read_own_capability,
     read_role_transition_gate,
     read_student_accessible_content,
+    read_student_lead_in_signals,
     read_student_role_state,
 )
 
@@ -65,5 +66,6 @@ __all__ = [
     "read_own_capability",
     "read_role_transition_gate",
     "read_student_accessible_content",
+    "read_student_lead_in_signals",
     "read_student_role_state",
 ]
