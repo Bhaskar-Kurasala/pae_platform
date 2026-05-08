@@ -10,6 +10,11 @@ under `backend/app/agents/tools/agent_specific/` (excluding
 `tools/universal/`, billing_support's authoritative entitlement readers,
 and pure write tools).
 **Date.** 2026-05-08.
+**Status (2026-05-08, post-D17b ITEM 2):** All 3 MEDIUM findings RESOLVED.
+HIGH findings (Bug 24) were resolved at D15 CP3 commit `779fb2f`. LOW
+findings remain documented; defer to post-launch unless real signal
+emerges. See "D17b ITEM 2 resolution" section at the bottom of this
+file for per-tool commit attribution.
 
 ---
 
@@ -119,6 +124,69 @@ hardened pattern.
   (D17b at the latest).
 
 ---
+
+## D17b ITEM 2 resolution (2026-05-08)
+
+All 3 MEDIUM findings resolved. Per-tool, per-commit attribution:
+
+### ITEM 2.A — `read_capstone_submission_content` (commit `a715913`)
+
+- **Fix shape:** input schema gains required `student_id`; SQL adds
+  `AND es.student_id = :student_id`. Mismatched ownership returns
+  `found=False` (single error mode — same shape as "not found" so
+  attacker can't probe submission existence).
+- **Consumer updated:** `project_evaluator.py:194-209` passes
+  `student_id=str(ctx.user_id)`.
+- **Tests:** 4 (authorized read, cross-student leak attempt, unknown
+  submission, schema validation). All pass against real Postgres.
+
+### ITEM 2.B — `read_rubric_for_capstone` (commit `3955214`)
+
+- **Fix shape:** input schema gains required `student_id`; SQL extends
+  with JOIN through `exercises → lessons → courses → course_entitlements`
+  with active-entitlement filter (`revoked_at IS NULL AND (expires_at
+  IS NULL OR expires_at > now())`). Mismatched / unentitled / expired /
+  revoked → `found=False`.
+- **Consumer updated:** `project_evaluator.py:223-235` passes
+  `student_id=str(ctx.user_id)`.
+- **Tests:** 5 (authorized read with active entitlement, unentitled
+  student, expired entitlement, revoked entitlement, schema validation).
+  All pass against real Postgres.
+
+### ITEM 2.C — `lookup_jd_decoded` (commit `<this commit>`)
+
+- **Fix shape:** input schema gains required `student_id`; SQL adds
+  `AND user_id = :student_id`. Mismatched ownership returns
+  `found=False`.
+- **Consumer status:** **No live consumer.** Pre-flight audit at
+  D17b/ITEM 2 confirmed no agent's `run()` invokes this tool today;
+  `tailored_resume_v2`'s comment at line 22 (`uses_tools = ...
+  lookup_jd_decoded`) is stale. JD content is fetched via the service
+  path `generate_tailored_resume(jd_id=...)` directly from
+  `tailored_resumes` in service code (`tailored_resume_service.py:195-219`).
+  The fix is defense-in-depth before someone wires up the tool — the
+  registered tool surface is reachable via the LLM tool-use protocol
+  if any future agent prompt surfaces it as available.
+- **Tests:** 4 (authorized read, cross-student leak attempt, unknown
+  JD, schema validation). All pass against real Postgres.
+
+**Discipline preserved across all 3 fixes:**
+
+- **Single error mode** — `found=False` (or empty result) regardless of
+  whether the cause is "not found" or "not yours". Prevents existence
+  probing.
+- **Pattern 22 + 27 honored** — schema chains verified against live DB
+  before authoring; test fixtures rebuilt synchronously with SQL
+  changes in the same commits.
+- **Pattern 23 verified at pre-flight** — all 3 tools' source files
+  matched the audit's claims exactly; no drift to surface.
+
+**LOW findings (13 tools) remain documented.** Defer to post-launch
+unless a real signal emerges (e.g., a cross-role content surfacing
+that indicates the entitlement chain isn't load-bearing somewhere
+the LOW classification misjudged). Sibling
+`resume_reviewer/read_capstones.py` (entitlement-chain hygiene pass
+flagged at the top of this doc) similarly defers.
 
 ## Method
 

@@ -31,6 +31,28 @@ class LookupJdDecodedInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     jd_id: uuid.UUID = Field(description="ID of a previously decoded JD.")
+    # D17b/ITEM 2.C — owner check. The previous SQL was
+    # `WHERE jd_id = :jd_id LIMIT 1` with no user scoping; any caller
+    # with a jd_id could read any student's tailored_resumes row.
+    # Caller passes ctx.user_id; SQL gates `AND user_id = :student_id`.
+    # Mismatched ownership returns found=False (single error mode —
+    # same shape as "JD not found" so existence isn't probable).
+    #
+    # Note: as of D17b/CP3.2 pre-flight audit, no agent code path
+    # actually invokes this tool — tailored_resume_v2 fetches the
+    # JD via the service path generate_tailored_resume(jd_id=...)
+    # in tailored_resume_service.py, not via this tool. The tool is
+    # registered and reachable via the LLM tool-use protocol; the
+    # fix is defense-in-depth before someone wires it up.
+    student_id: uuid.UUID = Field(
+        description=(
+            "The student the agent is acting on behalf of (typically "
+            "ctx.user_id). The tool returns found=False if the JD is "
+            "not owned by this student — closes the cross-student JD "
+            "leak vector flagged in d12-d14c-read-tool-entitlement-"
+            "leakage-audit (MEDIUM finding, D17b/ITEM 2.C)."
+        ),
+    )
 
 
 class LookupJdDecodedOutput(BaseModel):
@@ -62,9 +84,10 @@ async def lookup_jd_decoded(args: LookupJdDecodedInput) -> LookupJdDecodedOutput
         result = await session.execute(
             text(
                 "SELECT jd_text, jd_parsed FROM tailored_resumes "
-                "WHERE jd_id = :jd_id LIMIT 1"
+                "WHERE jd_id = :jd_id AND user_id = :student_id "
+                "LIMIT 1"
             ),
-            {"jd_id": args.jd_id},
+            {"jd_id": args.jd_id, "student_id": args.student_id},
         )
         row = result.fetchone()
     except Exception as exc:  # noqa: BLE001
