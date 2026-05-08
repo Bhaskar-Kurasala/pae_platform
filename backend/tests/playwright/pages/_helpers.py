@@ -1,13 +1,27 @@
 """D18 Phase A CP3 — Page-object auth helper.
 
-⚠ TEMPORARY ⚠
-This module is a CP3 stopgap. CP4 lands the proper fixture-based auth
-(see backend/tests/playwright/fixtures/ — currently empty placeholders).
-When CP4 ships:
-  * Replace `login_as_admin(page)` / `login_as_student(page)` call sites
-    with the corresponding CP4 fixtures (e.g. `admin_session`,
-    `student_session`).
-  * Delete this module.
+⚠ LEGACY (CP4 update) ⚠
+CP4 (2026-05-08) shipped `backend/tests/fixtures/admin_fixtures.py`
+with `seed_admin_user_with_login()` returning a real-bcrypt admin
+that DOES authenticate via HTTP. The canonical auth path forward is:
+
+    admin = await seed_admin_user_with_login(db_session)
+    # ... use admin.email + admin.password with the helpers below
+    #     OR a CP5 page-object-side fixture that injects JWT directly.
+
+This module's `login_as_student(page)` is kept for the CP3 smoke
+tests that pre-date the CP4 fixture path. `login_as_admin(page)`
+goes through the public register endpoint, which silently ignores
+role='admin' — the CP3 admin smoke tests remain xfail until CP5
+wires up a proper page-object-side admin auth fixture that consumes
+seed_admin_user_with_login output.
+
+When CP5 ships the page-object-side admin fixture:
+  * Replace `login_as_admin(page)` call sites with the new fixture.
+  * Drop the xfail markers on test_admin_cockpit_page_loads and
+    test_student_detail_panel_opens.
+  * Optionally delete this module if `login_as_student` is also
+    superseded.
 
 Mirrors the auth pattern used by frontend/e2e/helpers.ts:
   1. POST /api/v1/auth/register (idempotent: 409 means user already exists)

@@ -811,8 +811,354 @@ async def seed_momentum_data_analyst(
     return base
 
 
+# ── D18 Phase A CP4 — admin / payment / capstone-submission /
+# passing-mock-session / outreach seeders ──────────────────────────────
+#
+# Five new seed helpers added at CP4. Like the D15+D17b helpers, none
+# of these commit; the caller controls the transaction. These are the
+# building blocks for journey_fixtures.py composites.
+
+
+@dataclass
+class SeededAdmin:
+    """Identifiers for a seeded admin user."""
+
+    user_id: uuid.UUID
+    email: str
+    full_name: str
+    role: str = "admin"
+
+
+async def seed_admin_user(
+    session: AsyncSession,
+    *,
+    email_suffix: str | None = None,
+    full_name: str = "D18 CP4 Admin",
+    hashed_password: str = "x",
+) -> SeededAdmin:
+    """Seed an admin user via direct DB insert.
+
+    The hashed_password default ('x') is a placeholder — login via
+    HTTP requires a real bcrypt hash. admin_fixtures.py provides an
+    alternate seed path that goes through the API register flow so
+    the resulting admin can authenticate.
+
+    Pydantic email-validator rejects .invalid/.test/.local; this
+    helper uses example.com (RFC 6761 reserved-for-documentation,
+    never resolves) so the same user can also flow through HTTP
+    paths if needed.
+    """
+    sid = uuid.uuid4()
+    suffix = email_suffix or sid.hex[:12]
+    email = f"d18-cp4-admin-{suffix}@example.com"
+    await session.execute(
+        sql_text(
+            "INSERT INTO users (id, email, full_name, hashed_password, "
+            "is_active, is_verified, role) "
+            "VALUES (:id, :email, :name, :pw, TRUE, TRUE, 'admin')"
+        ),
+        {"id": sid, "email": email, "name": full_name, "pw": hashed_password},
+    )
+    return SeededAdmin(user_id=sid, email=email, full_name=full_name)
+
+
+@dataclass
+class SeededPayment:
+    """Identifiers for a seeded payments row."""
+
+    payment_id: uuid.UUID
+    user_id: uuid.UUID
+    amount_cents: int
+    status: str
+
+
+async def seed_payment_intent(
+    session: AsyncSession,
+    *,
+    student_id: uuid.UUID,
+    amount_cents: int = 9900,
+    status: str = "succeeded",
+    currency: str = "inr",
+) -> SeededPayment:
+    """Seed a payments row for retention/billing tests.
+
+    Default amount is ₹99 (cents). Status defaults to 'succeeded' —
+    realistic for paid-but-stalled fixtures; tests that need
+    pending/failed override.
+
+    course_id is left NULL — journey fixtures generally don't pin a
+    payment to a specific course (entitlement does that work).
+    """
+    pid = uuid.uuid4()
+    await session.execute(
+        sql_text(
+            """
+            INSERT INTO payments
+              (id, user_id, amount_cents, currency, status,
+               payment_method, created_at, updated_at)
+            VALUES
+              (:id, :uid, :amt, :cur, :st, 'card', now(), now())
+            """
+        ),
+        {
+            "id": pid,
+            "uid": student_id,
+            "amt": amount_cents,
+            "cur": currency,
+            "st": status,
+        },
+    )
+    return SeededPayment(
+        payment_id=pid,
+        user_id=student_id,
+        amount_cents=amount_cents,
+        status=status,
+    )
+
+
+@dataclass
+class SeededCapstoneSubmission:
+    """Identifiers for a seeded capstone exercise submission."""
+
+    submission_id: uuid.UUID
+    student_id: uuid.UUID
+    exercise_id: uuid.UUID
+    score: int | None
+    status: str
+
+
+async def _ensure_capstone_exercise(
+    session: AsyncSession,
+    *,
+    course_slug: str = "data-analyst",
+) -> uuid.UUID:
+    """Find a real is_capstone=TRUE exercise tied to course_slug,
+    or create one if none exists.
+
+    The playwright_test template seeds 11 catalog courses but no
+    lessons/exercises; CP4 fixtures need a real capstone-exercise
+    row to anchor submissions. We create one lazily and reuse it
+    across the run (a single capstone-exercise row supports many
+    submissions; that's the natural data shape).
+    """
+    exercise_id = (
+        await session.execute(
+            sql_text(
+                """
+                SELECT e.id
+                FROM exercises e
+                JOIN lessons l ON l.id = e.lesson_id
+                JOIN courses c ON c.id = l.course_id
+                WHERE c.slug = :slug AND e.is_capstone = TRUE
+                LIMIT 1
+                """
+            ),
+            {"slug": course_slug},
+        )
+    ).scalar_one_or_none()
+    if exercise_id is not None:
+        return exercise_id
+
+    course_id = (
+        await session.execute(
+            sql_text("SELECT id FROM courses WHERE slug = :s"),
+            {"s": course_slug},
+        )
+    ).scalar_one()
+
+    # `order` is a reserved word in Postgres — must quote. Pre-flight
+    # was wrong: schema column is `order` (not `position`). Caught at
+    # CP4 smoke; documented in cleanup.py's pg_constraint discipline
+    # note.
+    lesson_id = uuid.uuid4()
+    await session.execute(
+        sql_text(
+            """
+            INSERT INTO lessons (id, course_id, title, slug, "order",
+                                 created_at, updated_at)
+            VALUES (:id, :cid, 'CP4 capstone harness lesson',
+                    :sl, 9999, now(), now())
+            """
+        ),
+        {"id": lesson_id, "cid": course_id, "sl": f"cp4-capstone-{lesson_id.hex[:8]}"},
+    )
+
+    new_id = uuid.uuid4()
+    await session.execute(
+        sql_text(
+            """
+            INSERT INTO exercises
+              (id, lesson_id, title, description, is_capstone,
+               "order", created_at, updated_at)
+            VALUES
+              (:id, :lid, 'CP4 capstone harness exercise',
+               'Test fixture capstone for CP4', TRUE, 9999,
+               now(), now())
+            """
+        ),
+        {"id": new_id, "lid": lesson_id},
+    )
+    return new_id
+
+
+async def seed_capstone_submission(
+    session: AsyncSession,
+    *,
+    student_id: uuid.UUID,
+    course_slug: str = "data-analyst",
+    score: int | None = 85,
+    status: str = "graded",
+    code: str = "# CP4 fixture capstone submission\nprint('hello')\n",
+) -> SeededCapstoneSubmission:
+    """Seed an exercise_submissions row against a real capstone exercise.
+
+    Resolves a capstone exercise on `course_slug` (creates one if the
+    template doesn't have any). Default score=85 = passing-grade
+    semantics; pass score=None for an ungraded draft.
+    """
+    exercise_id = await _ensure_capstone_exercise(session, course_slug=course_slug)
+    sub_id = uuid.uuid4()
+    await session.execute(
+        sql_text(
+            """
+            INSERT INTO exercise_submissions
+              (id, student_id, exercise_id, code, status, score,
+               attempt_number, created_at, updated_at)
+            VALUES
+              (:id, :sid, :eid, :code, :status, :score, 1, now(), now())
+            """
+        ),
+        {
+            "id": sub_id,
+            "sid": student_id,
+            "eid": exercise_id,
+            "code": code,
+            "status": status,
+            "score": score,
+        },
+    )
+    return SeededCapstoneSubmission(
+        submission_id=sub_id,
+        student_id=student_id,
+        exercise_id=exercise_id,
+        score=score,
+        status=status,
+    )
+
+
+async def seed_passing_mock_session(
+    session: AsyncSession,
+    *,
+    student_id: uuid.UUID,
+    target_role_slug: str = "data_analyst",
+    hours_ago: int = 24,
+    dimension_scores: dict[str, float] | None = None,
+) -> uuid.UUID:
+    """Seed a passing mock interview signal.
+
+    The retention/gate aggregator filters on
+    agent_actions.output_data.session_verdict.passed=true for
+    "passed mock" semantics; that's where this writes. Mirrors the
+    private `_seed_passing_mock_action` helper used by D17b lead-in
+    fixtures (kept private; this is the public CP4 surface).
+
+    Returns the agent_actions row id.
+    """
+    if dimension_scores is None:
+        dimension_scores = {
+            "code_quality": 0.85,
+            "problem_solving": 0.82,
+            "communication": 0.80,
+            "domain_depth": 0.78,
+        }
+    output = {
+        "session_verdict": {
+            "passed": True,
+            "transition_target": {"to_role_slug": target_role_slug},
+            "dimension_scores": dimension_scores,
+        }
+    }
+    when = datetime.now(UTC) - timedelta(hours=hours_ago)
+    aid = uuid.uuid4()
+    await session.execute(
+        sql_text(
+            """
+            INSERT INTO agent_actions
+              (id, agent_name, student_id, action_type, status,
+               output_data, created_at)
+            VALUES
+              (:id, 'mock_interview', :sid, 'execute', 'completed',
+               CAST(:out AS JSONB), :ts)
+            """
+        ),
+        {
+            "id": aid,
+            "sid": student_id,
+            "out": json.dumps(output),
+            "ts": when,
+        },
+    )
+    return aid
+
+
+async def seed_outreach_log_entry(
+    session: AsyncSession,
+    *,
+    student_id: uuid.UUID,
+    channel: str,
+    triggered_by: str = "system",
+    triggered_by_user_id: uuid.UUID | None = None,
+    status: str = "delivered",
+    body_preview: str | None = None,
+    sent_hours_ago: int = 1,
+    template_key: str | None = None,
+    slip_type: str | None = None,
+) -> uuid.UUID:
+    """Seed an outreach_log row.
+
+    `channel` ∈ {'email', 'in_app', 'whatsapp', 'phone', 'sms'}.
+    `triggered_by` ∈ {'system', 'admin'} — admin-triggered rows
+    should also pass `triggered_by_user_id`.
+
+    Returns the new row id.
+    """
+    rid = uuid.uuid4()
+    when = datetime.now(UTC) - timedelta(hours=sent_hours_ago)
+    await session.execute(
+        sql_text(
+            """
+            INSERT INTO outreach_log
+              (id, user_id, channel, template_key, slip_type,
+               triggered_by, triggered_by_user_id, sent_at,
+               body_preview, status)
+            VALUES
+              (:id, :uid, :ch, :tk, :slip, :tb, :tbu, :sent,
+               :body, :st)
+            """
+        ),
+        {
+            "id": rid,
+            "uid": student_id,
+            "ch": channel,
+            "tk": template_key,
+            "slip": slip_type,
+            "tb": triggered_by,
+            "tbu": triggered_by_user_id,
+            "sent": when,
+            "body": body_preview,
+            "st": status,
+        },
+    )
+    return rid
+
+
 __all__ = [
+    "SeededAdmin",
+    "SeededCapstoneSubmission",
+    "SeededPayment",
     "SeededStudent",
+    "seed_admin_user",
+    "seed_capstone_submission",
     "seed_data_analyst_with_entitlement",
     "seed_healthy_data_analyst",
     "seed_just_cleared_gate_data_analyst",
@@ -821,6 +1167,9 @@ __all__ = [
     "seed_ml_engineer_for_gate_prep",
     "seed_ml_engineer_with_capstone_submission",
     "seed_momentum_data_analyst",
+    "seed_outreach_log_entry",
+    "seed_passing_mock_session",
+    "seed_payment_intent",
     "seed_python_developer_fresh",
     "seed_python_developer_with_curated_bank",
     "seed_returning_after_absence_data_analyst",

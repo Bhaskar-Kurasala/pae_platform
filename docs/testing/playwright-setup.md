@@ -255,7 +255,7 @@ to the team).
 - **CP2** — `db/` template database + per-suite reset; `db_session` fixture ✅
 - **CP3** — `pages/` page object models for 8 surfaces ✅
 - **CP4** — `fixtures/` extending `role_state_fixtures.py` with admin /
-  payment / submission / outreach / journey fixtures
+  payment / submission / outreach / journey fixtures ✅
 - **CP5** — `helpers/` traceability + grounding + behavior-shape + budget
   assertion utilities
 - **CP6** — `scripts/build_and_serve.sh`, `docker-compose.playwright.yml`,
@@ -343,3 +343,87 @@ as **CP4 supersedes**. The admin helper currently fails (admin user
 not seeded by the playwright_test template); CP3 admin smoke tests
 are marked `xfail` to surface the gap until CP4's admin fixture
 ships.
+
+---
+
+## CP4 — Test fixture library (2026-05-08)
+
+### Layout
+
+`backend/tests/fixtures/` ships three modules at CP4:
+
+  * `role_state_fixtures.py` — D15+D17b's 12 student-state seeders
+    plus 5 new CP4 primitive seeders: `seed_admin_user`,
+    `seed_payment_intent`, `seed_capstone_submission`,
+    `seed_passing_mock_session`, `seed_outreach_log_entry`.
+  * `journey_fixtures.py` — 6 composite fixtures that compose
+    primitives into one-call test scenarios:
+    `seed_full_journey_through_data_analyst`,
+    `seed_paid_silent_at_risk_student`,
+    `seed_capstone_stalled_student`,
+    `seed_streak_broken_student`,
+    `seed_promotion_avoidant_student`,
+    `seed_cold_signup_student`.
+  * `admin_fixtures.py` — `seed_admin_user_with_login` (real
+    bcrypt hash; can authenticate via HTTP) and
+    `seed_admin_with_outreach_history` for verification scenarios.
+  * `cleanup.py` — `cleanup_student_data(session, user_id)` is the
+    canonical teardown call. Documents the pre-flight FK CASCADE
+    map + the discipline (read pg_constraint, not docs cache).
+
+Convention parity with the existing 12: helpers don't commit;
+caller controls the transaction. Pytest fixtures wrap each helper
+in a setup-yield-teardown shape with cleanup.
+
+### FK cleanup ordering
+
+`cleanup.py` documents the order children-first, users-last:
+  1. `conversations` (CASCADE — defensive)
+  2. `exercise_submissions` (CASCADE — defensive)
+  3. `agent_actions.student_id` (NO ACTION — **required**)
+  4. `agent_invocation_log`, `outreach_log`, `student_messages`,
+     `student_notes`, `student_risk_signals` (all CASCADE —
+     defensive)
+  5. `learning_sessions`, `interview_sessions` (CASCADE — defensive)
+  6. `course_entitlements`, `student_role_state`, `payments`
+  7. `users` (root)
+
+Defensive DELETEs guard against future CASCADE drift: if migration N
+adds a student-anchored table without ON DELETE CASCADE, the next
+CP4 smoke run surfaces it via orphan-check failure rather than
+silent accumulation.
+
+### CP4 pre-flight calibration finding (Pattern 22 reinforced)
+
+The CP4 pre-flight initially reported `agent_actions` columns
+`triggered_by_user_id` / `target_user_id` and a `lessons.position`
+column — none of which exist in the live schema. Caught at smoke run
+time. Lesson: **always read pg_constraint and pg_attribute against
+the live DB**, never trust a docs/model-graph cache. The CP4
+`cleanup.py` docstring captures the verification queries; future
+CP authors should re-run them whenever schema may have drifted.
+
+### Pytest fixtures shipped at CP4 (in `playwright/conftest.py`)
+
+  * `python_developer_student` — fresh python_developer + cleanup.
+  * `admin_user_with_login` — admin with real bcrypt hash.
+  * `paid_silent_student`, `capstone_stalled_student`,
+    `journey_through_data_analyst` — composite journeys with
+    cleanup.
+
+Phase B tests can either request the fixture by name or import a
+seed helper directly and manage cleanup themselves.
+
+### Run convention reminder
+
+CP4 smoke (`test_cp4_fixtures.py`) is **async DB-only**; runs in the
+same pytest invocation as CP2 smoke (no `page` fixture). 15 tests,
+~2.3s end to end:
+
+```bash
+docker compose exec -T backend sh -c \
+  "cd /app && uv run pytest tests/playwright/smoke/test_cp4_fixtures.py"
+```
+
+The CP3 split-run discipline still applies; CP4 doesn't add browser
+tests so this isn't a new constraint.

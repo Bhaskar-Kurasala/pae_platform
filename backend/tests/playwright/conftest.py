@@ -186,3 +186,98 @@ async def db_session(
             yield session
     finally:
         await engine.dispose()
+
+
+# ── CP4: per-fixture pytest wrappers ────────────────────────────────
+#
+# Each pytest fixture below wraps a CP4 seed helper in the
+# setup-yield-teardown shape with cleanup_student_data() in teardown.
+# The seed helpers in tests/fixtures/* don't commit; these wrappers
+# do, so the backend can read the seeded state via its own pool.
+#
+# Why fixtures live in conftest (not the fixtures package):
+#   pytest discovers fixture *functions* via conftest.py only. The
+#   seed helpers are reusable building blocks; the pytest-fixture
+#   wiring is the discovery surface. If a script needs to call a
+#   helper outside pytest, it imports from tests.fixtures directly.
+#
+# Why one fixture per composite (not a parameterized fixture):
+#   Phase B journey tests are scenario-specific by definition;
+#   making the scenario explicit in the fixture name is cheaper to
+#   read than a parameter. Each composite is ~5 lines of wiring.
+
+
+def _flush(session: AsyncSession) -> None:
+    """No-op kept as documentation hook — see fixture docstrings.
+
+    Originally placeholder for shared post-seed assertion logic;
+    retained to mark where future shared invariants would live.
+    """
+    return
+
+
+@pytest_asyncio.fixture
+async def python_developer_student(db_session: AsyncSession) -> AsyncGenerator:
+    """Fresh python_developer student, cleaned up after the test."""
+    from tests.fixtures.cleanup import cleanup_student_data
+    from tests.fixtures.role_state_fixtures import seed_python_developer_fresh
+
+    student = await seed_python_developer_fresh(db_session)
+    await db_session.commit()
+    yield student
+    await cleanup_student_data(db_session, student.user_id)
+    await db_session.commit()
+
+
+@pytest_asyncio.fixture
+async def admin_user_with_login(db_session: AsyncSession) -> AsyncGenerator:
+    """Admin user with real bcrypt-hashed password (login-capable)."""
+    from tests.fixtures.admin_fixtures import seed_admin_user_with_login
+    from tests.fixtures.cleanup import cleanup_student_data
+
+    admin = await seed_admin_user_with_login(db_session)
+    await db_session.commit()
+    yield admin
+    await cleanup_student_data(db_session, admin.user_id)
+    await db_session.commit()
+
+
+@pytest_asyncio.fixture
+async def paid_silent_student(db_session: AsyncSession) -> AsyncGenerator:
+    """Paid 8d ago, silent 12d — paid_silent slip type."""
+    from tests.fixtures.cleanup import cleanup_student_data
+    from tests.fixtures.journey_fixtures import seed_paid_silent_at_risk_student
+
+    journey = await seed_paid_silent_at_risk_student(db_session)
+    await db_session.commit()
+    yield journey
+    await cleanup_student_data(db_session, journey.student.user_id)
+    await db_session.commit()
+
+
+@pytest_asyncio.fixture
+async def capstone_stalled_student(db_session: AsyncSession) -> AsyncGenerator:
+    """Entitled, attempted capstone, 15d silent — capstone_stalled slip type."""
+    from tests.fixtures.cleanup import cleanup_student_data
+    from tests.fixtures.journey_fixtures import seed_capstone_stalled_student
+
+    journey = await seed_capstone_stalled_student(db_session)
+    await db_session.commit()
+    yield journey
+    await cleanup_student_data(db_session, journey.student.user_id)
+    await db_session.commit()
+
+
+@pytest_asyncio.fixture
+async def journey_through_data_analyst(db_session: AsyncSession) -> AsyncGenerator:
+    """Student fully ready to clear python_developer→data_analyst gate."""
+    from tests.fixtures.cleanup import cleanup_student_data
+    from tests.fixtures.journey_fixtures import (
+        seed_full_journey_through_data_analyst,
+    )
+
+    journey = await seed_full_journey_through_data_analyst(db_session)
+    await db_session.commit()
+    yield journey
+    await cleanup_student_data(db_session, journey.student.user_id)
+    await db_session.commit()
