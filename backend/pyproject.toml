@@ -60,6 +60,10 @@ dev = [
     "types-redis>=4.6.0.20241004",
     "types-stripe>=3.5.2.20240106",
     "httpx>=0.28.1",
+    # D18 Phase A — backend-fixture-driven full-stack journey tests.
+    # Coexists with frontend/e2e (TypeScript Playwright; UI smoke).
+    "pytest-playwright>=0.7.1",
+    "playwright>=1.55.0",
 ]
 
 [tool.pytest.ini_options]
