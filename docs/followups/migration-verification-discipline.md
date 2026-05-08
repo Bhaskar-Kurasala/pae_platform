@@ -216,6 +216,8 @@ Two related sub-patterns. Both stem from MiniMax M2.7 having different cost/late
 - 18b (tightening-formula refinement, D14c CP4): D14c set `timeout_override_seconds=90` preemptively at CP1 (= spec 20000ms × 4.5). CP3 measured 4 phases: P1 51.81s, P2 57.48s (rubric-grounded paths), P3 15.18s, P4 15.79s (refusal paths) — `observed_max × 1.30 = 75s`. CP4 attempted to tighten 90 → 75; the post-cutover smoke on the **same Phase 1 payload that ran 51.81s in CP3 timed out at 75.05s**, a 22s spread on identical input at n=2. Held at 90s preemptive. Lesson: `observed_max × 1.30` is an acceptable target *value* but not a safe tightening threshold at small n; MiniMax tail latency is wider than the n=2-4 max captures. Wait for n ≥ 5 before tightening.
 - 18b (D15 reinforcement, multiple CPs): CP3 ran 4 real-LLM phases at career_coach (60s preemptive) + study_planner (existing 30s); all phases within budget, no tail timeouts. CP4 ran 4 real-LLM phases (with multi-turn for mock_interview) at the per-agent calibrated values; all within budget, again no tail timeouts. CP5 ran 1 e2e smoke phase at career_coach + 1 at study_planner; within budget. **Ten more deliverable data points across D14b, D14c, D15 confirm the pattern holds**: spec × 4-5 preemptive at CP1 is the safe default; MiniMax tail-latency under structured-output workloads is consistently wider than spec multiplied by typical safety factors. Pattern 18b ages well.
 
+- **18b (D17b ITEM 3 prompt-size extension):** the original framing applied 18b to *LLM provider changes* (Anthropic → MiniMax). D17b ITEM 3's first attempt extended `study_planner.md` by ~80 lines for the prompt-side lead-in section. Real-LLM verification timed out 3 of 6 study_planner phases at the agent's existing 30s dispatch ceiling — the prompt addition pushed the LLM call's response generation past the budget that fit the pre-D17b prompt size. Switching to deterministic post-LLM composition (Path E) eliminated the prompt growth and timeouts dissolved. **Canonical extension:** Pattern 18b applies preemptively when **prompt size changes materially**, not only when the LLM provider changes. Pre-flight calibration (or a deliberate timeout bump in the same commit as the prompt change) is required when adding ≥ 50 lines to any agent prompt. The mechanism is the same — the LLM has more context to ingest + more constraints to satisfy + more output to generate to honor the new instructions — but the trigger is prompt size, not provider. D17b ITEM 3 evidence at study_planner: pre-D17b prompt 109 lines / 30s budget held; D17b prompt-side attempt 191 lines / 30s budget broke 50% of the time; D17b Path E (no prompt change, prepend post-LLM) restored the 30s budget. Provider stayed MiniMax across all three measurements; prompt size was the variable.
+
 ### Pattern 19: Capability adapter signatures should accept both Pydantic and dict from start
 
 Adapter functions wired into capabilities (D13.5 `validation_input_adapter`) and tool-call argument builders (D12+ `_safe_tool` helpers) commonly receive dict-shaped data from the dispatch layer, NOT Pydantic instances. The dispatch layer normalizes outputs to dict via `model_dump(mode="json")` for audit + transport; adapters and helpers that assume Pydantic input crash on attribute access against a dict.
@@ -321,8 +323,58 @@ even though the doc's *intent* is still correct.
   framing-drift discipline applies equally to follow-up docs, task
   docstrings, and code comments — anywhere prose makes claims about
   code paths that future code can invalidate.
-- N=3 across follow-up docs + code comments + task docstrings;
-  canonical scope extended at D16 closure.
+- D17b ITEM 2.C pre-flight (tailored_resume_v2 `uses_tools`
+  comment) — the agent class's `uses_tools = True   # 2 read tools:
+  lookup_jd_decoded, lookup_base_resume` comment claimed
+  `lookup_jd_decoded` was a live consumer. Pre-flight grep confirmed
+  zero `run()`-side invocations; the JD content path goes through
+  `generate_tailored_resume(jd_id=...)` service code instead. The
+  comment was stale post some-earlier refactor. Reframed ITEM 2.C
+  scope to defense-in-depth (no consumer to update) before
+  implementation.
+- D17b ITEM 4.A pre-flight (eval-row-writer-defensive-fix.md
+  sub-item 2 framing) — the doc said "future redesign could add an
+  explicit `failure_class` enum"; the prompt's phrasing rebroadcast
+  this as "convert string field to typed enum." Pre-flight schema
+  inspection confirmed the column doesn't exist yet — additive
+  add-column, not migration. Reframed before authoring the
+  migration.
+- D17b ITEM 4.B pre-flight (eval-row-writer-defensive-fix.md
+  sub-item 3 framing) — the doc framed the consolidation as "a
+  single writer with a discriminator field." Pre-flight inspection
+  showed the two writers target *different tables* with *different
+  columns*; only the persistence envelope (try/except + add + flush
+  + log) is shared. Reframed to "extract shared envelope; leave
+  per-table row construction in each writer" before authoring.
+- N=6 across follow-up docs + code comments + task docstrings + agent
+  class comments + prompt rebroadcasts of doc framing. Discipline
+  ages strongly: every deliverable touching docs older than ~1
+  deliverable has surfaced at least one drift instance.
+
+**Tightened canonical statement (post-D17b N=6):**
+**Pre-flight verification of follow-up doc claims against current
+code is MANDATORY, not optional, on any deliverable that consumes a
+follow-up doc older than ~1 deliverable.** Expect drift; design
+pre-flight checkpoints to surface it explicitly. The cost of pre-flight
+verification is near-zero (read-only inspection); the cost of
+implementing against stale framing is rework + the architectural
+risk of encoding the wrong shape into a commit. Six instances across
+the engagement consistently show pre-flight surfaces drift that
+re-shapes implementation before it lands.
+
+Operational pre-flight checks for follow-up-doc-driven work:
+- Every named code symbol (function, column, file, table, agent
+  class) referenced in the doc gets a grep check against current
+  code. Renamed / removed / drifted: surface at pre-flight closure
+  before implementation.
+- Every shape claim ("returns X", "the column is TEXT(2000)", "the
+  consumer is Y") gets verified at the source. The doc's claim may
+  have been correct at write time and stale now.
+- Surface the reframe as a STOP and seek explicit founder approval
+  before encoding into a commit, even when the reframe seems obvious.
+  The N=6 evidence shows reframes consistently shift implementation
+  shape (additive vs migration; shared envelope vs single writer;
+  defense-in-depth vs consumer-update).
 
 ### Pattern 24: docker-compose volume mount asymmetry
 
@@ -604,9 +656,116 @@ match what they know is true.
   read from primary tables (LD-1..LD-5 annotations). This is the
   variant-2 case (writer-retired-without-drop). Drop migration tracked
   at `d16-followup-admin-console-drop-migration.md`.
-- N=1; promoted to candidate (not yet canonical) at D16 closure.
-  Pattern firmness depends on observing the same shape in another
-  cluster — CI check would generate the dataset.
+- D17b ITEM 2.C pre-flight (`lookup_jd_decoded` tool) — the tool is
+  registered in the universal tool registry and reachable via the
+  LLM tool-use protocol, but no agent's `run()` invokes it. The
+  `tailored_resume_v2:22` `uses_tools` comment claims it's a live
+  consumer (Pattern 23 drift); the actual JD content path goes
+  through `generate_tailored_resume(jd_id=...)` service code.
+  This is the **third variant** of the pattern: not a missing writer
+  (the read tool exists) and not a retired writer (no migration
+  history) — a **registered-but-unconsumed tool** that the LLM could
+  theoretically discover and call but no production prompt surfaces
+  to it. Defense-in-depth fix at ITEM 2.C added the missing
+  student_id filter, so a future consumer wiring up the tool
+  inherits a safe contract.
+- N=2; promoted from candidate to **canonical** at D17b closure.
+  The third variant (registered-but-unconsumed tool) is documented
+  alongside the two original variants. Both observed instances came
+  from architectural audits (D16 CP1 + D17b ITEM 2.C pre-flight),
+  reinforcing that this pattern surfaces under audit-style
+  investigation more reliably than under feature-driven work.
+
+**Three variants (post-D17b):**
+1. **No-writer-found:** schema shipped without writer; reader (if any)
+   silently degrades.
+2. **Writer-retired-without-drop:** writer was authored, then
+   superseded; cluster's data persists indefinitely.
+3. **Registered-but-unconsumed tool:** tool registered in the registry
+   and reachable via LLM tool-use, but no agent `run()` invokes it
+   today. Stale `uses_tools` comments or pre-deletion-of-consumer
+   shapes commonly produce this. The leak surface is "the LLM might
+   discover and call it"; defense-in-depth fixes apply the same
+   guardrails an active consumer would have required.
+
+### Pattern 30 (candidate): Deterministic composition over prompt-side judgment for state-aware response decoration
+
+When an agent's response needs to vary based on deterministic state
+signals (e.g., "open with welcome-back framing if days_since_last_session
+≥ 5"), the natural first instinct is to put the firing logic in the
+prompt: surface the signals to the LLM, write a prompt section telling
+it which template to fill. D17b ITEM 3 evidence shows two failure modes
+of the prompt-side approach:
+
+1. **Tone-competition.** Existing prompt instructions ("be honest,
+   direct, no sycophancy", "ground every assessment in data", etc.)
+   compete with the new state-aware decoration instructions. The LLM
+   is biased toward the dominant tone — the older, longer, more
+   internally-reinforced part of the prompt usually wins. D17b ITEM 3's
+   first attempt: 4 of 4 trigger phases failed to fire the lead-in
+   framing on career_coach; the LLM consistently led with deficit
+   analysis (matching the dominant tone) instead of welcome / mock-pass
+   / gate-cleared opener.
+2. **Prompt-size-driven timeout drift.** Adding the decoration logic
+   grows the prompt; the LLM's response generation takes longer
+   proportional to ingestion + constraint count + output overhead.
+   D17b ITEM 3's first attempt added ~80 lines to study_planner; 3 of
+   6 phases timed out at the existing 30s dispatch ceiling. Pattern
+   18b territory (extended at D17b ITEM 3 to cover prompt-size
+   changes, not just provider changes).
+
+**Discipline:** when the firing decision can be computed
+deterministically from structured state, do the composition outside
+the LLM:
+
+- The LLM receives only the inputs it needs to produce its core
+  output (career analysis, study plan, etc.) — exactly what the
+  pre-decoration prompt asked for.
+- A pre-LLM tool call aggregates the state signals into a structured
+  contract object (Pattern 26 shape).
+- A post-LLM `compose_*_opener(signals, ...) -> str | None` function
+  applies the deterministic firing rules and returns either a
+  templated opener or None.
+- The agent's `run()` prepends `f"{opener}\n\n"` to the user-visible
+  field (typically `payload["answer"]`) when not None; healthy-state
+  path passes through unchanged.
+
+**Trade-offs accepted:**
+- Lead-in copy is templated, not LLM-generated organic. Mitigated by
+  the LLM-generated content immediately following the opener: the
+  natural prose bridge makes the seam invisible in production.
+- Future tone iteration requires code change, not prompt change. The
+  templates live in code; updating them is a small focused commit
+  rather than a prompt edit. Acceptable when templates are short and
+  isolated in a dedicated composer module.
+- Templates feel slightly more mechanical than free-form riffs. Per
+  D17b ITEM 3 verification, the templates landed verbatim in
+  production runs and read coherently in context — so the trade-off
+  was demonstrated worth it.
+
+**Provenance:**
+- D17b ITEM 3 (Path E `compose_lead_in_opener`) — the original
+  prompt-side approach demonstrated both failure modes in 7-phase
+  real-LLM verification (4/4 career_coach trigger phases failed to
+  fire; 3/6 study_planner phases timed out from prompt growth). The
+  deterministic post-LLM composition approach (Path E) resolved both
+  simultaneously: 13 deterministic unit tests pin trigger correctness;
+  4-phase real-LLM verification confirms verbatim opener prepending +
+  control-phase baseline preservation. Cost ~₹0 (no LLM judgment on
+  firing).
+- N=1; **promote to canonical if** D18 testing or post-launch
+  iteration surfaces the same shape (state-aware response decoration
+  considered for prompt vs. deterministic post-LLM composition). The
+  pattern's force depends on observing the trade-off resolution work
+  the same way more than once.
+
+**Cross-reference:**
+- Pattern 26 (runtime backstop discipline; structured fields over
+  excavation): the aggregator + deterministic composer together are
+  the canonical Pattern 26 shape for response decoration.
+- Pattern 18b (prompt-size extension): the prompt-side failure mode
+  that motivated Pattern 30 is also a Pattern 18b instance; the two
+  patterns reinforce.
 
 ## Application guide
 
