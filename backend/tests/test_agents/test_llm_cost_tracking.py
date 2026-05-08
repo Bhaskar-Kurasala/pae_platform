@@ -479,3 +479,161 @@ async def test_tailored_resume_llm_falls_back_when_no_response_metadata(
 
     # Fallback should be the static Sonnet name — non-empty, not None.
     assert isinstance(result["model"], str) and len(result["model"]) > 0
+
+
+# ── D17b/ITEM 1 — readiness sub-agents capture model from response ─────
+#
+# The institutional under-cost bug from D12 CP3 (tailored_resume_llm)
+# was previously fixed at the LLM-result-dict layer. ITEM 1 closes the
+# same shape one architectural layer up: SubAgentResult/ParsedJd
+# constructions in readiness_sub_agents.py + jd_parser.py used to
+# hardcode model=model_for(self.tier), recording intent (Anthropic
+# default) instead of the actually-routed model (MiniMax M2.7 when
+# MINIMAX_API_KEY is set). Fix uses the new _model_from(response)
+# helper at success-path constructions; error paths intentionally
+# retain model_for(self.tier) because no response exists yet.
+
+
+@pytest.mark.asyncio
+async def test_readiness_sub_agent_captures_response_model_under_minimax() -> None:
+    """JDAnalyst.run() success path → SubAgentResult.model = response_metadata['model'].
+
+    Pins the under-cost fix at the readiness sub-agent layer. With a
+    fake response reporting model='MiniMax-M2.7', the returned
+    SubAgentResult.model must echo MiniMax-M2.7, NOT model_for('fast')
+    (which would be claude-haiku-4-5).
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.agents.readiness_sub_agents import JDAnalyst
+
+    fake_response = MagicMock()
+    fake_response.content = '{"role": "ML Engineer", "must_haves": []}'
+    fake_response.usage_metadata = {"input_tokens": 120, "output_tokens": 80}
+    fake_response.response_metadata = {"model": "MiniMax-M2.7"}
+
+    fake_llm = AsyncMock()
+    fake_llm.ainvoke = AsyncMock(return_value=fake_response)
+
+    import app.agents.readiness_sub_agents as rsa
+
+    original_build = rsa.build_llm
+    rsa.build_llm = lambda **_k: fake_llm  # type: ignore[assignment]
+    try:
+        agent = JDAnalyst()
+        result = await agent.run(jd_text="a sample JD body", parsed_jd={})
+    finally:
+        rsa.build_llm = original_build  # type: ignore[assignment]
+
+    assert result.succeeded
+    assert result.model == "MiniMax-M2.7", (
+        f"Expected MiniMax-M2.7 from response_metadata; got {result.model!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_readiness_sub_agent_falls_back_to_intent_when_no_response_metadata() -> None:
+    """When response_metadata is absent (stub LLM), fall back to model_for(tier).
+
+    Discipline: intent is the most honest signal when truth is
+    unavailable. Stub LLMs in tests, providers without metadata, etc.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.agents.llm_factory import model_for
+    from app.agents.readiness_sub_agents import JDAnalyst
+
+    fake_response = MagicMock()
+    fake_response.content = '{"role": "ML Engineer", "must_haves": []}'
+    fake_response.usage_metadata = {"input_tokens": 50, "output_tokens": 25}
+    fake_response.response_metadata = {}  # empty — no model key
+
+    fake_llm = AsyncMock()
+    fake_llm.ainvoke = AsyncMock(return_value=fake_response)
+
+    import app.agents.readiness_sub_agents as rsa
+
+    original_build = rsa.build_llm
+    rsa.build_llm = lambda **_k: fake_llm  # type: ignore[assignment]
+    try:
+        agent = JDAnalyst()
+        result = await agent.run(jd_text="a sample JD body", parsed_jd={})
+    finally:
+        rsa.build_llm = original_build  # type: ignore[assignment]
+
+    assert result.succeeded
+    # JDAnalyst.tier = "smart" → model_for("smart") = "claude-sonnet-4-6"
+    assert result.model == model_for("smart")
+
+
+@pytest.mark.asyncio
+async def test_readiness_sub_agent_error_path_keeps_intent_model() -> None:
+    """Error path (LLM raises before response) keeps model=model_for(self.tier).
+
+    Discipline preserved: success/error asymmetry is load-bearing.
+    No response means no truth to extract; intent is the honest
+    signal of what the agent TRIED to use. The fix MUST NOT touch
+    the error-path constructions — they would otherwise lose all
+    model attribution.
+    """
+    from unittest.mock import AsyncMock
+
+    from app.agents.llm_factory import model_for
+    from app.agents.readiness_sub_agents import JDAnalyst
+
+    fake_llm = AsyncMock()
+    fake_llm.ainvoke = AsyncMock(
+        side_effect=RuntimeError("simulated provider 503")
+    )
+
+    import app.agents.readiness_sub_agents as rsa
+
+    original_build = rsa.build_llm
+    rsa.build_llm = lambda **_k: fake_llm  # type: ignore[assignment]
+    try:
+        agent = JDAnalyst()
+        result = await agent.run(jd_text="a sample JD body", parsed_jd={})
+    finally:
+        rsa.build_llm = original_build  # type: ignore[assignment]
+
+    assert not result.succeeded
+    assert result.error and "503" in result.error
+    # Intent fallback on error — no response existed.
+    # JDAnalyst.tier = "smart" → model_for("smart") = "claude-sonnet-4-6"
+    assert result.model == model_for("smart")
+
+
+@pytest.mark.asyncio
+async def test_jd_parser_captures_response_model_under_minimax() -> None:
+    """jd_parser.parse_jd() success path → ParsedJd.model = response_metadata['model'].
+
+    Same fix shape as readiness sub-agents but applied inline to
+    jd_parser (which mirrors the inline usage_metadata extraction
+    style rather than importing the helper).
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services import jd_parser
+
+    fake_response = MagicMock()
+    fake_response.content = '{"role": "ML Engineer", "company": "Acme"}'
+    fake_response.usage_metadata = {"input_tokens": 200, "output_tokens": 60}
+    fake_response.response_metadata = {"model": "MiniMax-M2.7"}
+
+    async def _fake_invoke(_jd_text: str):
+        return jd_parser.normalize_llm_content(fake_response.content), fake_response
+
+    original_invoke = jd_parser._invoke_llm
+    jd_parser._invoke_llm = _fake_invoke  # type: ignore[assignment]
+    try:
+        parsed = await jd_parser.parse_jd("Senior ML Engineer at Acme...")
+    finally:
+        jd_parser._invoke_llm = original_invoke  # type: ignore[assignment]
+
+    # Sanity: parse succeeded (non-empty role)
+    assert parsed.role == "ML Engineer"
+    assert parsed.company == "Acme"
+    # The fix: ParsedJd.model echoes the live response, not model_for("fast")
+    assert parsed.model == "MiniMax-M2.7", (
+        f"Expected MiniMax-M2.7 from response_metadata; got {parsed.model!r}"
+    )

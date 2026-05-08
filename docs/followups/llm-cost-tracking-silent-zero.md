@@ -1,8 +1,14 @@
 # LLM cost tracking — silent-zero gaps after MiniMax activation
 
-**Status:** Partially resolved — `tailored_resume_service.py` path RESOLVED in
-D12 CP3 Part C. Five remaining auxiliary cost-write paths still emit ₹0 under
-MiniMax. Resolution scheduled across D13, D17.
+**Status:** Substantially resolved.
+- `tailored_resume_service.py` path RESOLVED in D12 CP3 Part C (2026-05-06).
+- `jd_decoder_service.py` + `readiness_orchestrator.py` paths RESOLVED in
+  D17b ITEM 1 (2026-05-08) via the refined-Path-B fix at the
+  SubAgentResult/ParsedJd construction sites — see "D17b ITEM 1 resolution"
+  section below.
+- Two remaining gaps are cost-tracking-pipeline-broken shapes (D12 v2 agents
+  + Layer 2 safety classifier / Critic), both architecturally distinct from
+  the under-cost shape; deferred per triage below.
 **Created:** 2026-05-05 (during MiniMax M2.7 activation, Phase 1.1
 investigation).
 **Cross-references:**
@@ -88,26 +94,12 @@ dashboards) which we do not yet have built.
   IS emitting (verified during Phase 4), so `_merge_token_usage` runs;
   the issue is downstream. Triage: D17 or when production cost
   reporting becomes a blocker.
-- **`jd_decoder_service.py` cost tracking** → D17 cleanup OR accept
-  as deferred. Writes to a dedicated `jd_decode_runs.cost_inr` table.
-  **D17a investigation (2026-05-07): STOP — different architecture
-  than the tailored_resume precedent.** jd_decoder doesn't hardcode a
-  `model_for(tier)` argument at the cost-row write site; instead, the
-  `SubAgentResult.model` field is populated at every sub-agent
-  construction site (9 instances in `app/agents/readiness_sub_agents.py`,
-  1 in `app/services/jd_parser.py`) via `model_for(self.tier)`.
-  Applying the tailored_resume precedent fix here requires either
-  (a) modifying every sub-agent's LLM-response handling to extract
-  `response_metadata["model"]`, or (b) plumbing a `model_used` field
-  through `SubAgentResult` from each invocation point. Either is a
-  cross-module refactor, not a one-line precedent application. Also
-  intersects D15/D16 territory (`readiness_sub_agents.py` is shared
-  with `readiness_orchestrator.py`). Surface to founder for decision
-  on shape before resumption.
-- **`readiness_orchestrator.py` cost tracking** → D17 cleanup OR
-  accept as deferred. Accumulates cost into a service-internal
-  variable; touch the model resolution at the same time the orchestrator
-  is reviewed.
+- **`jd_decoder_service.py` cost tracking** → **RESOLVED in D17b ITEM 1
+  (2026-05-08).** See "D17b ITEM 1 resolution" section below.
+- **`readiness_orchestrator.py` cost tracking** → **RESOLVED in D17b ITEM 1
+  (2026-05-08), composes with the same fix.** The orchestrator reads
+  `result.model` from SubAgentResult; once the SubAgentResult population
+  is correct, the orchestrator inherits the correctness.
 - **`base_agent.log_action` telemetry** → no fix. Legacy BaseAgent
   agents are retired by D17 as the canonical agentic endpoint absorbs
   all dispatch; fixing telemetry on a code path scheduled for deletion
@@ -117,6 +109,85 @@ dashboards) which we do not yet have built.
   D17 cleanup territory. The classifier and Critic build their own
   LLMs via `build_llm()` and never call `estimate_cost_inr` on the
   results.
+
+## D17b ITEM 1 resolution (2026-05-08)
+
+**Architectural framing:** The "Path A vs Path B" framing from the D17a
+STOP turned out to be a false dichotomy. The pre-flight audit at D17b
+ITEM 1 surfaced that the two patterns operate at **different
+architectural layers** and compose:
+
+- **Path A** (response_metadata extraction at the leaf) is institutional
+  in `agentic_base.py:587-616` (`_track_llm_usage`) and was the D12 CP3
+  Part C fix in `tailored_resume_llm.py`. It's the canonical pattern for
+  "what model actually ran" inside a single LLM call.
+- **Path B** (structured contract field carried through the call stack)
+  is institutional in `readiness_sub_agents.py` (the `SubAgentResult`
+  dataclass with `model: str` field). It's the canonical pattern for
+  passing the value across module boundaries to downstream consumers.
+
+The receivers (`jd_decoder_service.py`, `readiness_orchestrator.py`)
+were already on Path B and reading `result.model` correctly. The bug
+was at the **value source**: the 8 SubAgentResult constructions in
+`readiness_sub_agents.py` and the 1 ParsedJd construction in
+`jd_parser.py` hardcoded `model=model_for(self.tier)` (intent), not
+`model=<truth from response>`. Under MiniMax, this produced an
+under-cost shape — Sonnet pricing applied to MiniMax M2.7 calls
+(~10× over-attribution). Identical bug shape to the original
+tailored_resume CP3 Part C bug, one architectural layer up.
+
+**Fix shape (refined Path B — leaf extraction populates contract field):**
+
+1. Added `_model_from(response) -> str | None` helper to
+   `readiness_sub_agents.py`, mirroring the agentic_base.py pattern:
+   prefer `response_metadata['model']`, fall back to `['model_name']`,
+   return None when absent (signal to use intent fallback).
+2. Updated all 4 success-path SubAgentResult constructions in
+   `readiness_sub_agents.py` to use
+   `model=_model_from(response) or model_for(self.tier)`.
+3. Inlined the same extraction into `jd_parser.py` at its single
+   ParsedJd construction (matching jd_parser's existing inline-style
+   for `usage_metadata` extraction).
+4. **Kept all 4 error-path SubAgentResult constructions unchanged**
+   (`model=model_for(self.tier)`). No response exists yet at the
+   error path; intent is the most honest signal of what the agent
+   tried to use. The success/error asymmetry is load-bearing
+   discipline — a future contributor changing this would silently
+   destroy model attribution on every LLM failure.
+
+**Tests at `backend/tests/test_agents/test_llm_cost_tracking.py`:**
+
+- `test_readiness_sub_agent_captures_response_model_under_minimax`:
+  pins the under-cost fix; fake response with
+  `response_metadata={"model": "MiniMax-M2.7"}` produces
+  `SubAgentResult.model == "MiniMax-M2.7"`.
+- `test_readiness_sub_agent_falls_back_to_intent_when_no_response_metadata`:
+  pins the fallback path for stub LLMs / providers without metadata.
+- `test_readiness_sub_agent_error_path_keeps_intent_model`: pins the
+  success/error asymmetry — LLM raises, SubAgentResult.model is
+  `model_for(self.tier)`, not None or empty.
+- `test_jd_parser_captures_response_model_under_minimax`: pins the
+  parallel fix at jd_parser's single construction site.
+
+**N=4 evidence chain resolved:**
+
+1. D14c (rubric_grounding helper response model not captured) — RESOLVED transitively.
+2. D17a (jd_decoder_service.py investigation STOP) — RESOLVED in D17b ITEM 1.
+3. D15 CP3 (readiness_orchestrator.py turn-cost attribution) — RESOLVED transitively.
+4. D15 CP4+CP5 (readiness verdict generator cost) — RESOLVED transitively.
+
+The receivers all read `result.model`; once the population is correct
+at the 9 leaf sites, the entire downstream cost-attribution graph is
+correct. No additional consumer-side changes were needed.
+
+**Pattern observation registered for canonical promotion:**
+Path A and Path B are not alternatives. They compose at different
+layers. Treating them as alternatives risks either (a) duplicating
+extraction logic at every consumer (bad Path A) or (b) propagating
+wrong values through structured fields (bad Path B). The composed
+discipline: **extract at the leaf via Path A; carry across module
+boundaries via Path B; the value source change happens at the
+construction site, the abstraction stays.**
 
 ## What this means for Pass 3i §I.3
 

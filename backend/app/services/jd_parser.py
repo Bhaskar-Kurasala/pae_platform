@@ -128,6 +128,20 @@ async def parse_jd(jd_text: str) -> ParsedJd:
     input_tokens = int(usage.get("input_tokens", 0)) if isinstance(usage, dict) else 0
     output_tokens = int(usage.get("output_tokens", 0)) if isinstance(usage, dict) else 0
 
+    # D17b/ITEM 1 — capture the model that actually produced the response
+    # (response_metadata.model under MiniMax = "MiniMax-M2.7"; under
+    # Anthropic = the requested Claude model). Mirrors the inline
+    # response-metadata extraction style of usage above; falls back to
+    # model_for("fast") as honest intent when no response_metadata is
+    # present. See readiness_sub_agents._model_from for the canonical
+    # helper if this style is ever unified.
+    resp_meta = getattr(response, "response_metadata", {}) or {}
+    response_model: str | None = None
+    if isinstance(resp_meta, dict):
+        mdl = resp_meta.get("model") or resp_meta.get("model_name")
+        if isinstance(mdl, str) and mdl:
+            response_model = mdl
+
     return ParsedJd(
         role=str(parsed.get("role") or "").strip(),
         company=str(parsed.get("company") or "").strip(),
@@ -145,5 +159,5 @@ async def parse_jd(jd_text: str) -> ParsedJd:
         tone_signals=_coerce_str_list(parsed.get("tone_signals"), max_len=5),
         input_tokens=input_tokens,
         output_tokens=output_tokens,
-        model=model_for("fast"),
+        model=response_model or model_for("fast"),
     )
