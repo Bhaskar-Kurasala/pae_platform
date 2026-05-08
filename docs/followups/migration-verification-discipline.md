@@ -214,6 +214,7 @@ Two related sub-patterns. Both stem from MiniMax M2.7 having different cost/late
 - 18a: D13 Bug 19 — Critic was sized for Haiku (max_tokens=400); under MiniMax-only configuration the thinking block consumed the entire budget and the text block came back empty. Interim fix bumped max_tokens to 2048 (~₹0.20/Critic-call). Architectural fix routes Critic directly to Haiku via `ChatAnthropic` when `ANTHROPIC_API_KEY` is set (~₹0.005/Critic-call). See `docs/followups/critic-tier-routing-architectural.md`.
 - 18b (preemptive sizing): Multiple data points across the engagement: D12 career_coach (90s spec, 150s override needed), D12 tailored_resume (60s spec, 120s override needed), D13 mock_interview (12000ms spec → 60s override after Critic added), D14b practice_curator (8000ms spec → 60s override after CP3 timeouts). The pattern holds across both single-shot and multi-turn agents, both Critic-enabled and Critic-free agents. Spec is Anthropic-era; override discipline is the post-MiniMax reality.
 - 18b (tightening-formula refinement, D14c CP4): D14c set `timeout_override_seconds=90` preemptively at CP1 (= spec 20000ms × 4.5). CP3 measured 4 phases: P1 51.81s, P2 57.48s (rubric-grounded paths), P3 15.18s, P4 15.79s (refusal paths) — `observed_max × 1.30 = 75s`. CP4 attempted to tighten 90 → 75; the post-cutover smoke on the **same Phase 1 payload that ran 51.81s in CP3 timed out at 75.05s**, a 22s spread on identical input at n=2. Held at 90s preemptive. Lesson: `observed_max × 1.30` is an acceptable target *value* but not a safe tightening threshold at small n; MiniMax tail latency is wider than the n=2-4 max captures. Wait for n ≥ 5 before tightening.
+- 18b (D15 reinforcement, multiple CPs): CP3 ran 4 real-LLM phases at career_coach (60s preemptive) + study_planner (existing 30s); all phases within budget, no tail timeouts. CP4 ran 4 real-LLM phases (with multi-turn for mock_interview) at the per-agent calibrated values; all within budget, again no tail timeouts. CP5 ran 1 e2e smoke phase at career_coach + 1 at study_planner; within budget. **Ten more deliverable data points across D14b, D14c, D15 confirm the pattern holds**: spec × 4-5 preemptive at CP1 is the safe default; MiniMax tail-latency under structured-output workloads is consistently wider than spec multiplied by typical safety factors. Pattern 18b ages well.
 
 ### Pattern 19: Capability adapter signatures should accept both Pydantic and dict from start
 
@@ -274,6 +275,222 @@ When a Pass 3 spec wording references a table, column, or tool name against a sc
 **Why CP1 pre-authoring, not CP2 schema audit:** CP2 schema audit catches drift in *the SQL the tool emits* against the live DB. It does NOT catch the case where the tool was named correctly per spec but the spec's name is wrong relative to actual schema. By CP2, the misleading name is already encoded in the input schema, the capability declaration, the prompt's section names, and any partial test coverage — fixing it requires multi-file rename work. At CP1 pre-authoring it's a single decision before any code is written.
 
 **Provenance:** D14c CP1 — Pass 3c E9 spec referenced rubric storage at "course's `course_content`" against a `course_content` table that doesn't exist in the codebase. Actual rubric storage is `exercises.rubric` (JSON, nullable) per-capstone. Spec named the rubric reader `read_rubric_for_course` taking a course_id; reality required `read_rubric_for_capstone` taking an exercise_id. Surfaced at CP1 pre-authoring decision report; locked decisions D-1 (tool rename), D-2 (drop spec's `rubric_id` input — implied by submission), D-3 (`project_submission_id` maps to `exercise_submissions.id`) made before any agent code shipped. Pre-authoring discipline saved the multi-file rename cost a CP2-time discovery would have incurred. Single-data-point promotion is justified because the failure mode is concrete and the rule is simple.
+
+**Reciprocal extension (D15 CP4):** when extending an SQL JOIN in a tool, synchronously update every test fixture that exercises that SQL — including legacy stub-smoke tests authored against the pre-extension schema. CP3's Bug-24 fix added JOINs through `lessons → courses → course_entitlements → student_role_state`, but the legacy `test_read_active_capstone.py` and `test_read_capstone_status.py` throwaway-schema fixtures still declared the pre-CP3 minimal `exercises + exercise_submissions` shape. Tests passed at CP3 closure (the 6 new entitlement-filter tests use the live DB); the staleness surfaced only at CP4 regression-slice run. Rule: a CP that changes a tool's SQL shape MUST run not just the new tests but every test that imports the changed tool, even when those tests are in unrelated files. Cross-reference Pattern 27 (test fixture staleness as code evolves).
+
+### Pattern 23: Follow-up doc framing drifts from current code as the codebase evolves
+
+Follow-up docs that name specific code paths, columns, table names, or
+function signatures become stale as the code evolves around them. The
+doc reads correctly against the codebase at write time, but a future
+reader following the doc's references against current code finds
+either renamed symbols, removed columns, or shifted invariants.
+
+**Discipline:** when authoring a follow-up doc, prefer:
+- *Behavioral* descriptions over *symbolic* references when the
+  symbol is volatile ("the tool that reads the student's most recent
+  capstone" vs. `read_capstone_status.py`'s SQL line 78).
+- *Provenance commits* over symbolic references ("commit 21ff4f6
+  established this") so the reader can `git show` against a fixed
+  state.
+- *Reciprocal cross-reference* in the doc the symbol lives in:
+  "this column is referenced at `docs/followups/foo.md`."
+- When symbolic references are unavoidable (the doc IS the canonical
+  reference for a SQL-shape decision), restate the framing at the top
+  of the doc + version it ("framing as of [date]; if you're reading
+  later, run `git log -- this/path` to confirm symbols still exist").
+
+**Why this matters:** follow-up docs accumulate. By D17 there will be
+50+. A doc that named `senior_engineer.execute(state)` when the
+agent's signature was `execute(self, state)` reads as wrong against
+the post-D11 `execute(self, input, ctx)` AgenticBaseAgent surface,
+even though the doc's *intent* is still correct.
+
+**Provenance:**
+- D14c CP2a (curriculum_mapper finding) — the follow-up doc named
+  `curriculum_mapper.py`'s capability declaration; D17 cleanup
+  deleted the file. Doc still references the deleted file.
+- D17a Item C (eval-row-writer column-length) — the doc named the
+  audit_log column with a length constraint that was widened
+  immediately after the doc was written.
+- N=2; promoted to canonical at D15 closure.
+
+### Pattern 24: docker-compose volume mount asymmetry
+
+When the dev container bind-mounts only some of the source directories
+(`app/`, `alembic/`) but the developer adds new files in unmounted
+sibling directories (`tests/`, `scripts/`), the new files appear to
+exist on the host but are invisible to the container without `docker
+cp` or a rebuild. This produces "test passed locally but not in
+container" confusion that's actually a mount-asymmetry bug, not a
+code bug.
+
+**Discipline:**
+- Audit `docker inspect <container> --format '{{range .Mounts}}{{.Source}}
+  -> {{.Destination}}{{println}}{{end}}'` early when adding files in
+  new directories. Confirm the directory is bind-mounted, not just
+  baked into the image.
+- For test-fixture directories that need to be visible to the
+  container BUT live in `tests/`, the operationally cheap workaround
+  is `docker cp` per file change. The proper fix is updating
+  `docker-compose.yml` to bind-mount `tests/`.
+- When you find an asymmetry, register it loudly in the contributing
+  guide so the next contributor doesn't burn the same hour.
+
+**Provenance:** D15 CP1+ — the backend container bind-mounts
+`backend/app/` and `backend/alembic/` but NOT `backend/tests/`. New
+test files at `backend/tests/test_models/test_role_models.py` had to
+be `docker cp`'d for every iteration. Captured as a follow-up at
+`docs/followups/phase-1-audit-test-dsn-resolution.md` (TEST_PG_DSN
+resolution issue surfaced the mount-asymmetry context). N=1
+high-value operational finding; promoted to canonical at D15 closure.
+
+### Pattern 25: Round-trip content references through the discovery tool
+
+Heuristic content-fabrication detection (regex for "Production RAG",
+"MLOps", generic content names) misses the failure mode where a tool
+returns *real* platform content the calling student doesn't have
+access to. The agent grounds in what the tool returned; the LLM
+output looks plausible; the heuristic detector sees only canonical
+content names and clears.
+
+**Discipline:** runtime grounding verification must round-trip every
+extracted content reference through the discovery tool's accessible
+set, not just heuristic-fabrication-detect. Concretely, the verifier:
+
+- Re-derives the student's accessible-titles set from the live DB
+  (replicating the `read_student_accessible_content` SQL) — sidesteps
+  any audit-write gap on the agent's tool-call audit.
+- Extracts candidate content references from the agent's full JSON
+  output via two regex shapes:
+  1. Platform-prefixed capstone title patterns (e.g., `D\d+[a-z]?\s+CP\d+...`).
+  2. Parenthetical Title Case phrases adjacent to content keywords
+     (`capstone`, `exercise`, `notebook`, `lesson`, `submission`,
+     `course`, `problem`).
+- Suppresses known role-identity phrases ("Python Developer", "Senior
+  GenAI Engineer", platform vocabulary) so legitimate role framing
+  doesn't trip false positives.
+- Flags any extracted name not in the accessible set as a runtime
+  grounding violation.
+
+**Two facets** of the pattern:
+1. **Verifier requirement** — verification must round-trip through the
+   discovery tool, not just look for fabricated-shaped strings.
+2. **Verifier design** — regex shapes + suppression list. The
+   suppression list is hand-validated against legitimate output during
+   verifier authoring; expansion is a known long-tail effort.
+
+**Provenance:**
+- D15 CP3 — Bug 24 fabrication ("D14c CP3 Phase 2: Multi-Agent Eval
+  Harness" referenced for python_developer student with no
+  entitlement) was a real platform capstone, not a fabricated one.
+  Heuristic detection missed it; manual inspection caught it.
+- D15 CP3 verifier at `tests/fixtures/runtime_grounding_verifier.py`
+  is the canonical implementation. Reused at CP4 + CP5 for all
+  agent verification.
+- N=1 with two facets; promoted to canonical at D15 closure.
+
+### Pattern 26: Runtime backstop for derivative fields
+
+When an output field can be deterministically computed from other
+LLM-produced fields OR from authoritative runtime state, the agent's
+runtime backstop computes it server-side rather than asking the LLM.
+The LLM's emission is informative but not load-bearing; the backstop
+preserves the LLM's judgment-bearing values (evidence narration,
+explanation text) and overwrites the derivative values (sums, pass
+booleans, copy-from-context fields) with canonically-computed values.
+
+**Discipline:** when adding a new optional output field, ask:
+1. Can this field be computed from other fields in the same output
+   plus authoritative runtime state?
+2. If yes — do not rely on the LLM. Add a runtime backstop that
+   computes the canonical value after the LLM emits, before the
+   agent returns. Preserve the LLM's narrative content; replace its
+   derivative values.
+3. If no (the field genuinely requires the LLM's judgment) — the
+   prompt instruction is the only enforcement. Document this in the
+   prompt's "Hard constraints" section.
+
+This pattern composes with Pattern 22 (server-side coercion of LLM
+output before validation) — the backstops sit at the same layer.
+
+**Three canonical examples in D15 CP4:**
+1. **practice_curator** — `Exercise.source` (`curated`/`generated`) +
+   `curated_exercise_id` are derivative of whether the LLM's emitted
+   title matches an entry in `accessible_curated_problems`. Runtime
+   backstop `_infer_exercise_source` performs the title match and
+   sets the field; prompt says "set source = curated/generated" but
+   the backstop is the load-bearing enforcement.
+2. **project_evaluator** — `TransitionGateStatus.passes_threshold` is
+   derivative of `overall_score >= capstone_threshold_required`.
+   Runtime backstop `_enforce_gate_status` recomputes from
+   authoritative `gate_def` + `overall_score`. The LLM's
+   `transition_gate_status` is overwritten entirely; the prompt
+   instruction is informative.
+3. **mock_interview** — `SessionVerdict.weighted_score` is derivative
+   of `sum(weight × score)` across `dimension_scores`; `passed` is
+   derivative of `weighted_score >= mock_interview_pass_threshold`.
+   Runtime backstop `_enforce_session_verdict` normalizes weights
+   from the gate definition (LLM may have emitted wrong weights) and
+   recomputes. Preserves the LLM's per-dimension `evidence` strings.
+
+**Why three in one checkpoint earns canonical promotion:** when a
+single deliverable produces three independent instances of the same
+discipline applied to different field shapes, the discipline is
+generalizable, not coincidental. Pattern is load-bearing for any
+future deliverable that adds derivative fields.
+
+**Provenance:** D15 CP4 — practice_curator + project_evaluator +
+mock_interview backstops at `_infer_exercise_source`,
+`_enforce_gate_status`, `_enforce_session_verdict`. N=3 in one
+checkpoint; promoted to canonical at D15 closure.
+
+### Pattern 27: Test fixture staleness as code evolves
+
+Test fixtures encoded against initial state become brittle when the
+production state evolves. Two failure shapes:
+
+1. **Data-evolution staleness** — fixture asserts an invariant that
+   was true at deploy time but evolves with normal product behavior.
+   E.g., "all backfilled students sit at python_developer" is true
+   at CP1 backfill; once any student transitions, it's wrong. The
+   assertion was over-strict at write time, not stale-by-evolution
+   in the wrong direction.
+2. **Schema-evolution staleness** — fixture builds a throwaway
+   schema reflecting the SQL shape at write time. A later CP changes
+   the SQL (adds JOINs, renames columns); the fixture doesn't
+   regenerate; tests that import the changed SQL fail with
+   "column doesn't exist."
+
+**Discipline:**
+- For data-evolution: write invariants for properties that hold
+  across normal data evolution. "At least N students at python_developer"
+  is robust; "ALL students at python_developer" is brittle.
+- For schema-evolution: when a CP changes SQL shape, run the broader
+  test slice (not just the new tests) to surface stale fixtures
+  before closure. Update fixtures atomically with the SQL change in
+  the same commit.
+- CP closures should run not just the new test slice but adjacent
+  agent slices + a sample of the legacy test surface that imports
+  any changed tool.
+
+**Cross-reference Pattern 20** (closure-baseline test slices may miss
+latent assertion drift): Pattern 27 is the field-data sibling of
+Pattern 20's capability-registry-assertion-drift case. Pattern 20
+fires when the count of capability declarations drifts; Pattern 27
+fires when fixture-encoded values drift.
+
+**Provenance:**
+- D15 CP3 (data-evolution) — `test_backfill_all_students_start_at_python_developer`
+  was over-strict; loosened to `>= 129 students at python_developer`
+  to admit normal progression. Surfaced at CP3 closure baseline run.
+- D15 CP4 (schema-evolution) — `test_read_active_capstone.py` and
+  `test_read_capstone_status.py` throwaway-schema fixtures lacked
+  the `lessons + courses + course_entitlements + student_role_state`
+  tables that CP3's Bug-24 fix added to the SQL. Surfaced at CP4
+  regression-slice run; fixtures rebuilt at CP4 closure.
+- N=2 with different shapes (data + schema evolution); promoted to
+  canonical at D15 closure.
 
 ## Application guide
 
