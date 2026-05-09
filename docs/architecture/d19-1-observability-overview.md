@@ -387,6 +387,52 @@ backend is the structurally correct path.
 3. Close the synthetic-probe gap last (out-of-band; no
    substrate dependency).
 
+## D19.2 build-out (cross-reference, added at D19.2 closure 2026-05-09)
+
+D19.2 reshaped the original D19.2-D19.5 launch-operations arc to
+match cohort-1 economic reality. D19.1's substrate underpins
+everything D19.2 ships; D19.2 itself adds:
+
+  * **Two paged alerts** (D19.2 D-A) — cost spike (Honeycomb
+    Trigger; gated on backend lock) + uptime (UptimeRobot free
+    tier). All other alerts deferred per
+    [`docs/followups/d19-deferred-alerting-and-runbooks.md`](../followups/d19-deferred-alerting-and-runbooks.md).
+  * **Per-student daily cost ceiling** (D19.2 D-B) — application-
+    layer protection enforcing at agentic dispatch entry. New
+    `users.daily_cost_ceiling_inr_override` column wins over tier
+    defaults per
+    [`docs/operations/cost-ceilings.md`](../operations/cost-ceilings.md).
+  * **Graceful-failure UX** (D19.2 D-C) — backend exception
+    handler envelope extended with `trace_id` + `user_message`
+    fields; new inline `GracefulFailureMessage` frontend
+    component for non-route failures (chat, mock interview,
+    practice, capstone surfaces).
+  * **Operational review processes** (D19.2 / CP1.6) —
+    [`sentry-review-process.md`](../operations/sentry-review-process.md)
+    and
+    [`cohort-events-review-process.md`](../operations/cohort-events-review-process.md)
+    document the non-paged half of cohort-1 launch ops.
+  * **D19.4 parked** (D19.2 D-D) — on-call rotation, escalation
+    paths, full runbook discipline deferred until second engineer
+    OR cohort >200 users. The CP4 runbook scaffold remains as
+    "first-look + correlate" pointers; no further population at
+    this stage.
+
+The cross-reference goes both ways:
+
+  * **D19.1 → D19.2:** D19.2's cost ceiling consumes
+    `_compute_today_cost_inr` from D19.1's existing matview
+    aggregation (`mv_student_daily_cost`); enforcement at
+    `AgenticOrchestratorService.process_request` consumes the
+    `EntitlementContext.cost_budget_remaining_today_inr` field
+    populated by `compute_active_entitlements`. D19.2's
+    graceful-failure UX consumes D19.1's `trace_id` contextvar
+    bound by `RequestIDMiddleware` for correlation.
+  * **D19.2 → D19.1:** D19.2 surfaced no new pattern candidates
+    (consumption of D19.1 substrate, not new architectural
+    pattern territory) — confirms the per-arc discipline that
+    consumption arcs don't expand the pattern catalog.
+
 ## Cross-references
 
 - Saved D19.1 prompt: [`docs/claude-code-prompts/d19-1-prompt.md`](../claude-code-prompts/d19-1-prompt.md)

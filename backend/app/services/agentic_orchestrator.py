@@ -24,9 +24,11 @@ from decimal import Decimal
 from typing import Any
 
 import structlog
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.capability import filter_capabilities_for_user, list_capabilities
+from app.models.user import User
 from app.agents.dispatch import (
     dispatch_chain,
     dispatch_single,
@@ -126,6 +128,39 @@ class AgenticOrchestratorService:
                 target_agent=None,
                 blocked=True,
                 block_reason="no_active_entitlement",
+                duration_ms=int((time.perf_counter() - start) * 1000),
+                cost_inr=Decimal("0"),
+            )
+
+        # D19.2 / CP1.4 — daily cost ceiling enforcement at dispatch
+        # entry. EntitlementContext.cost_budget_remaining_today_inr was
+        # already populated by compute_active_entitlements(); we just
+        # gate on the value here. Enforcement at this site (vs deeper
+        # inside dispatch) is deliberate: we want to short-circuit
+        # BEFORE the safety scan + supervisor LLM call burns more
+        # cost on a user who's already over their ceiling.
+        #
+        # cost_remaining can be negative when a prior invocation's
+        # cost pushed the user past the ceiling mid-flight; treat
+        # zero or negative as "at/over ceiling" → graceful decline.
+        if entitlement_ctx.cost_budget_remaining_today_inr <= Decimal("0"):
+            await self._record_ceiling_hit(
+                db=db,
+                student_id=student_id,
+                used=entitlement_ctx.cost_budget_used_today_inr,
+                remaining=entitlement_ctx.cost_budget_remaining_today_inr,
+            )
+            return OrchestratorResult(
+                request_id=request_id,
+                conversation_id=conversation_id,
+                response_text=(
+                    "You've reached today's usage limit. Please "
+                    "continue tomorrow or contact support if you need "
+                    "an exception."
+                ),
+                target_agent=None,
+                blocked=True,
+                block_reason="daily_cost_ceiling_hit",
                 duration_ms=int((time.perf_counter() - start) * 1000),
                 cost_inr=Decimal("0"),
             )
@@ -265,6 +300,64 @@ class AgenticOrchestratorService:
         )
 
     # ── Helpers ─────────────────────────────────────────────────────
+
+    async def _record_ceiling_hit(
+        self,
+        *,
+        db: AsyncSession,
+        student_id: uuid.UUID,
+        used: Decimal,
+        remaining: Decimal,
+    ) -> None:
+        """D19.2 / CP1.4 — log a cohort event when a student hits the
+        daily cost ceiling. Visibility for the founder during the daily
+        cohort-events review (see docs/operations/cohort-events-review-process.md).
+
+        Best-effort: a failure to record the event must NOT block the
+        decline response — the user-facing graceful-degrade is the
+        load-bearing path; the event is observability seasoning.
+
+        We pull the student row to populate actor_handle correctly
+        (mask_handle in cohort_event_service); if the read fails we
+        record without an actor.
+        """
+        try:
+            from app.services.cohort_event_service import record_event
+
+            student = None
+            try:
+                student_result = await db.execute(
+                    select(User).where(User.id == student_id)
+                )
+                student = student_result.scalar_one_or_none()
+            except Exception as exc:  # noqa: BLE001
+                log.debug(
+                    "orchestrator.ceiling_hit_actor_lookup_failed",
+                    student_id=str(student_id),
+                    error=str(exc),
+                )
+
+            await record_event(
+                db,
+                kind="daily_cost_ceiling_hit",
+                actor=student,
+                label=(
+                    f"Student hit daily cost ceiling "
+                    f"(used ₹{used:.2f}, remaining ₹{remaining:.2f})"
+                ),
+                payload={
+                    "user_id": str(student_id),
+                    "cost_used_inr": str(used),
+                    "cost_remaining_inr": str(remaining),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "orchestrator.ceiling_hit_event_failed",
+                student_id=str(student_id),
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
 
     async def _build_supervisor_context(
         self,

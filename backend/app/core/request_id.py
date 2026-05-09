@@ -123,6 +123,13 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             request_id=request_id,
             trace_id=trace_id,
         )
+        # D19.2 / CP1.5 — also surface the IDs on request.state so
+        # the global exception handler (which runs OUTSIDE this
+        # middleware's dispatch via Starlette's outer exception
+        # middleware) can read them when contextvars are unbound by
+        # the time it executes.
+        request.state.request_id = request_id
+        request.state.trace_id = trace_id
         try:
             response: Response = await call_next(request)
         finally:

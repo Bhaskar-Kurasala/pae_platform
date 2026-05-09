@@ -520,18 +520,31 @@ def _resolve_effective_tier(
 
 
 def _resolve_cost_ceiling(
-    tier: TierName, paid: list[ActiveEntitlement]
+    tier: TierName,
+    paid: list[ActiveEntitlement],
+    user_override: Decimal | None = None,
 ) -> Decimal:
-    """Cost ceiling for the user, with metadata override support.
+    """Cost ceiling for the user, with two override layers.
 
-    Pass 3f §H.3: per-student override via
-    course_entitlements.metadata['cost_ceiling_inr_override']. When
-    multiple entitlements specify overrides, the largest wins (the
-    user has paid for the most generous one).
+    Resolution order (D19.2 D-B):
+      1. ``user_override`` (from ``users.daily_cost_ceiling_inr_override``)
+         — wins unconditionally when non-None. Per-student admin lever
+         for tightening (suspected adversarial use, budget concerns) or
+         loosening (paying customer one-off allowance) without changing
+         tier configuration.
+      2. ``course_entitlements.metadata['cost_ceiling_inr_override']``
+         (Pass 3f §H.3) — when multiple entitlements specify overrides,
+         the largest wins (the user has paid for the most generous one).
+      3. Tier config's daily cost ceiling — the default.
 
-    Falls back to the tier config's daily cost ceiling if no override.
+    Why user_override at the top: D-B specifies the user-level lever
+    is the binding constraint. A flagged user shouldn't be able to
+    bypass the tightened ceiling by buying a course with a generous
+    metadata override.
     """
     base = get_tier(tier).daily_cost_ceiling_inr
+    if user_override is not None:
+        return user_override
     overrides: list[Decimal] = []
     for ent in paid:
         raw = ent.metadata.get("cost_ceiling_inr_override")
@@ -553,6 +566,30 @@ def _resolve_cost_ceiling(
     return max(base, max(overrides))
 
 
+async def _read_user_cost_ceiling_override(
+    db: AsyncSession, user_id: uuid.UUID
+) -> Decimal | None:
+    """D19.2 / CP1.4 — read the per-user daily cost ceiling override
+    column. Returns None when unset (the common case); returns the
+    Decimal when an admin has set a per-student override.
+
+    Read once per agent invocation as part of
+    ``compute_active_entitlements``; uncached because the matview
+    refresh dominates the cost-budget path's latency budget anyway.
+    """
+    result = await db.execute(
+        text(
+            "SELECT daily_cost_ceiling_inr_override FROM users "
+            "WHERE id = :uid"
+        ),
+        {"uid": user_id},
+    )
+    row = result.first()
+    if row is None or row[0] is None:
+        return None
+    return Decimal(row[0])
+
+
 async def compute_active_entitlements(
     db: AsyncSession, user_id: uuid.UUID
 ) -> EntitlementContext:
@@ -567,7 +604,8 @@ async def compute_active_entitlements(
     paid = await _active_paid_entitlements_full(db, user_id)
     free = await _active_free_tier_grant(db, user_id)
     effective_tier = _resolve_effective_tier(paid, free)
-    cost_ceiling = _resolve_cost_ceiling(effective_tier, paid)
+    user_override = await _read_user_cost_ceiling_override(db, user_id)
+    cost_ceiling = _resolve_cost_ceiling(effective_tier, paid, user_override)
     cost_used = await _compute_today_cost_inr(db, user_id)
     cost_remaining = cost_ceiling - cost_used
     if cost_remaining < 0:

@@ -1,6 +1,7 @@
 from datetime import datetime
+from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, String, Text
+from sqlalchemy import Boolean, DateTime, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -31,6 +32,17 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # backfills via /api/v1/admin/students/{id}/whatsapp_number. Empty
     # / NULL means no WhatsApp deep-link rendered on the cockpit panel.
     whatsapp_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # D19.2 / CP1.4 — per-student daily cost ceiling override.
+    # NULL → use the tier-based default from STUDENT_DAILY_COST_CEILING_INR
+    # env var (free tier) or the paid-tier course config.
+    # Non-NULL → use this value as the ceiling for this user, regardless
+    # of tier. Wins over tier defaults; primarily for tightening
+    # individual students (suspected adversarial use, budget concerns)
+    # or loosening (paying customer with a one-off allowance) without
+    # changing the global tier configuration.
+    daily_cost_ceiling_inr_override: Mapped[Decimal | None] = mapped_column(
+        Numeric(precision=10, scale=2), nullable=True
+    )
 
     enrollments: Mapped[list["Enrollment"]] = relationship(back_populates="student", lazy="select")
     submissions: Mapped[list["ExerciseSubmission"]] = relationship(

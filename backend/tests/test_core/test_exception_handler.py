@@ -111,3 +111,46 @@ async def test_happy_path_unaffected() -> None:
     # Even the happy path now ships the request id so the frontend can
     # surface it on errors that come from elsewhere.
     assert REQUEST_ID_HEADER in resp.headers
+
+
+# D19.2 / CP1.5 — graceful-failure UX additions.
+
+
+@pytest.mark.asyncio
+async def test_d19_2_response_carries_trace_id_and_user_message() -> None:
+    """D19.2 D-C: error envelope ships ``trace_id`` (W3C 32-hex)
+    alongside the existing ``request_id``, plus a separate
+    ``user_message`` field with the canonical try-again wording so
+    the frontend GracefulFailureMessage component renders the
+    consistent UX without parsing the legacy ``message`` string."""
+    app = _make_app()
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/boom")
+    body = resp.json()
+    err = body["error"]
+    # trace_id is W3C 32-hex per RequestIDMiddleware (D19.1 CP1.1).
+    assert "trace_id" in err
+    trace_id = err["trace_id"]
+    assert isinstance(trace_id, str) and len(trace_id) == 32
+    # user_message carries the canonical D-C wording.
+    assert "user_message" in err
+    assert "try again" in err["user_message"].lower()
+    assert "we've logged" in err["user_message"].lower()
+    # request_id preserved for backwards compatibility.
+    assert "request_id" in err
+    assert err["request_id"]
+
+
+@pytest.mark.asyncio
+async def test_d19_2_user_message_is_stable_and_does_not_leak_internals() -> None:
+    """The user_message must NOT leak the exception type or
+    message; it's a fixed string regardless of what raised."""
+    app = _make_app()
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/boom")
+    user_message = resp.json()["error"]["user_message"]
+    assert "kaboom" not in user_message
+    assert "RuntimeError" not in user_message
+    assert "Traceback" not in user_message
