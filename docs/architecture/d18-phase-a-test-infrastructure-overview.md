@@ -564,3 +564,50 @@ infrastructure surface is:
   ✅ Patterns documented for cross-cutting concerns
 
 Phase B prompt drafting starts after this commit lands.
+
+---
+
+## D19.1 cross-reference (added at D19.1 CP5 close, 2026-05-09)
+
+The Phase A test infrastructure substrate underpins **closure-time
+test verification** (now canonical per the pattern catalog at
+[`docs/followups/migration-verification-discipline.md`](../followups/migration-verification-discipline.md)).
+Every D19.1 closure ran its empirical-evidence pass through this
+infrastructure:
+
+  * `docker-compose.yml + docker-compose.playwright.yml` overlay
+    (Phase A retrofit) is the canonical environment.
+  * `pae_platform-playwright-runner:local` image
+    (Phase A `Dockerfile.runner`) is the canonical pytest harness
+    — bakes the project venv on top of upstream
+    `mcr.microsoft.com/playwright/python:v1.59.0`, so chromium +
+    system libs (libnspr4, libnss3, etc.) are pre-resolved.
+  * `playwright_test` DB + the per-suite reset
+    (`reset_for_suite.py`) are the canonical data fixtures.
+  * The split-run convention
+    ([`docs/followups/pytest-asyncio-pytest-playwright-split-runs.md`](../followups/pytest-asyncio-pytest-playwright-split-runs.md))
+    governs how D19.1 unit tests run separately from the
+    Playwright suite.
+
+D19.1 layered observability instrumentation on top of Phase A's
+test substrate. The cross-reference goes both ways:
+
+  * **Phase A → D19.1:** Phase A's `tests/playwright/journeys/`
+    suite became the empirical-evidence pass for substrate
+    correctness in CP1, CP2, CP3 closures. Without Phase A's
+    canonical environment, D19.1 would have shipped against
+    static-review proxies — an inferior posture explicitly
+    rejected by the closure-time test verification discipline.
+  * **D19.1 → Phase A:** D19.1's CP1 closure-time verification
+    surfaced the `pytestmark = pytest.mark.anyio` collision
+    with `asyncio_mode = "auto"`; that finding extended the
+    split-runs followup with a CP1 addendum. Pattern 22's
+    bidirectional value clause was reinforced with 4 D19.1
+    substrate instances (CP1 conformance discovery, CP2 shim
+    recognition, CP3 absence verification, CP5 catalog-itself
+    drift). Two new patterns (P35 infrastructure-layer
+    auto-propagation, P36 prospective convention enforcement)
+    landed in the catalog at D19.1 CP5.
+
+For the canonical D19.1 reference, see
+[`docs/architecture/d19-1-observability-overview.md`](d19-1-observability-overview.md).

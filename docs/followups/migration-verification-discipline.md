@@ -971,3 +971,289 @@ generalize beyond the testing arc. The Phase B test coverage
 overview at
 `docs/architecture/d18-phase-b-test-coverage-overview.md`
 holds the per-CP catalog and bug log.
+
+---
+
+## Pattern catalog updates from D19.1 (observability substrate arc)
+
+### Pattern 22 — bidirectional value, evidence base extended (D19.1 CP5)
+
+The bidirectional value clause was made explicit at D18 Phase B
+CP5 (drift-detection direction + drift-prevention direction; see
+the section above titled "Pattern 22 — verify always (elevated
+at D18 Phase B CP5 close)"). D19.1 contributes 4 substrate-level
+instances that reinforce both directions.
+
+**D19.1 evidence:**
+
+  * **CP1 pre-flight, drift-prevention direction.** Authoring
+    began assuming greenfield (replace structlog, add
+    correlation IDs, build Celery propagation). Pre-flight
+    discovered the substrate was already on structlog with
+    `merge_contextvars`, `RequestIDMiddleware` already mounted
+    with UUID4 correlation IDs, and Sentry's PII redaction
+    already in place. The verified-conformance redirected CP1
+    scope from net-new authoring to additive extension (W3C
+    `trace_id` alongside existing `request_id`). Without
+    pre-flight, CP1 would have ripped out and replaced working
+    infrastructure.
+  * **CP2 pre-flight, drift-prevention direction.**
+    `app/agents/primitives/metrics.py` was a no-op shim
+    deliberately authored as a Pattern 27 prospective mitigation
+    (see Pattern 36 below). The 18 existing call sites already
+    used the symbol contract the eventual prometheus_client
+    flip would honour. CP2's actual scope reduced to "flip the
+    shim + rename to D-D" rather than greenfield instrumentation
+    + 18-call-site migration. Without pre-flight, the rename
+    would have been a 18-edit blast radius rather than 1.
+  * **CP3 pre-flight, drift-detection direction.**
+    OpenTelemetry was claimed by spec context as "may already be
+    instrumented somewhere" (Sentry has its own tracing).
+    Pre-flight verified zero OTel imports across `backend/`
+    (Glob + Grep) — Sentry's tracing is a separate substrate.
+    Greenfield install confirmed; CP3 proceeded without scope
+    re-shape. The verified absence is itself the contract:
+    nothing to migrate, no compatibility shims needed.
+  * **CP5 pre-flight on the catalog itself.** The architect's
+    CP5.3 spec described Pattern 22 as if the bidirectional
+    clause didn't exist yet ("amend P22 canonical statement
+    with bidirectional clause"). Pre-flight on the catalog
+    discovered the clause was already added at D18 Phase B
+    closure. Drift-detection direction caught against an
+    architect-prompt artifact, not just code; refines what the
+    "live system" being verified can be (catalogs, prompts,
+    docs, in addition to code).
+
+**Refined N-count:** Pattern 22 evidence base 14+ (D18) + 4
+(D19.1) = 18+ logged instances across CP1, CP2, CP3, CP4, CP5.
+Caught both code drift and meta-artifact drift.
+
+### Pattern 35 — Infrastructure-layer auto-propagation (NEW at D19.1 CP5)
+
+**Canonical:**
+
+> When convention drift across consumers is the predictable
+> failure mode, enforce at the infrastructure layer rather than
+> documenting at the consumer layer. Place the enforcement at
+> the convention-definition site — the decorator, base class,
+> helper, registration wrapper — so consumers cannot drift
+> without a code change to the substrate. Per-call-site
+> discipline is a weaker substitute that fails the moment a
+> new consumer is added under time pressure.
+
+**Why infrastructure-layer:** consumer-layer enforcement
+(documentation, code review, lint comments) relies on humans
+applying the convention every time. Pattern 27 (consumer
+convention drift) is the predictable failure mode. The fix
+shape is: move enforcement to the boundary the consumer must
+cross to participate. The substrate gates correctness; the
+consumer can't bypass without breaking the substrate
+contract.
+
+**D19.1 evidence (N=4):**
+
+  * **CP1 — `CorrelatedTask.apply_async`.** Celery task
+    correlation IDs propagate across the broker round-trip
+    because `Task.apply_async` is overridden to read the current
+    structlog contextvars and inject them as task headers.
+    The 1 active call site (`pregenerate_quiz_for_message.delay`)
+    plus all future call sites get propagation for free; no
+    `headers={'request_id': ...}` discipline at any consumer.
+    Tested via `test_celery_task_observes_same_trace_id_as_caller`
+    (CP1.6.b) which asserts value equality across the broker.
+  * **CP2 — `register_counter` / `register_histogram` /
+    `register_gauge` helpers.** Every metric registration
+    passes through D-C (cardinality denylist) and D-D (naming
+    convention) validation at construction time. A drifting
+    registration raises `MetricRegistrationError` at boot, not
+    at scrape time. The denylist linter test
+    (`test_cp2_cardinality_no_denylisted_labels`) closes the
+    loop by walking the registry post-hoc.
+  * **CP3 — `set_safe_span_attribute(span, key, value)`.**
+    Privacy denylist enforced at the substrate boundary.
+    Consumers writing `span.set_attribute("email", ...)`
+    bypass the helper — but the discipline test
+    (`test_set_safe_span_attribute_rejects_pii` etc.) catches
+    direct-API drift at CI time. Convention-definition site
+    enforcement + complementary per-registry sweep.
+  * **CP4 — Dashboard schema validation against REGISTRY.**
+    The dashboard discipline tests
+    (`test_dashboard_panel_metrics_are_registered`) walk every
+    JSON dashboard, resolve every panel's metric name against
+    the canonical registry, and fail at CI if any reference
+    drifts. Dashboards-as-code shipping with stale metric names
+    is the classic Pattern 27 failure mode for observability
+    backends; CP4's CI gate prevents it at definition time.
+
+**Sub-rule:** enforcement at the convention-definition site
+is the preferred shape over per-call-site discipline. Per-call-site
+discipline (lint comments, review checklists) fails at the first
+new consumer added under deadline pressure; substrate-level
+enforcement only fails when the substrate itself is bypassed,
+which is a much rarer event.
+
+**Generalizes beyond observability** — applies to any system
+where (a) the same convention applies at many consumer sites and
+(b) drift is detectable at the convention-definition layer.
+Examples in the platform's existing code that would benefit:
+input validation at API boundary (already there via Pydantic),
+DB-write validation at repository layer, agent permission gates
+at the dispatcher.
+
+**Provenance:** D19.1 CP1-CP4. N=4 in the same arc; the
+within-arc reproducibility is itself signal that this is a
+canonical pattern, not a one-off.
+
+### Closure-time test verification discipline (canonical sub-rule under "Application guide", 2026-05-09)
+
+**Canonical:**
+
+> Closure reports run tests in the canonical environment;
+> static review is supplementary, not substitutive. Closure
+> verification scope matches substrate change scope: code
+> changes → full integration suite; docs / tests / schema
+> changes only → discipline tests in the same canonical
+> environment.
+
+**Why this is canonical, not just process:** during D19.1 CP1,
+Claude Code attempted to ship a closure report with
+"my-host-Python-3.14 + isolated deps + `--noconftest`" as the
+test environment. Pre-flight had passed there; closure report
+asserted green. The architect (correctly) flagged that
+non-canonical-environment evidence is structurally weaker than
+canonical-environment evidence — the same code can pass
+non-canonically while a real environmental constraint fails
+canonically. The CP1 closure was reissued against the canonical
+runner image; the reissue caught the
+`pytestmark = pytest.mark.anyio` collision with
+`asyncio_mode = "auto"` that would have surfaced at first CI
+run instead.
+
+**4 iterations of evidence (D19.1 CP1-CP4):**
+
+  * **CP1.** Caught `pytestmark = pytest.mark.anyio` /
+    `asyncio_mode = "auto"` collision under combined-suite
+    execution. Static review missed it; canonical-environment
+    execution surfaced it immediately.
+  * **CP2.** Surfaced supervisor-overlength flake (`~50%`
+    isolation rate). Static review couldn't have detected; only
+    real-LLM execution at suite scale produced the signal.
+  * **CP3.** Surfaced 2 additional batch-flake instances
+    (`career_coach_responds_with_role_aware_guidance`,
+    `resume_reviewer_records_cost_inr_for_real_llm_call`).
+    Substrate-latency-amplified flakiness; only canonical
+    real-LLM execution under suite load reveals the rate.
+  * **CP4.** Confirmed scope-matching refinement: dashboards +
+    runbooks + discipline tests don't need a real-LLM Phase B
+    re-run because they don't change substrate behaviour.
+    Verified via 55/55 unit tests in 1.47s; no false claim of
+    Phase B re-run.
+
+**Cost arithmetic:** closure-time verification costs ~₹4-6 per
+real-LLM CP (one Phase B re-run); ~₹0 for documentation /
+discipline-only CPs (scope-matching refinement). At 5 CPs per
+deliverable, the verification budget adds ~₹15-25 per
+substrate-changing deliverable; this is now the steady-state
+expectation for D19.x and beyond.
+
+**Application:** every closure report names (a) the canonical
+environment in which tests ran, (b) the actual numbers (counts
++ wall-clock), (c) any flake classifications with isolation
+rerun evidence. Reports without these surface as
+discipline-violation candidates.
+
+### Pattern 36 — Prospective convention enforcement at substrate boundaries (NEW at D19.1 CP5)
+
+**Canonical:**
+
+> When designing new infrastructure that consumers will use
+> repeatedly, anticipate convention enforcement at the substrate
+> boundary even when the enforcement layer can't yet be built
+> (because the dependency, the backend, or the policy isn't
+> finalized). Author the substrate with the eventual enforcement
+> shape in mind — stable symbol contract, narrow consumer-side
+> API, no consumer-visible state that prevents later validation.
+> Prospective mitigation costs ~5% authoring overhead;
+> retrofitting after consumers have multiplied costs proportional
+> to consumer count.
+
+**Why this is its own pattern (not a sub-rule under Pattern 35):**
+Pattern 35 is about *enforcing* conventions at the substrate
+boundary. Pattern 36 is about *designing for future enforcement*
+when the substrate ships before the enforcement layer is
+buildable. The two compose: ship the substrate now (P36),
+enforce later (P35), without consumer-side rework in between.
+
+**Evidence — pre-existing, validated at D19.1 CP2:**
+
+The 2024-era author of `app/agents/primitives/metrics.py` shipped
+the module as a no-op shim **before** `prometheus_client` was a
+dependency. The shim's docstring: *"Designed so call sites can be
+instrumented today without adding the prometheus_client
+dependency. When you're ready to flip to real Prometheus, replace
+the `_Counter` / `_Histogram` no-op classes here with thin
+wrappers around `prometheus_client.Counter` / `Histogram` and
+add the `/metrics` endpoint — call sites do not change."*
+
+D19.1 CP2 confirmed the design held: 18 active consumers across
+4 modules (`tools.py`, `communication.py`, `evaluation.py`,
+`memory.py`) flipped from no-op to real Prometheus emission with
+**zero call-site edits**. The only changes:
+
+  1. Replaced 2 classes in the shim with `prometheus_client`
+     wrappers.
+  2. Added 2 millisecond → second adapter classes for legacy
+     `_MS` symbols (D-D requires `_seconds`); call-site
+     `.observe(duration_ms)` unchanged.
+  3. Renamed underlying Prometheus metric names to `aicareeros_*`
+     while preserving symbol names exposed to consumers.
+
+The 5% prospective-mitigation overhead at authoring (the shim
+itself was ~120 LoC of structural shape) prevented an 18-edit
+retrofit blast radius that would have included real-LLM
+Phase B re-verification per edited file. Cost saved ≈ ₹5-10 in
+closure-time verification alone, plus the soft savings from not
+having to carry "convention drift in flight" through CP3.
+
+**Distinguishing from related patterns:**
+
+  * **P35** (infrastructure-layer auto-propagation) — about
+    enforcing conventions when you can.
+  * **P36** (prospective substrate design) — about authoring
+    substrates so future P35-style enforcement is cheap to add.
+  * **P27** (consumer convention drift) — the failure mode P35
+    + P36 together prevent.
+  * **P34** (pre-flight infrastructure investment compounds) —
+    the cost-arithmetic principle that justifies the 5%
+    overhead. P36 is "what kind of pre-flight investment to
+    make"; P34 is "when the investment pays off."
+
+**Application:** when you're authoring a new substrate module
+that consumers will use widely, ask: *what's the eventual
+enforcement layer?* Even if you can't build it now, structure
+the consumer-facing contract so the enforcement layer can slot
+in cheaply. Stable symbol names, narrow public API, no
+consumer-visible private state, no implicit ordering
+dependencies between consumers and the substrate's internal
+state.
+
+**Provenance:** N=1 confirmed at D19.1 CP2 from a pre-existing
+2024-era design. Promote to canonical without further
+validation: the design was deliberate, the prediction held, and
+the cost-savings are quantifiable. Future deliverables that ship
+substrate ahead of enforcement should reference this pattern
+explicitly.
+
+### Cross-reference
+
+Both Pattern 35 and Pattern 36 are observability-substrate
+patterns. The canonical D19.1 reference at
+`docs/architecture/d19-1-observability-overview.md` traces each
+pattern instance to its CP-level provenance and code location.
+The backend decision at
+`docs/architecture/d19-1-observability-backend-decision.md`
+relies on these patterns operationally — dashboards-as-code
+(P35 instance #4) is the load-bearing reversibility mechanism
+for the backend choice; OTel-native instrumentation (P35 instance
+#3 + P36 substrate design) keeps the consumer code portable
+across backends.
