@@ -102,6 +102,34 @@ This pattern is local to CP5's admin fixture; if Phase B needs more
 sync-fixture DB writes, factor `_run_async` into a shared helper
 (probably `tests/playwright/helpers/sync_async_bridge.py`).
 
+## D19.1 CP1 addendum — don't combine pytestmark anyio with auto-mode
+
+Surfaced 2026-05-09 during D19.1 CP1 closure-time test verification.
+
+The project's `backend/pyproject.toml` sets
+`asyncio_mode = "auto"` for pytest-asyncio. That alone drives every
+`async def test_*` function. **Async unit-test files must NOT also
+add `pytestmark = pytest.mark.anyio`** — both plugins then race for
+the same coroutine, producing the same
+`Runner.run() cannot be called from a running event loop` error
+described above (which is otherwise reserved for the
+pytest-asyncio + pytest-playwright collision).
+
+The CP1 test file at `backend/tests/test_core/test_d19_cp1_correlation.py`
+shipped with the marker; targeted run alone passed (11/11) because
+Playwright fixtures weren't loaded into the session. Running the
+combined suite — even with the split-run convention applied — still
+crashed because the second pytest-asyncio runner is invoked when
+auto-mode collides with the explicit anyio marker.
+
+**Rule:** in the `backend/tests/` tree, async tests get auto-mode
+pytest-asyncio for free. Don't add `pytest.mark.anyio` /
+`pytestmark = pytest.mark.anyio`. The pre-existing
+`tests/test_core/test_request_id.py` carries the marker historically
+and works because of small fixture surface, but new files should
+follow the canonical pattern. (A CP-equivalent cleanup of
+`test_request_id.py` is out of scope until the next test-touch.)
+
 ## Cross-references
 
 - `backend/tests/playwright/conftest.py` — function-scoped engine
