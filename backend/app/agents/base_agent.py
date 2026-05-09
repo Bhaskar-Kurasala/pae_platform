@@ -209,9 +209,18 @@ class BaseAgent(ABC):
             self._log.warning("agent.log_action.failed", error=str(exc))
 
     async def run(self, state: AgentState) -> AgentState:
-        """Full pipeline: execute → evaluate → log_action."""
+        """Full pipeline: execute → evaluate → log_action.
+
+        D19.1 CP1.2c — ``agent_id`` is bound to structlog contextvars
+        at the canonical run() entry so every log line emitted *during*
+        the agent invocation carries it, including lines from non-
+        agent code paths the agent transitively calls (DB layer, tool
+        functions, LLM providers). Unbound in the finally block so a
+        subsequent agent in the same request gets a clean slate.
+        """
         start_ms = int(time.monotonic() * 1000)
         status = "completed"
+        structlog.contextvars.bind_contextvars(agent_id=self.name)
         try:
             self._log.info("agent.run.start", task_length=len(state.task))
             state = await self.execute(state)
@@ -226,4 +235,5 @@ class BaseAgent(ABC):
         finally:
             duration_ms = int(time.monotonic() * 1000) - start_ms
             await self.log_action(state, status=status, duration_ms=duration_ms)
+            structlog.contextvars.unbind_contextvars("agent_id")
         return state

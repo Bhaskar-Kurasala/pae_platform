@@ -1,12 +1,20 @@
 from celery import Celery
 from celery.schedules import crontab
 
+from app.core.celery_logging import CorrelatedTask  # D19.1 CP1.3
 from app.core.config import settings
 
 celery_app = Celery(
     "platform",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
+    # D19.1 CP1.3 — every task subclasses CorrelatedTask so apply_async
+    # auto-injects structlog correlation IDs (request_id, trace_id,
+    # user_id, agent_id, session_id, cohort_id) into the task headers.
+    # task_prerun / task_postrun signal handlers in celery_logging.py
+    # restore the context inside the worker. Both .delay() and
+    # .apply_async() ride this without any call-site changes.
+    task_cls=CorrelatedTask,
     include=[
         "app.tasks",
         "app.tasks.growth_snapshots",

@@ -84,6 +84,10 @@ async def get_current_user(
     from app.core.sentry import set_user_context
 
     set_user_context(str(user.id))
+    # D19.1 CP1.2a — bind user_id into structlog contextvars so every
+    # log line emitted by the rest of the request carries it. Routes
+    # that don't depend on get_current_user correctly never bind it.
+    structlog.contextvars.bind_contextvars(user_id=str(user.id))
     return user
 
 
@@ -97,4 +101,5 @@ async def get_current_user_optional(
     from app.core.sentry import set_user_context
 
     set_user_context(str(user.id))
+    structlog.contextvars.bind_contextvars(user_id=str(user.id))
     return user
