@@ -1,0 +1,56 @@
+{
+  "id": "db-health",
+  "title": "Database Health",
+  "owner": "engineering",
+  "description": "Pool utilization and query latency. Incident-shape window — DB issues cascade fast.",
+  "runbook": "../runbooks.md#db-health",
+  "time_range_default": "1h",
+  "panels": [
+    {
+      "id": "pool-connections-in-use",
+      "title": "Pool connections in use",
+      "panel_type": "gauge",
+      "description": "Currently checked-out asyncpg connections. Approaching db_pool_size + db_max_overflow = saturation.",
+      "query": {
+        "metric": "aicareeros_db_pool_connections_in_use",
+        "aggregation": "avg"
+      }
+    },
+    {
+      "id": "query-rate-by-type",
+      "title": "Query rate by type (queries/sec)",
+      "panel_type": "counter_rate",
+      "description": "select / insert / update / delete / other. Sudden imbalance signals a specific code path regressing.",
+      "query": {
+        "metric": "aicareeros_db_query_duration_seconds_count",
+        "aggregation": "rate",
+        "by": ["query_type"]
+      }
+    },
+    {
+      "id": "p95-query-latency-by-type",
+      "title": "p95 query latency by type (seconds)",
+      "panel_type": "histogram_quantile",
+      "description": "p95 latency per query class. SELECT p95 > 100ms means an index is missing or a join is exploding.",
+      "query": {
+        "metric": "aicareeros_db_query_duration_seconds",
+        "aggregation": "quantile",
+        "quantile": 0.95,
+        "by": ["query_type"]
+      }
+    },
+    {
+      "id": "slow-query-count",
+      "title": "Slow queries (>500ms) per minute",
+      "panel_type": "counter_rate",
+      "description": "Rate of queries crossing SLOW_QUERY_THRESHOLD_MS (500ms; see app/core/database.py). Each slow query also fires a structlog warning with the SQL preview — correlate via trace_id.",
+      "query": {
+        "metric": "aicareeros_db_query_duration_seconds_bucket",
+        "aggregation": "rate",
+        "rate_window": "1m",
+        "filter": {"le": "0.5"},
+        "transform": "above_threshold"
+      }
+    }
+  ]
+}

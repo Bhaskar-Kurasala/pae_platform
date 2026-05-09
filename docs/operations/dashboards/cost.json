@@ -1,0 +1,73 @@
+{
+  "id": "cost",
+  "title": "Cost (INR)",
+  "owner": "founder + ops",
+  "description": "LLM cost burn — per-agent rate, cumulative spend, attribution. Trend-shape window for budget alignment.",
+  "runbook": "../runbooks.md#cost",
+  "time_range_default": "24h",
+  "panels": [
+    {
+      "id": "cost-rate-by-agent",
+      "title": "Cost (INR/hour) by agent",
+      "panel_type": "counter_rate",
+      "description": "Hourly cost-burn rate per agent. Sustained outliers signal prompt regressions or specialist runaway.",
+      "query": {
+        "metric": "aicareeros_agent_cost_inr",
+        "aggregation": "rate",
+        "rate_window": "1h",
+        "by": ["agent_id"]
+      }
+    },
+    {
+      "id": "cumulative-cost-today",
+      "title": "Cumulative cost today (INR)",
+      "panel_type": "counter_rate",
+      "description": "Sum of cost_inr increments since 00:00 UTC. Compare against the daily ceiling (Pass 3f §D).",
+      "query": {
+        "metric": "aicareeros_agent_cost_inr",
+        "aggregation": "sum",
+        "rate_window": "24h"
+      }
+    },
+    {
+      "id": "cumulative-cost-week",
+      "title": "Cumulative cost this week (INR)",
+      "panel_type": "counter_rate",
+      "description": "Sum of cost_inr over the rolling 7-day window. Founder-track metric for cohort-1 unit economics.",
+      "query": {
+        "metric": "aicareeros_agent_cost_inr",
+        "aggregation": "sum",
+        "rate_window": "7d"
+      }
+    },
+    {
+      "id": "cumulative-cost-month",
+      "title": "Cumulative cost this month (INR)",
+      "panel_type": "counter_rate",
+      "description": "Rolling 30-day cost. Ops-track metric for billing reconciliation.",
+      "query": {
+        "metric": "aicareeros_agent_cost_inr",
+        "aggregation": "sum",
+        "rate_window": "30d"
+      }
+    },
+    {
+      "id": "top-cost-agents-today",
+      "title": "Top 5 cost-burning agents today",
+      "panel_type": "table",
+      "description": "Sorted table of agents by today's cost. Surfaces which specialist is consuming budget.",
+      "query": {
+        "metric": "aicareeros_agent_cost_inr",
+        "aggregation": "sum",
+        "rate_window": "24h",
+        "by": ["agent_id"],
+        "sort": "desc",
+        "limit": 5
+      }
+    }
+  ],
+  "notes": [
+    "Per-user / per-cohort cost attribution lives in logs (CP1 contextvars carry user_id; trace_id correlates the cost-burn span to the originating request) and in agent_actions / mv_student_daily_cost rows. Metric labels stay agent-scoped per D-C cardinality discipline.",
+    "Cohort-1 launch cost ceiling: ₹50/student/day per Pass 3f §D.1. mv_student_daily_cost enforces; this dashboard observes."
+  ]
+}

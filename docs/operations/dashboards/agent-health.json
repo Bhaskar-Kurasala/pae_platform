@@ -1,0 +1,106 @@
+{
+  "id": "agent-health",
+  "title": "Agent Health",
+  "owner": "engineering",
+  "description": "Per-agent invocation rate, error rate, latency percentiles. Incident-shape window for routing / specialist regressions.",
+  "runbook": "../runbooks.md#agent-health",
+  "time_range_default": "1h",
+  "panels": [
+    {
+      "id": "invocations-by-agent",
+      "title": "Invocations / sec by agent",
+      "panel_type": "counter_rate",
+      "description": "Per-agent invocation rate. Sum across success / error / timeout outcomes.",
+      "query": {
+        "metric": "aicareeros_agent_invocations",
+        "aggregation": "rate",
+        "by": ["agent_id"]
+      }
+    },
+    {
+      "id": "error-rate-by-agent",
+      "title": "Error rate by agent",
+      "panel_type": "counter_rate",
+      "description": "Error invocations / total invocations per agent. Outcome label = 'error'.",
+      "query": {
+        "metric": "aicareeros_agent_invocations",
+        "aggregation": "rate",
+        "by": ["agent_id"],
+        "filter": {"outcome": "error"}
+      }
+    },
+    {
+      "id": "p50-latency-by-agent",
+      "title": "p50 invocation latency by agent (seconds)",
+      "panel_type": "histogram_quantile",
+      "description": "Median agent invocation duration.",
+      "query": {
+        "metric": "aicareeros_agent_invocation_duration_seconds",
+        "aggregation": "quantile",
+        "quantile": 0.5,
+        "by": ["agent_id"]
+      }
+    },
+    {
+      "id": "p95-latency-by-agent",
+      "title": "p95 invocation latency by agent (seconds)",
+      "panel_type": "histogram_quantile",
+      "description": "p95 invocation duration. Alert source.",
+      "query": {
+        "metric": "aicareeros_agent_invocation_duration_seconds",
+        "aggregation": "quantile",
+        "quantile": 0.95,
+        "by": ["agent_id"]
+      }
+    },
+    {
+      "id": "p99-latency-by-agent",
+      "title": "p99 invocation latency by agent (seconds)",
+      "panel_type": "histogram_quantile",
+      "description": "p99 invocation duration. Watch for tail-degradation distinct from p95.",
+      "query": {
+        "metric": "aicareeros_agent_invocation_duration_seconds",
+        "aggregation": "quantile",
+        "quantile": 0.99,
+        "by": ["agent_id"]
+      }
+    },
+    {
+      "id": "top-10-slowest-agents",
+      "title": "Top 10 slowest agents (p95)",
+      "panel_type": "table",
+      "description": "Sorted table of agents by p95 latency. Surfaces regressions across the agent population at a glance.",
+      "query": {
+        "metric": "aicareeros_agent_invocation_duration_seconds",
+        "aggregation": "quantile",
+        "quantile": 0.95,
+        "by": ["agent_id"],
+        "sort": "desc",
+        "limit": 10
+      }
+    },
+    {
+      "id": "eval-score-distribution-by-agent",
+      "title": "Eval score distribution by agent",
+      "panel_type": "histogram_quantile",
+      "description": "Critic eval score histogram. Dropping median signals quality regression.",
+      "query": {
+        "metric": "aicareeros_agent_eval_score",
+        "aggregation": "quantile",
+        "quantile": 0.5,
+        "by": ["agent_id"]
+      }
+    },
+    {
+      "id": "inter-agent-call-depth",
+      "title": "Inter-agent call depth (max observed)",
+      "panel_type": "histogram_quantile",
+      "description": "Max chain depth per outermost execute(). Persistent depth >5 indicates runaway fan-out.",
+      "query": {
+        "metric": "aicareeros_agent_inter_agent_call_depth",
+        "aggregation": "quantile",
+        "quantile": 0.99
+      }
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "id": "api-health",
+  "title": "API Health",
+  "owner": "engineering",
+  "description": "Request rate, error rate, and latency percentiles by endpoint. Incident-shape: short window, granular detail.",
+  "runbook": "../runbooks.md#api-health",
+  "time_range_default": "1h",
+  "panels": [
+    {
+      "id": "request-rate-by-endpoint",
+      "title": "Request rate by endpoint (req/s)",
+      "panel_type": "counter_rate",
+      "description": "Per-endpoint request rate, summed across method + status_code.",
+      "query": {
+        "metric": "aicareeros_api_requests",
+        "aggregation": "rate",
+        "by": ["endpoint"]
+      }
+    },
+    {
+      "id": "error-rate-by-endpoint",
+      "title": "5xx error rate by endpoint (req/s)",
+      "panel_type": "counter_rate",
+      "description": "5xx rate per endpoint. Filter status_code =~ '5..'. Primary on-call signal.",
+      "query": {
+        "metric": "aicareeros_api_requests",
+        "aggregation": "rate",
+        "by": ["endpoint"],
+        "filter": {"status_code": "5.."}
+      }
+    },
+    {
+      "id": "p50-latency-by-endpoint",
+      "title": "p50 request latency by endpoint (seconds)",
+      "panel_type": "histogram_quantile",
+      "description": "Median latency per endpoint. Drift here precedes p95/p99 drift by hours.",
+      "query": {
+        "metric": "aicareeros_api_request_duration_seconds",
+        "aggregation": "quantile",
+        "quantile": 0.5,
+        "by": ["endpoint"]
+      }
+    },
+    {
+      "id": "p95-latency-by-endpoint",
+      "title": "p95 request latency by endpoint (seconds)",
+      "panel_type": "histogram_quantile",
+      "description": "p95 latency. Steady-state alert source.",
+      "query": {
+        "metric": "aicareeros_api_request_duration_seconds",
+        "aggregation": "quantile",
+        "quantile": 0.95,
+        "by": ["endpoint"]
+      }
+    },
+    {
+      "id": "p99-latency-by-endpoint",
+      "title": "p99 request latency by endpoint (seconds)",
+      "panel_type": "histogram_quantile",
+      "description": "p99 latency. Tail-sampling trigger source for the tracing collector (D19.1 CP3 D-E).",
+      "query": {
+        "metric": "aicareeros_api_request_duration_seconds",
+        "aggregation": "quantile",
+        "quantile": 0.99,
+        "by": ["endpoint"]
+      }
+    }
+  ]
+}

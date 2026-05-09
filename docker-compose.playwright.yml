@@ -126,6 +126,14 @@ services:
       PYTHONPATH: "/app"
     working_dir: /app
     volumes:
+      # D19.1 CP4 — operations/dashboards JSON + runbooks.md live at
+      # the repo root (not in backend/) so dashboards-as-code is
+      # version-controlled alongside the rest of docs/. The runner
+      # image bakes /app/ from the ./backend build context only, so
+      # this read-only bind mounts the canonical dashboard location
+      # into a parallel path the test_d19_cp4_dashboards.py test can
+      # find via parents[3] / docs / operations.
+      - ./docs:/docs:ro
       # Mount ONLY the tests subtree. Mounting all of ./backend
       # shadowed the runner image's baked /app/.venv with the
       # host's backend/.venv (built on Windows during host-side uv
