@@ -3,6 +3,14 @@ from celery.schedules import crontab
 
 from app.core.celery_logging import CorrelatedTask  # D19.1 CP1.3
 from app.core.config import settings
+from app.core.tracing import init_tracing, instrument_celery  # D19.1 CP3
+
+# D19.1 CP3 — init the global tracer in the worker process before
+# CeleryInstrumentor attaches; instrumentation grabs the tracer at
+# instrument-time, so order matters. init_tracing is idempotent and
+# no-op-safe when OTEL_EXPORTER_OTLP_ENDPOINT isn't set.
+init_tracing()
+instrument_celery()
 
 celery_app = Celery(
     "platform",

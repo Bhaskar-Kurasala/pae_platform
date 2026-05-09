@@ -41,6 +41,22 @@ dependencies = [
     "pyyaml>=6.0.3",
     "posthog>=7.13.1",
     "prometheus-client>=0.21.0",
+    # D19.1 CP3 — OpenTelemetry tracing substrate. opentelemetry-api +
+    # -sdk for the in-process tracer; -exporter-otlp-proto-http for the
+    # default exporter (HTTP transport keeps egress simple — no gRPC
+    # cert dance). Auto-instrumentations cover FastAPI / SQLAlchemy /
+    # Redis / httpx / requests / Celery without custom shim work; OTel's
+    # community packages have stabilized over the past year and follow
+    # the OTel-spec versioning.
+    "opentelemetry-api>=1.30.0",
+    "opentelemetry-sdk>=1.30.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.30.0",
+    "opentelemetry-instrumentation-fastapi>=0.51b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.51b0",
+    "opentelemetry-instrumentation-redis>=0.51b0",
+    "opentelemetry-instrumentation-httpx>=0.51b0",
+    "opentelemetry-instrumentation-requests>=0.51b0",
+    "opentelemetry-instrumentation-celery>=0.51b0",
     "sentry-sdk[fastapi]>=2.0.0",
     # D9 / Pass 3g — safety primitive. Presidio detects PII (input + output);
     # spaCy provides the en_core_web_lg NER model Presidio's analyzer uses.

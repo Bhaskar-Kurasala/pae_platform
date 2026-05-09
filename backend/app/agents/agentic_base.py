@@ -291,6 +291,40 @@ class AgenticBaseAgent(Generic[_InputT]):
         Per-agent token tracking is opt-in (agents that don't call
         _track_llm_usage get cost_inr=0 in their audit row, which
         is honest — we don't have to know).
+
+        D19.1 CP3 — wrapped in a span per agent invocation. Span
+        attributes: agent_id, model, outcome (set in
+        _finalize_action_log alongside cost_inr). Privacy linter
+        rejects any attempt to set prompt/response/PII keys; see
+        app/core/tracing.py.
+        """
+        # D19.1 CP3 — span per agent invocation. We scope the entire
+        # execute() body so any DB / HTTP / LLM call inside this
+        # method becomes a child span automatically via the OTel
+        # auto-instrumentations. The span context is bound to the
+        # current asyncio task so child execution paths inherit it.
+        from app.core.tracing import get_tracer, set_safe_span_attribute
+
+        tracer = get_tracer()
+        with tracer.start_as_current_span(f"agent.{self.name}") as _agent_span:
+            set_safe_span_attribute(_agent_span, "agent_id", self.name)
+            set_safe_span_attribute(
+                _agent_span, "agent.model", str(self.model_name)
+            )
+            return await self._execute_body(
+                input, ctx, span=_agent_span
+            )
+
+    async def _execute_body(
+        self,
+        input: _InputT | dict[str, Any],
+        ctx: AgentContext,
+        span: Any,
+    ) -> AgentResult:
+        """Inner body of execute() — extracted so the surrounding
+        ``with tracer.start_as_current_span(...)`` block in execute()
+        can wrap it without indenting the entire 130-line method
+        body. Identical semantics to the pre-CP3 execute() body.
         """
         started_at = time.perf_counter()
         # Initialize the per-call LLM usage accumulator. Agents call
@@ -689,6 +723,41 @@ class AgenticBaseAgent(Generic[_InputT]):
                 AGENT_COST_INR_TOTAL.labels(agent_id=self.name).inc(
                     cost_inr_float
                 )
+
+            # D19.1 CP3 — annotate the active span (the agent.<name>
+            # span set up in execute()) with non-PII observability
+            # attributes. Passes through the privacy linter; cost_inr
+            # + token counts + outcome are bounded-shape values.
+            try:
+                from opentelemetry import trace as _trace
+
+                from app.core.tracing import set_safe_span_attribute
+
+                _active = _trace.get_current_span()
+                if _active is not None and _active.is_recording():
+                    set_safe_span_attribute(
+                        _active, "agent.tokens_in", int(total_input)
+                    )
+                    set_safe_span_attribute(
+                        _active, "agent.tokens_out", int(total_output)
+                    )
+                    set_safe_span_attribute(
+                        _active, "agent.tokens_total", int(total_tokens)
+                    )
+                    set_safe_span_attribute(
+                        _active, "agent.outcome", status
+                    )
+                    if cost_inr_float > 0:
+                        set_safe_span_attribute(
+                            _active, "agent.cost_inr", float(cost_inr_float)
+                        )
+                    if resolved_model:
+                        set_safe_span_attribute(
+                            _active, "agent.model_resolved", resolved_model
+                        )
+            except Exception:  # noqa: BLE001
+                # Tracing must never break the audit path.
+                pass
 
             duration_ms = int((time.perf_counter() - started_at) * 1000)
 

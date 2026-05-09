@@ -237,34 +237,59 @@ class BaseAgent(ABC):
             AGENT_INVOCATIONS,
         )
 
+        # D19.1 CP3 — manual span per agent invocation. span attributes
+        # are bounded-cardinality + non-PII per the privacy denylist;
+        # token counts + cost_inr are layered in by log_action below
+        # via metadata.
+        from app.core.tracing import get_tracer, set_safe_span_attribute
+
+        tracer = get_tracer()
         start_monotonic = time.monotonic()
         status = "completed"
         outcome = "success"
         structlog.contextvars.bind_contextvars(agent_id=self.name)
-        try:
-            self._log.info("agent.run.start", task_length=len(state.task))
-            state = await self.execute(state)
-            state = await self.evaluate(state)
-            state = state.model_copy(update={"agent_name": self.name})
-            self._log.info("agent.run.complete", score=state.evaluation_score)
-        except Exception as exc:
-            status = "error"
-            outcome = "error"
-            state = state.model_copy(update={"error": str(exc), "agent_name": self.name})
-            self._log.exception("agent.run.error", error=str(exc))
-            raise
-        finally:
-            duration_seconds = time.monotonic() - start_monotonic
-            duration_ms = int(duration_seconds * 1000)
-            # D-D canonical agent metrics. agent_id is bounded
-            # cardinality (~20 registered agents); outcome is a
-            # 3-value enum {success, error, timeout}.
-            AGENT_INVOCATIONS.labels(
-                agent_id=self.name, outcome=outcome
-            ).inc()
-            AGENT_INVOCATION_DURATION_SECONDS.labels(
-                agent_id=self.name
-            ).observe(duration_seconds)
-            await self.log_action(state, status=status, duration_ms=duration_ms)
-            structlog.contextvars.unbind_contextvars("agent_id")
+        with tracer.start_as_current_span(f"agent.{self.name}") as span:
+            set_safe_span_attribute(span, "agent_id", self.name)
+            set_safe_span_attribute(span, "agent.model", self.model)
+            try:
+                self._log.info("agent.run.start", task_length=len(state.task))
+                state = await self.execute(state)
+                state = await self.evaluate(state)
+                state = state.model_copy(update={"agent_name": self.name})
+                self._log.info("agent.run.complete", score=state.evaluation_score)
+            except Exception as exc:
+                status = "error"
+                outcome = "error"
+                state = state.model_copy(
+                    update={"error": str(exc), "agent_name": self.name}
+                )
+                self._log.exception("agent.run.error", error=str(exc))
+                span.record_exception(exc)
+                raise
+            finally:
+                duration_seconds = time.monotonic() - start_monotonic
+                duration_ms = int(duration_seconds * 1000)
+                set_safe_span_attribute(span, "agent.outcome", outcome)
+                set_safe_span_attribute(span, "agent.duration_ms", duration_ms)
+                # Token counts (when present in state.metadata) carry
+                # no PII and are critical for cost-per-trace queries
+                # in CP4 dashboards.
+                tokens_in = state.metadata.get("input_tokens")
+                tokens_out = state.metadata.get("output_tokens")
+                if tokens_in is not None:
+                    set_safe_span_attribute(
+                        span, "agent.tokens_in", int(tokens_in)
+                    )
+                if tokens_out is not None:
+                    set_safe_span_attribute(
+                        span, "agent.tokens_out", int(tokens_out)
+                    )
+                AGENT_INVOCATIONS.labels(
+                    agent_id=self.name, outcome=outcome
+                ).inc()
+                AGENT_INVOCATION_DURATION_SECONDS.labels(
+                    agent_id=self.name
+                ).observe(duration_seconds)
+                await self.log_action(state, status=status, duration_ms=duration_ms)
+                structlog.contextvars.unbind_contextvars("agent_id")
         return state

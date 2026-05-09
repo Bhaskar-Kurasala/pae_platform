@@ -16,6 +16,7 @@ from app.core.metrics_middleware import MetricsMiddleware
 from app.core.rate_limit import limiter
 from app.core.request_id import RequestIDMiddleware
 from app.core.sentry import init_sentry
+from app.core.tracing import init_tracing, instrument_auto
 
 configure_logging(level="DEBUG" if settings.debug else "INFO")
 
@@ -23,6 +24,12 @@ configure_logging(level="DEBUG" if settings.debug else "INFO")
 # before any imports that may raise) so a startup crash still gets
 # reported. No-op when SENTRY_DSN is unset.
 init_sentry()
+
+# D19.1 CP3 — initialize OpenTelemetry tracer provider before
+# auto-instrumentations run (instrumentations grab the global tracer
+# at attach time). No-op safe: when OTEL_EXPORTER_OTLP_ENDPOINT is
+# unset, the tracer is configured but spans evaporate.
+init_tracing()
 
 log = structlog.get_logger()
 
@@ -125,6 +132,12 @@ def create_app() -> FastAPI:
         debug=settings.debug,
         lifespan=lifespan,
     )
+
+    # D19.1 CP3 — auto-instrument FastAPI + DB/Redis/HTTP clients.
+    # Mounted before the explicit middleware stack so OTel can wrap
+    # the ASGI app cleanly. Safe-no-op when the instrumentation
+    # packages aren't importable for some reason.
+    instrument_auto(app=app)
 
     # Request ID — must be outermost so every log line gets the correlation ID
     app.add_middleware(RequestIDMiddleware)
