@@ -12,9 +12,14 @@ Four tests cover the four scope items in the CP1 closure deliverables:
      as a Sentry breadcrumb carrying the correlation IDs without
      leaking redacted fields.
 
-We use anyio (asyncio backend) per the rest of the suite. The Celery
-test sets task_always_eager=True so the worker runs in-process — no
-broker / worker required.
+The project's pyproject.toml sets ``asyncio_mode = "auto"`` so
+pytest-asyncio drives every async test function automatically. We
+deliberately do NOT add ``pytestmark = pytest.mark.anyio`` here:
+mixing pytest-asyncio auto-mode with an anyio mark causes both
+plugins to try to run the same coroutine, producing
+``Runner.run() cannot be called from a running event loop``
+when the suite is run alongside Playwright fixtures. Sticking
+with auto-mode pytest-asyncio is the canonical pattern.
 """
 
 from __future__ import annotations
@@ -22,7 +27,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-import pytest
+import pytest  # noqa: F401  (kept for future fixture/mark use)
 import structlog
 from fastapi import APIRouter, FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -33,13 +38,11 @@ from app.core.celery_logging import (
     _unbind_task_context,
 )
 from app.core.request_id import (
-    REQUEST_ID_HEADER,
+    REQUEST_ID_HEADER,  # noqa: F401  (kept for future header-contract tests)
     RequestIDMiddleware,
     _parse_traceparent,
     _trace_id_from_uuid,
 )
-
-pytestmark = pytest.mark.anyio
 
 
 # ---------------------------------------------------------------------------
