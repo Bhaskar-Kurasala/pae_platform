@@ -1,4 +1,67 @@
-# Supervisor `constructed_context.user_message` over-length flake
+# Real-LLM batch-flake cluster (CP1F-shape + supervisor-malformed-JSON)
+
+## 2026-05-09 update — CP3 closure adds two more flakes; rename advised
+
+The original surfacing was the supervisor over-length flake (50%
+isolation rate). D19.1 CP3 closure-time verification surfaced two
+additional transient flakes that share a family:
+
+  * `test_cp1_journey_e_career_coach.py::test_career_coach_responds_with_role_aware_guidance`
+    — failed in CP3 Phase B sweep; 3/3 isolation runs **passed**.
+    Failure mode in suite: supervisor LLM emitted malformed JSON
+    (`JSONDecodeError: Expecting ',' delimiter: line 1 column 1054`),
+    orchestrator returned blocked decline with empty response.
+
+  * `test_cp1_journey_f_resume_reviewer.py::test_resume_reviewer_records_cost_inr_for_real_llm_call`
+    — failed in CP3 Phase B sweep; 3/3 isolation runs **passed**.
+    Failure mode in suite: no `agent_actions` row for `resume_reviewer`,
+    suggesting the dispatch chain didn't reach the specialist (same
+    family as the supervisor over-length pattern — supervisor's
+    output bypassed validation; specialist never invoked).
+
+Combined evidence across CP2 + CP3 verification runs:
+
+| Test | Pre-CP1 | CP2 sweep | CP2 isolation | CP3 sweep | CP3 isolation |
+|------|---------|-----------|---------------|-----------|---------------|
+| career_coach_responds_with_role_aware_guidance | pass | pass | — | **fail** | 3/3 pass |
+| resume_reviewer_records_cost_inr_for_real_llm_call | pass | pass | — | **fail** | 3/3 pass |
+| career_coach_writes_agent_actions_with_full_cost_tracking | pass | **fail** | 2/4 pass | pass | — |
+
+These are **batch-flakes under suite load**, not isolation flakes.
+Different from the original supervisor over-length flake which
+failed ~50% in isolation. Cumulative observation: D19.1's
+substrate work (CP1 contextvars + CP2 metric emission + CP3
+OTel auto-instrumentation) adds per-call latency that occasionally
+pushes a real-LLM journey path over a retry / timeout threshold
+under parallel-ish suite execution.
+
+**Suggested rename when this followup is acted on:**
+`real-llm-batch-flake-cluster.md`. The supervisor over-length
+mechanism (Section "Mechanism" below) is one instance; the
+malformed-JSON / dispatch-skip patterns above are sibling
+instances. All three trace back to non-deterministic supervisor
+LLM output bypassing the validation that's supposed to keep
+specialist inputs well-formed.
+
+## Disposition update
+
+Original recommendation: A+B+C (prompt tightening + truncation +
+cost-tracking gap fix), ~₹2-4 cost.
+
+Updated recommendation: same + add a **suite-mode OTel sampler
+override**. Set `OTEL_TRACES_SAMPLER_ARG=0.0` in the
+`docker-compose.playwright.yml` overlay so spans are created but
+immediately unsampled, removing per-call OTel overhead in the
+test environment. Production keeps the 1% baseline. Estimated
+~₹0 — one-line env addition + a single Phase B re-run to confirm
+flake rate drops.
+
+This is incremental to A+B+C, not a substitute. The underlying
+supervisor non-determinism is still a real pre-launch concern.
+
+---
+
+# (original) Supervisor `constructed_context.user_message` over-length flake
 
 **Status:** Open. Real-LLM flake pre-existing CP2; surfaced
 2026-05-09 during D19.1 CP2 closure-time test verification. Affects
