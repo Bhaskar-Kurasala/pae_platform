@@ -680,6 +680,15 @@ class AgenticBaseAgent(Generic[_InputT]):
                         model=resolved_model,
                         error=str(exc),
                     )
+            # D19.1 CP2 — D-D canonical agent cost metric (mirrors the
+            # legacy BaseAgent.log_action increment so both v1 and
+            # v2/agentic paths populate the same counter).
+            if cost_inr_float > 0:
+                from app.core.metrics import AGENT_COST_INR_TOTAL
+
+                AGENT_COST_INR_TOTAL.labels(agent_id=self.name).inc(
+                    cost_inr_float
+                )
 
             duration_ms = int((time.perf_counter() - started_at) * 1000)
 

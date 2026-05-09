@@ -12,6 +12,7 @@ from app.api._deprecated import DeprecationHeaderMiddleware
 from app.core.config import settings
 from app.core.exception_handler import unhandled_exception_handler
 from app.core.logging import configure_logging
+from app.core.metrics_middleware import MetricsMiddleware
 from app.core.rate_limit import limiter
 from app.core.request_id import RequestIDMiddleware
 from app.core.sentry import init_sentry
@@ -128,6 +129,12 @@ def create_app() -> FastAPI:
     # Request ID — must be outermost so every log line gets the correlation ID
     app.add_middleware(RequestIDMiddleware)
 
+    # D19.1 CP2 — Prometheus metrics middleware. Mounted INSIDE
+    # RequestIDMiddleware (so logs from metric emission still carry
+    # the correlation IDs) but OUTSIDE rate limiting / CORS / route
+    # handlers so it sees every request, including 429/401 responses.
+    app.add_middleware(MetricsMiddleware)
+
     # PR2/A4.1 — Deprecation/Sunset headers on routes marked with
     # `@deprecated`. Runs after the route is matched so it can read the
     # endpoint's metadata; sits inside RequestIDMiddleware so the request
@@ -212,6 +219,15 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.health import router as health_router
 
     app.include_router(health_router)
+
+    # D19.1 CP2 — Prometheus /metrics scrape endpoint at root level.
+    # Auth-gated by METRICS_USERNAME / METRICS_PASSWORD env vars; see
+    # app/api/v1/routes/metrics.py. Skipped from MetricsMiddleware's
+    # observation by template ('/metrics') so the scrape itself
+    # doesn't pollute the request-rate metric.
+    from app.api.v1.routes.metrics import router as metrics_router
+
+    app.include_router(metrics_router)
 
     # API v1
     from app.api.v1.routes.admin import router as admin_router

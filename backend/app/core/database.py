@@ -110,7 +110,21 @@ def _attach_slow_query_logger(sync_engine: Any) -> None:
         start = getattr(context, "_query_start_perf", None)
         if start is None:
             return  # paranoia: someone set up the engine without our listener
-        duration_ms = (perf_counter() - start) * 1000.0
+        duration_seconds = perf_counter() - start
+        duration_ms = duration_seconds * 1000.0
+
+        # D19.1 CP2 — D-D canonical DB metric. query_type is derived
+        # from the leading SQL keyword and bucketed into a tiny
+        # bounded enum (select / insert / update / delete / other).
+        try:
+            from app.core.metrics import DB_QUERY_DURATION_SECONDS
+
+            DB_QUERY_DURATION_SECONDS.labels(
+                query_type=_classify_sql(statement)
+            ).observe(duration_seconds)
+        except Exception:  # noqa: BLE001
+            pass
+
         if duration_ms < SLOW_QUERY_THRESHOLD_MS:
             return
         log.warning(
@@ -123,11 +137,61 @@ def _attach_slow_query_logger(sync_engine: Any) -> None:
         )
 
 
+def _classify_sql(statement: str) -> str:
+    """Map a SQL statement to a small bounded query-type enum.
+
+    Cardinality discipline (D-C): the metric label space is fixed
+    at the 5 values returned here, regardless of SQL volume. We
+    classify by the leading non-whitespace token; ``WITH ... SELECT``
+    and similarly-shaped CTEs are bucketed under their actual
+    leading keyword (``with``) for honesty.
+    """
+    if not statement:
+        return "other"
+    head = statement.lstrip()[:8].lower()
+    if head.startswith("select"):
+        return "select"
+    if head.startswith("insert"):
+        return "insert"
+    if head.startswith("update"):
+        return "update"
+    if head.startswith("delete"):
+        return "delete"
+    return "other"
+
+
+def _attach_pool_metrics(sync_engine: Any) -> None:
+    """Update aicareeros_db_pool_connections_in_use on every checkout
+    / checkin. The gauge tracks "currently checked out" by reading
+    SQLAlchemy's pool counter directly — robust to async / thread
+    contexts because the underlying pool is sync.
+    """
+
+    def _refresh(*_args: Any, **_kwargs: Any) -> None:
+        try:
+            from app.core.metrics import DB_POOL_CONNECTIONS_IN_USE
+
+            pool = sync_engine.pool
+            # checkedout() returns the count of outstanding
+            # connections; available on QueuePool + StaticPool.
+            checked_out = pool.checkedout() if hasattr(pool, "checkedout") else 0
+            DB_POOL_CONNECTIONS_IN_USE.set(int(checked_out))
+        except Exception:  # noqa: BLE001
+            pass
+
+    event.listen(sync_engine, "checkout", _refresh)
+    event.listen(sync_engine, "checkin", _refresh)
+
+
 # Wire the slow-query logger to the *sync* facet of the async engine —
 # SQLAlchemy 2.0 dispatches cursor events on the sync engine for both
 # sync and async usage. Idempotent: SQLAlchemy dedupes identical
 # listeners, but importing this module once at startup is the contract.
 _attach_slow_query_logger(engine.sync_engine)
+
+# D19.1 CP2 — pool gauge instrumentation. Same listener convention
+# as the slow-query logger; piggybacks on SQLAlchemy's pool events.
+_attach_pool_metrics(engine.sync_engine)
 
 
 AsyncSessionLocal = async_sessionmaker(

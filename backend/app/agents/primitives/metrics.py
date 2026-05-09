@@ -1,25 +1,26 @@
-"""Lightweight metrics shim for the Agentic OS primitives.
+"""Agent-primitives metrics shim — D19.1 CP2 update.
 
-Designed so call sites can be instrumented today without adding the
-`prometheus_client` dependency. When you're ready to flip to real
-Prometheus, replace the `_Counter` / `_Histogram` no-op classes here
-with thin wrappers around `prometheus_client.Counter` / `Histogram`
-and add the `/metrics` endpoint — call sites do not change.
+Historically this module was a pure no-op shim authored to give the
+agent primitives stable instrumentation symbols *before* the
+prometheus_client dependency landed. CP2 replaces those no-ops with
+real metrics registered against the canonical ``CollectorRegistry`` in
+``app/core/metrics.py``.
 
-Exposed symbols (stable contract):
+To keep the 18 existing call sites stable across the migration, this
+module re-exports the legacy symbol names and provides two thin
+millisecond → second adapters so call sites that previously called
+``observe(duration_ms)`` keep working without edit. The Prometheus
+metric they actually populate is the new ``_seconds``-suffixed
+histogram (D-D convention), so dashboards and queries see the right
+unit even though the call-site contract is unchanged.
 
-    metrics.AGENT_EXECUTIONS_TOTAL.labels(agent="…").inc()
-    metrics.AGENT_EVAL_SCORE_HISTOGRAM.labels(agent="…").observe(0.82)
-    metrics.TOOL_CALL_DURATION_MS.labels(tool="…").observe(123)
-    metrics.MEMORY_RECALL_HITS.labels(mode="…").inc(n)
-    metrics.MEMORY_RECALL_DURATION_MS.labels(mode="…").observe(45)
-    metrics.MEMORY_WRITES_TOTAL.labels(scope="…").inc()
-    metrics.INTER_AGENT_CALL_DEPTH.observe(3)
+When/why to use which symbol:
 
-All operations are O(1), non-blocking, and currently no-ops. Each shim
-also emits a structlog `metrics.observe` / `metrics.inc` line at debug
-level so you can grep for spikes during dev even before Prometheus
-lands.
+  * Existing primitive code (tools.py, memory.py, evaluation.py,
+    communication.py) — keep importing from here. No edits needed.
+  * New code anywhere — import directly from ``app.core.metrics``.
+    The canonical symbols there have ``_SECONDS`` suffixes and accept
+    seconds directly; no implicit conversion.
 """
 
 from __future__ import annotations
@@ -28,87 +29,55 @@ from typing import Any
 
 import structlog
 
+from app.core import metrics as _metrics
+
 log = structlog.get_logger().bind(layer="metrics")
 
 
-class _Counter:
-    """No-op counter that mimics prometheus_client.Counter API."""
+class _MillisecondHistogramAdapter:
+    """Adapter so legacy callers can keep passing ``duration_ms``.
 
-    def __init__(self, name: str, description: str, labelnames: tuple[str, ...] = ()) -> None:
-        self._name = name
-        self._description = description
-        self._labelnames = labelnames
-        self._labels: dict[str, str] = {}
+    Wraps a real prometheus_client Histogram (or a labels()-bound
+    child). ``observe(duration_ms)`` divides by 1000 before delegating
+    so the underlying metric — named ``..._seconds`` per D-D — gets
+    the unit it claims to carry. ``labels(**kwargs)`` returns a new
+    adapter wrapping the labels()-bound child.
+    """
 
-    def labels(self, **kwargs: str) -> "_Counter":
-        # Returns a new instance carrying the labels — same shape as
-        # prometheus_client. No-op binding so call sites are stable.
-        c = _Counter(self._name, self._description, self._labelnames)
-        c._labels = {**self._labels, **kwargs}
-        return c
+    __slots__ = ("_inner",)
 
-    def inc(self, amount: float = 1.0) -> None:
-        log.debug("metrics.inc", metric=self._name, amount=amount, **self._labels)
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
 
+    def labels(self, **kwargs: str) -> "_MillisecondHistogramAdapter":
+        return _MillisecondHistogramAdapter(self._inner.labels(**kwargs))
 
-class _Histogram:
-    """No-op histogram. observe() drops the value into a debug log line."""
-
-    def __init__(self, name: str, description: str, labelnames: tuple[str, ...] = ()) -> None:
-        self._name = name
-        self._description = description
-        self._labelnames = labelnames
-        self._labels: dict[str, str] = {}
-
-    def labels(self, **kwargs: str) -> "_Histogram":
-        h = _Histogram(self._name, self._description, self._labelnames)
-        h._labels = {**self._labels, **kwargs}
-        return h
-
-    def observe(self, value: float) -> None:
-        log.debug("metrics.observe", metric=self._name, value=value, **self._labels)
+    def observe(self, value_ms: float) -> None:
+        self._inner.observe(value_ms / 1000.0)
 
 
-# ── Stable metric names (don't rename without updating dashboards) ──────
+# ── Re-exports / adapters ──────────────────────────────────────────────
 
-AGENT_EXECUTIONS_TOTAL = _Counter(
-    "agent_executions_total",
-    "Count of agent execute() invocations.",
-    labelnames=("agent", "status"),
+# Counters keep their symbol names; underlying Prometheus name is the
+# new D-D-conformant aicareeros_* variant authored in core/metrics.py.
+MEMORY_RECALL_HITS = _metrics.MEMORY_RECALL_HITS
+MEMORY_WRITES_TOTAL = _metrics.MEMORY_WRITES_TOTAL
+
+# Histograms — keep the _MS symbol name to leave call sites unchanged,
+# but route through the ms→s adapter so the underlying metric value
+# is in seconds. The legacy AGENT_EVAL_SCORE_HISTOGRAM symbol maps to
+# the new AGENT_EVAL_SCORE (no unit conversion; eval scores are 0..1).
+AGENT_EVAL_SCORE_HISTOGRAM = _metrics.AGENT_EVAL_SCORE
+TOOL_CALL_DURATION_MS = _MillisecondHistogramAdapter(
+    _metrics.TOOL_CALL_DURATION_SECONDS
 )
-AGENT_EVAL_SCORE_HISTOGRAM = _Histogram(
-    "agent_eval_score",
-    "Critic score returned for an agent attempt.",
-    labelnames=("agent",),
+MEMORY_RECALL_DURATION_MS = _MillisecondHistogramAdapter(
+    _metrics.MEMORY_RECALL_DURATION_SECONDS
 )
-TOOL_CALL_DURATION_MS = _Histogram(
-    "tool_call_duration_ms",
-    "Time spent inside a single tool execution.",
-    labelnames=("tool", "status"),
-)
-MEMORY_RECALL_HITS = _Counter(
-    "memory_recall_hits",
-    "Number of memory rows returned by recall().",
-    labelnames=("mode",),
-)
-MEMORY_RECALL_DURATION_MS = _Histogram(
-    "memory_recall_duration_ms",
-    "Wall time of a recall() call.",
-    labelnames=("mode",),
-)
-MEMORY_WRITES_TOTAL = _Counter(
-    "memory_writes_total",
-    "Number of memories written to agent_memory.",
-    labelnames=("scope",),
-)
-INTER_AGENT_CALL_DEPTH = _Histogram(
-    "inter_agent_call_depth",
-    "Maximum chain depth observed for an outermost execute().",
-)
+INTER_AGENT_CALL_DEPTH = _metrics.INTER_AGENT_CALL_DEPTH
 
 
 __all__ = [
-    "AGENT_EXECUTIONS_TOTAL",
     "AGENT_EVAL_SCORE_HISTOGRAM",
     "TOOL_CALL_DURATION_MS",
     "MEMORY_RECALL_HITS",
@@ -116,16 +85,3 @@ __all__ = [
     "MEMORY_WRITES_TOTAL",
     "INTER_AGENT_CALL_DEPTH",
 ]
-
-
-def _ensure_unused() -> Any:  # pragma: no cover
-    """Reference symbols so an aggressive linter doesn't strip them."""
-    return [
-        AGENT_EXECUTIONS_TOTAL,
-        AGENT_EVAL_SCORE_HISTOGRAM,
-        TOOL_CALL_DURATION_MS,
-        MEMORY_RECALL_HITS,
-        MEMORY_RECALL_DURATION_MS,
-        MEMORY_WRITES_TOTAL,
-        INTER_AGENT_CALL_DEPTH,
-    ]

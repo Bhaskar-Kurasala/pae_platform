@@ -119,6 +119,15 @@ class BaseAgent(ABC):
                     input_tokens=int(input_tokens or 0),
                     output_tokens=int(output_tokens or 0),
                 )
+                # D19.1 CP2 — D-D canonical agent cost metric. Bounded
+                # cardinality (~20 registered agents). Counter sums
+                # over time so per-cohort / per-user attribution
+                # happens via logs (correlation IDs from CP1), not
+                # via metric labels (D-C cardinality discipline).
+                if cost_inr:
+                    from app.core.metrics import AGENT_COST_INR_TOTAL
+
+                    AGENT_COST_INR_TOTAL.labels(agent_id=self.name).inc(cost_inr)
                 # USD too — easier for the Anthropic budget dashboard.
                 cost_usd = round(cost_inr / 84.0, 6) if cost_inr else 0.0
 
@@ -218,8 +227,19 @@ class BaseAgent(ABC):
         functions, LLM providers). Unbound in the finally block so a
         subsequent agent in the same request gets a clean slate.
         """
-        start_ms = int(time.monotonic() * 1000)
+        # D19.1 CP2 — local import to avoid the metrics module's
+        # boot-time registration running before structlog is configured
+        # (configure_logging in main.py runs first; metrics.py is small
+        # but imports prometheus_client which configures its own
+        # process-level multiprocess directory check).
+        from app.core.metrics import (
+            AGENT_INVOCATION_DURATION_SECONDS,
+            AGENT_INVOCATIONS,
+        )
+
+        start_monotonic = time.monotonic()
         status = "completed"
+        outcome = "success"
         structlog.contextvars.bind_contextvars(agent_id=self.name)
         try:
             self._log.info("agent.run.start", task_length=len(state.task))
@@ -229,11 +249,22 @@ class BaseAgent(ABC):
             self._log.info("agent.run.complete", score=state.evaluation_score)
         except Exception as exc:
             status = "error"
+            outcome = "error"
             state = state.model_copy(update={"error": str(exc), "agent_name": self.name})
             self._log.exception("agent.run.error", error=str(exc))
             raise
         finally:
-            duration_ms = int(time.monotonic() * 1000) - start_ms
+            duration_seconds = time.monotonic() - start_monotonic
+            duration_ms = int(duration_seconds * 1000)
+            # D-D canonical agent metrics. agent_id is bounded
+            # cardinality (~20 registered agents); outcome is a
+            # 3-value enum {success, error, timeout}.
+            AGENT_INVOCATIONS.labels(
+                agent_id=self.name, outcome=outcome
+            ).inc()
+            AGENT_INVOCATION_DURATION_SECONDS.labels(
+                agent_id=self.name
+            ).observe(duration_seconds)
             await self.log_action(state, status=status, duration_ms=duration_ms)
             structlog.contextvars.unbind_contextvars("agent_id")
         return state

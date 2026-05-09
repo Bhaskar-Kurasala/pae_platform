@@ -40,6 +40,7 @@ dependencies = [
     "jinja2>=3.1.4",
     "pyyaml>=6.0.3",
     "posthog>=7.13.1",
+    "prometheus-client>=0.21.0",
     "sentry-sdk[fastapi]>=2.0.0",
     # D9 / Pass 3g — safety primitive. Presidio detects PII (input + output);
     # spaCy provides the en_core_web_lg NER model Presidio's analyzer uses.

@@ -155,9 +155,43 @@ def _unbind_task_context(
     sender: Any = None,
     task_id: str | None = None,
     task: Any = None,
+    state: str | None = None,
     **_: Any,
 ) -> None:
-    """task_postrun handler — clear our keys so the next task starts fresh."""
+    """task_postrun handler — clear our keys so the next task starts fresh.
+
+    D19.1 CP2 — also increments aicareeros_celery_tasks with the
+    task_name + outcome labels. ``state`` is Celery's task state
+    string (SUCCESS / FAILURE / RETRY / REVOKED); we map to a 3-value
+    outcome enum for cardinality discipline (the raw state strings
+    work too, but normalising guards against future Celery version
+    drift introducing new states).
+    """
+    # Determine task name + outcome before touching contextvars so a
+    # crash in the metric emit doesn't leave stale context bound.
+    task_name = "unknown"
+    if task is not None:
+        task_name = getattr(task, "name", None) or str(task)
+    elif sender is not None:
+        task_name = getattr(sender, "name", None) or str(sender)
+
+    if state == "SUCCESS":
+        outcome = "success"
+    elif state in ("FAILURE", "REVOKED"):
+        outcome = "error"
+    elif state == "RETRY":
+        outcome = "retry"
+    else:
+        outcome = "other"
+
+    try:
+        from app.core.metrics import CELERY_TASKS
+
+        CELERY_TASKS.labels(task_name=task_name, outcome=outcome).inc()
+    except Exception:  # noqa: BLE001
+        # Telemetry never load-bearing for task correctness.
+        pass
+
     structlog.contextvars.unbind_contextvars(
         *_PROPAGATED_KEYS, "trace_origin"
     )

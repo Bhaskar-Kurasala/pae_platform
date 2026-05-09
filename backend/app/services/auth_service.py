@@ -20,6 +20,8 @@ class AuthService:
     async def register(self, payload: UserCreate) -> User:
         existing = await self.repo.get_by_email(payload.email)
         if existing:
+            # D19.1 CP2 — auth_events metric.
+            self._record_auth_event("signup_conflict")
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Email already registered",
@@ -36,6 +38,9 @@ class AuthService:
             create_payload["whatsapp_number"] = payload.whatsapp_number
         user = await self.repo.create(create_payload)
         log.info("auth.register", user_id=str(user.id))
+        # D19.1 CP2 — auth_events metric. event_type is a 5-value
+        # bounded enum; D-C cardinality safe.
+        self._record_auth_event("signup")
 
         # Emit a real cohort_event so the admin "Live event feed" on
         # /admin lights up immediately when a student signs up. Only
@@ -95,16 +100,19 @@ class AuthService:
     async def login(self, email: str, password: str) -> dict[str, str]:
         user = await self.repo.get_by_email(email)
         if not user or not user.hashed_password:
+            self._record_auth_event("login_failure")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials",
             )
         if not verify_password(password, user.hashed_password):
+            self._record_auth_event("login_failure")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials",
             )
         if not user.is_active:
+            self._record_auth_event("login_disabled")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account disabled",
@@ -112,6 +120,7 @@ class AuthService:
         access_token = create_access_token({"sub": str(user.id), "role": user.role})
         refresh_token = create_refresh_token({"sub": str(user.id)})
         log.info("auth.login", user_id=str(user.id))
+        self._record_auth_event("login")
         return {
             "access_token": access_token,
             "refresh_token": refresh_token,
@@ -140,8 +149,30 @@ class AuthService:
         new_access = create_access_token({"sub": str(user.id), "role": user.role})
         new_refresh = create_refresh_token({"sub": str(user.id)})
         log.info("auth.refresh", user_id=str(user.id))
+        self._record_auth_event("refresh")
         return {
             "access_token": new_access,
             "refresh_token": new_refresh,
             "token_type": "bearer",
         }
+
+    @staticmethod
+    def _record_auth_event(event_type: str) -> None:
+        """D19.1 CP2 — increment aicareeros_auth_events.
+
+        ``event_type`` is a bounded enum (signup, signup_conflict,
+        login, login_failure, login_disabled, refresh). Cardinality
+        is fixed by the constant call sites in this module — adding
+        a new event_type means a new code change here, which is
+        exactly the discipline D-C wants.
+
+        Best-effort: a metrics import error or registry inconsistency
+        must never block authentication. Auth is the load-bearing
+        path; metric emission is observability seasoning.
+        """
+        try:
+            from app.core.metrics import AUTH_EVENTS
+
+            AUTH_EVENTS.labels(event_type=event_type).inc()
+        except Exception:  # noqa: BLE001
+            pass
