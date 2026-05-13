@@ -144,3 +144,49 @@ launch-stage discipline; revisit when one of the above triggers.
 - Correlation IDs: [`docs/architecture/d19-1-logging-conventions.md`](../architecture/d19-1-logging-conventions.md)
 - Cohort-events review (companion process): [`docs/operations/cohort-events-review-process.md`](cohort-events-review-process.md)
 - Deferred alerts (the things NOT being paged): [`docs/followups/d19-deferred-alerting-and-runbooks.md`](../followups/d19-deferred-alerting-and-runbooks.md)
+
+---
+
+## Known-issue fingerprints (founder-side Sentry UI config)
+
+Pin these in Sentry's Issue Grouping → Custom Fingerprints. Each
+pinned issue gets a stable group so regressions surface immediately
+rather than disappearing into the noise.
+
+### auth.signup_grace_failed (auth-signup-grace-jsonb)
+
+**Origin:** D9 commit 1df4b3d → fix landed in the
+auth-signup-grace-jsonb investigation commit (see
+[`docs/operations/auth-signup-grace-jsonb-investigation.md`](auth-signup-grace-jsonb-investigation.md)).
+Backfill script: [`backend/scripts/auth_signup_grace_backfill.py`](../../backend/scripts/auth_signup_grace_backfill.py).
+
+**Sentry fingerprint rule:**
+
+```
+message:"auth.signup_grace_failed"  →  fingerprint = ["auth-signup-grace-failed"]
+```
+
+Or equivalently in Sentry's Custom Fingerprinting YAML:
+
+```yaml
+rules:
+  - matcher:
+      type: logger
+      patterns:
+        - "auth.signup_grace_failed"
+    fingerprint:
+      - "auth-signup-grace-failed"
+```
+
+**What this catches:** any future regression of the `:meta::jsonb`
+parameter-binding bug (or equivalent JSONB-cast syntax that
+asyncpg rejects) will fire `auth.signup_grace_failed` at WARNING
+level. With this fingerprint pinned, that single Sentry issue
+group spikes immediately rather than getting fragmented across
+per-user trace_ids. Daily founder review notices the spike at
+the next review.
+
+**When to remove:** never; this is permanent operational
+infrastructure. The signup_grace path is load-bearing for new
+student onboarding; a regression here breaks the platform for
+free-tier users.

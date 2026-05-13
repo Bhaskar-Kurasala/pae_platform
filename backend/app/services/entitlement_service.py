@@ -670,11 +670,20 @@ async def grant_signup_grace(
         return row[0]
 
     grant_id = uuid.uuid4()
+    # NOTE: `::jsonb` cast omitted on the metadata bind — asyncpg /
+    # SQLAlchemy text-mode parses `:meta::jsonb` as the parameter
+    # `meta` followed by another colon-introduced reference, which
+    # raises PostgresSyntaxError ("syntax error at or near ':'").
+    # Postgres auto-casts the JSON-shaped text `_json_dumps(metadata)`
+    # to the JSONB column type at INSERT because the column is
+    # declared JSONB. Same pattern as escalate_to_human.py:181-200.
+    # Investigation + regression-guard test:
+    # docs/operations/auth-signup-grace-jsonb-investigation.md.
     await db.execute(
         text(
             "INSERT INTO free_tier_grants "
             "(id, user_id, grant_type, granted_at, expires_at, metadata) "
-            "VALUES (:id, :uid, 'signup_grace', :now, :exp, :meta::jsonb)"
+            "VALUES (:id, :uid, 'signup_grace', :now, :exp, :meta)"
         ),
         {
             "id": grant_id,
@@ -725,11 +734,13 @@ async def grant_placement_quiz_session(
         return row[0]
 
     grant_id = uuid.uuid4()
+    # NOTE: see grant_signup_grace above — same JSONB-cast omission
+    # for the same reason. Postgres auto-casts at the column type.
     await db.execute(
         text(
             "INSERT INTO free_tier_grants "
             "(id, user_id, grant_type, granted_at, expires_at, metadata) "
-            "VALUES (:id, :uid, 'placement_quiz_session', :now, :exp, :meta::jsonb)"
+            "VALUES (:id, :uid, 'placement_quiz_session', :now, :exp, :meta)"
         ),
         {
             "id": grant_id,

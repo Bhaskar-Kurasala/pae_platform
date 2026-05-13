@@ -4,13 +4,12 @@
 **Decision:** The agent reports state; **the founder makes the
 final go/no-go call**.
 **Headline:** Architect-led substrate **GREEN across all dimensions**.
-3 of 4 parallel ops-side items **NOT YET LANDED**; the 4th
-(Honeycomb backend lock) is **CONFIG-SHIPPED post-D19.5
-(2026-05-13)** and awaits founder execution of the `fly secrets
-set` commands documented at
-[`docs/operations/honeycomb-backend-lock.md`](../operations/honeycomb-backend-lock.md).
-None of the remaining 3 are unambiguously launch-blocking; each
-carries a specific impact characterized in Section 2.
+Of 4 parallel ops-side items, **2 are CONFIG-SHIPPED** awaiting
+founder execution (Item 2 auth-signup-grace-jsonb post-2026-05-13
+fix + backfill script; Item 4 Honeycomb backend lock); **2 remain
+RED** (Item 1 BUG-CP4-LESSON-FK-500 and Item 3 Stripe webhook
+env). None of the remaining items are unambiguously launch-
+blocking; each carries a specific impact characterized in Section 2.
 
 This document is the architect-led closure for D19.5. It reports
 the state of every load-bearing dimension cohort-1 launch depends
@@ -95,54 +94,72 @@ gate doc when fix lands.
 
 ### Item 2 — auth-signup-grace-jsonb
 
-**State:** 🔴 RED — not landed.
+**State (D19.5 close):** 🔴 RED — not landed.
 
-**Evidence (Pattern 22 drift-detection at pre-flight):**
-- `backend/app/services/entitlement_service.py:677` still emits
-  `VALUES (:id, :uid, 'signup_grace', :now, :exp, :meta::jsonb)`
-  with the `:meta::jsonb` parameter-binding syntax that asyncpg
-  rejects (`PostgresSyntaxError: syntax error at or near ":"`).
-- Same syntax repeats at line 732 for the
-  `placement_quiz_session` grant insert (collateral surface for
-  the same bug).
-- No fix commit; backend logs during recent verification runs
-  still show `auth.signup_grace_failed` warnings firing on every
-  fresh-student registration.
+**State (post-investigation-and-fix commit, 2026-05-13):** 🟢
+GREEN-config — code fix + regression-guard tests landed; **backfill
+execution against production pending founder run** (10-second
+dev-DB verification proves the apply path works end-to-end).
 
-**Fix scope (per existing follow-up `docs/followups/auth-signup-grace-jsonb-cast-syntax.md`):**
-2-4 hour bug-fix-team work. Replace `:meta::jsonb` with the asyncpg-
-compatible cast syntax (use `CAST(:meta AS jsonb)` OR pass `meta`
-as a `dict` and let asyncpg handle JSONB encoding via the
-SQLAlchemy `JSON()`/`JSONB()` type). Possibly backfill grants for
-users registered during the regression window (any student whose
-signup ran after this code path landed and saw the silently-swallowed
-exception).
+**What landed in the fix commit:**
+- `entitlement_service.py:677` + `:732` — dropped the `::jsonb`
+  cast suffix on both call sites. Postgres auto-casts the
+  JSON-shaped `_json_dumps(metadata)` text to the JSONB column
+  type at INSERT because the column is declared JSONB
+  ([alembic/versions/0057_entitlement_tier.py:101-105](../../backend/alembic/versions/0057_entitlement_tier.py)).
+  Same workaround pattern as escalate_to_human.py:181-200.
+- Investigation doc with empirical findings:
+  [`docs/operations/auth-signup-grace-jsonb-investigation.md`](../operations/auth-signup-grace-jsonb-investigation.md)
+  — regression window (2026-05-03 → 2026-05-13; ~10 days);
+  downstream impact characterization (signup succeeds; first
+  agentic call returns 402 for users without paid entitlement);
+  dev-DB affected count (92 students, 90 with paid entitlement
+  masking, 2 most-impacted); backfill policy choice
+  (`expires_at = NOW() + 24h` per option b — restores access).
+- Regression-guard tests in
+  [`backend/tests/test_services/test_entitlement_grant_writes.py`](../../backend/tests/test_services/test_entitlement_grant_writes.py)
+  — 3 tests using `ast`-based extraction of `text()` call
+  arguments; catch `::jsonb` re-introduction at CI without
+  false-positives from docstrings / comments.
+- Backfill script at
+  [`backend/scripts/auth_signup_grace_backfill.py`](../../backend/scripts/auth_signup_grace_backfill.py)
+  — dry-run by default + `--apply` flag; idempotent (`WHERE NOT
+  EXISTS` guard); backfilled rows carry
+  `metadata={'backfill': True, 'reason': 'auth-signup-grace-jsonb',
+  'original_signup_at': <user.created_at>}` for future cohort
+  analysis. Verified end-to-end on dev DB: dry-run identifies 92
+  affected, apply inserts 92, re-dry-run shows 0 residual.
+- Sentry fingerprint rule documented at
+  [`docs/operations/sentry-review-process.md`](../operations/sentry-review-process.md)
+  "Known-issue fingerprints" section. Founder configures in Sentry
+  UI; pins `auth.signup_grace_failed` to a stable issue group
+  so any future regression surfaces immediately.
 
-**Launch-impact assessment:** **MEDIUM**. The bug silently fails
-the signup-grace entitlement grant for every new student. The
-`try/except` wrapping at `auth_service.py:90` swallows the failure
-and logs a warning — students proceed past signup but **without a
-free-tier grant**. Cohort-1 students:
-- See **NO functional failure at signup** (the swallow keeps signup
-  green).
-- Hit `402 Payment Required` from the canonical agentic endpoint
-  on their first agent invocation IF they haven't yet purchased a
-  course AND aren't covered by another free-tier path.
-- Are **invisible to the daily founder review** unless founder
-  greps logs for `auth.signup_grace_failed`.
+**What remains for founder execution:**
+1. Run dry-run against production: `uv run python -m
+   scripts.auth_signup_grace_backfill --dry-run` from the Fly
+   backend app. Reports counts.
+2. Verify counts look right (likely 0 if cohort-1 enrollment
+   model is paid-at-signup; non-zero otherwise).
+3. If non-zero: run `--apply`. Idempotent + safe to re-run.
+4. Configure the Sentry fingerprint rule in the Sentry UI per
+   the doc.
 
-For cohort-1 specifically: if the cohort is paid-by-design (every
-student has a course entitlement at signup), this bug is invisible.
-If any cohort-1 students rely on `signup_grace` for their first
-24-hour free window, this bug presents as "402 on first interaction"
-— a real UX issue.
+**Launch-impact assessment (revised):** **LOW** post-fix-landing.
+The syntax fix is in place; new signups will create their
+signup_grace rows correctly. The remaining question is whether
+existing affected users in production need the backfill — that
+depends on cohort-1 enrollment model:
+- Cohort-1 paid-at-signup: backfill is no-op (dry-run shows 0).
+- Cohort-1 includes free-trial users: backfill executes for
+  those users; each gets a 24h fresh grant from backfill moment.
 
-**Recommendation:** **PROBABLY launch-blocking; founder decides
-based on cohort-1 enrollment model**. If cohort-1 includes any
-signup_grace-dependent users, this must land before launch. If
-cohort-1 is 100% paid-entitlement-at-signup, defer to first
-post-launch fix-cycle. Fix is small (2-4 hours); the launch-block
-question is "is anyone in cohort-1 affected?"
+**Recommendation (revised):** Founder runs dry-run against
+production this week to confirm the affected count. If 0, no
+action; Item 2 fully GREEN. If non-zero, run `--apply` (idempotent,
+safe). Either way, Item 2 is no longer launch-blocking — the
+substrate is fixed; existing-affected-users are addressed via
+the script.
 
 ---
 
@@ -235,11 +252,18 @@ of founder time. **Founder picks.**
 
 ### Honest aggregate
 
-| Aggregate | State (D19.5 close) | State (post-lock-config 2026-05-13) |
-|-----------|---------------------|--------------------------------------|
-| Architect-led substrate (10 dimensions) | 🟢 GREEN (8 green + 2 yellow) | 🟢 GREEN (unchanged) |
-| Parallel ops-side items (4 items) | 🔴 RED across all 4 | 🟡 1 YELLOW (Item 4, config-shipped) + 🔴 3 RED (Items 1-3) |
-| **Net launch-readiness** | **CONDITIONAL** | **CONDITIONAL** (improved) |
+| Aggregate | D19.5 close | +Honeycomb-lock-config | +auth-signup-grace fix |
+|-----------|-------------|------------------------|-----------------------|
+| Architect-led substrate (10 dim) | 🟢 GREEN | 🟢 GREEN | 🟢 GREEN |
+| Parallel ops-side items (4 items) | 🔴 RED × 4 | 🟡 1 + 🔴 3 | 🟡 2 + 🔴 2 |
+| **Net launch-readiness** | CONDITIONAL | CONDITIONAL (improved) | **CONDITIONAL (much improved)** |
+
+Two RED items remain: Item 1 (BUG-CP4-LESSON-FK-500) and Item 3
+(Stripe webhook env config). Per their Section 2 dispositions:
+Item 1 is LOW launch-impact (only fires on malformed-API path,
+not normal user journey); Item 3 is CONDITIONAL on cohort-1
+payment model (LAUNCH-BLOCKING only if cohort-1 takes Stripe
+webhook payments during launch week).
 
 ### The decision surface
 
