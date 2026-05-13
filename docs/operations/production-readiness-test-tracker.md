@@ -86,10 +86,10 @@ unknowns. **Low** rows are post-launch polish.
 | 2.1.2 | Two tabs, one user — logout in tab A; tab B still operates until next 401 | Low | 🔲 | |
 | 2.1.3 | Refresh-token rotation race — two parallel 401s both try to refresh | Medium | 🔲 | |
 | 2.1.4 | Login with leading/trailing whitespace in email | Medium | 🔲 | Trim on frontend AND backend? |
-| 2.1.5 | Password reset flow exists + works end-to-end | **High** | 🔲 | Launch blocker if missing |
+| 2.1.5 | Password reset flow exists + works end-to-end | **High** | ❌ | **No endpoint found**. grep for `password.?reset\|forgot.?password\|reset_token` in routes/ returned 0. Launch blocker — users have no recovery path. |
 | 2.1.6 | Email verification on signup — required? Bypassable? | Medium | 🔲 | |
 | 2.1.7 | "Remember me" / session persistence across browser restart | Low | 🔲 | |
-| 2.1.8 | Email enumeration on signup ("user exists" vs "ok") | **High** | 🔲 | Security baseline |
+| 2.1.8 | Email enumeration on signup ("user exists" vs "ok") | **High** | ❌ | Existing email → 409; new email → 201. Distinct response codes = enumeration leak. Recommend returning 201/202 for both and emailing differentiated content out-of-band. |
 
 ### 2.2 Chat & streaming
 
@@ -100,7 +100,7 @@ unknowns. **Low** rows are post-launch polish.
 | 2.2.3 | Double-submit while stream in flight — send button disabled? | Medium | 🔲 | |
 | 2.2.4 | Empty / whitespace-only message — API 422 cleanly? | Low | 🔲 | Frontend likely blocks |
 | 2.2.5 | Very long message (>20KB paste) — UX when exceeded? | Medium | 🔲 | |
-| 2.2.6 | XSS / markdown injection in assistant output | **High** | 🔲 | grep `dangerouslySetInnerHTML` |
+| 2.2.6 | XSS / markdown injection in assistant output | **High** | ✅ | Fixed in `9ea91a2`. 3 sites of `dangerouslySetInnerHTML` audited: v8-topbar (hardcoded literals — safe), path-screen (already comment-disabled), admin/page.tsx (real XSS sink via user-controlled `full_name`/`exercise.title` → now renders as text). |
 | 2.2.7 | Mode switch mid-conversation — applies to next message or retroactive? | Low | 🔲 | |
 
 ### 2.3 Cost ceilings & rate limits
@@ -141,15 +141,15 @@ unknowns. **Low** rows are post-launch polish.
 
 | # | Test case | Priority | Status | Notes |
 |---|-----------|----------|--------|-------|
-| 2.7.1 | Student A → student B's notebook entry | **High** | 🔲 | |
-| 2.7.2 | Student A → student B's flashcards | **High** | 🔲 | |
-| 2.7.3 | Student A → student B's quiz attempts | **High** | 🔲 | |
-| 2.7.4 | Student A → student B's mock-interview report | **High** | 🔲 | |
-| 2.7.5 | Student A → student B's portfolio | **High** | 🔲 | |
+| 2.7.1 | Student A → student B's notebook entry (PATCH + DELETE) | **High** | ✅ | Both 404 — owner-scoped query is correct. |
+| 2.7.2 | Student A → student B's flashcards | 🔁 | N/A | No flashcards table — they live as JSON inside notebook_entries; covered by 2.7.1. |
+| 2.7.3 | Student A → student B's quiz attempts | Medium | 🔲 | `quiz_results` table has no `user_id` column — needs separate audit of how ownership is enforced. |
+| 2.7.4 | Student A → student B's mock-interview report | Medium | 🔲 | `mock_session_reports` has no `user_id` column — needs separate audit. |
+| 2.7.5 | Student A → student B's portfolio (GET /receipts/autopsy/{id}) | **High** | ✅ | 404 — owner-scoped query is correct. |
 | 2.7.6 | File-upload MIME check (chat attachments) | Medium | 🔲 | |
 | 2.7.7 | File-upload size limit | Medium | 🔲 | |
 | 2.7.8 | File-upload path traversal in filenames | Medium | 🔲 | |
-| 2.7.9 | `.env` excluded from docker image + git | **High** | 🔲 | One-line grep |
+| 2.7.9 | `.env` excluded from docker image + git | **High** | ✅ | `.gitignore` excludes `.env`; backend container has no `/app/.env` (confirmed via `ls`). |
 | 2.7.10 | CORS allowlist — rejects `null` and `*` | Medium | 🔲 | |
 
 ### 2.8 Operational
@@ -159,7 +159,7 @@ unknowns. **Low** rows are post-launch polish.
 | 2.8.1 | Sentry receives events in prod | **High** | 🔲 | Verify post-deploy with a forced exception |
 | 2.8.2 | Honeycomb spans flowing in prod | **High** | 🔲 | Verify post-deploy |
 | 2.8.3 | Backup job runs + restore tested | **High** | 🔲 | Launch blocker |
-| 2.8.4 | Migration 0067 rollback exists + tested | **High** | 🔲 | |
+| 2.8.4 | Migration 0067 rollback exists + tested | **High** | ⚠️ | `downgrade()` exists and drops the column cleanly. Live rollback dry-run still 🔲. |
 
 ---
 
@@ -169,6 +169,7 @@ unknowns. **Low** rows are post-launch polish.
 |--------|-----|
 | `ad43f2d` | /logout route (was 404); chat quiz pregenerate 422 race-condition guard; docker-compose API URL realigned to :8001 |
 | `425602c` | Stale conversation 404 self-heal (strip `?c=` + clear localStorage) |
+| `9ea91a2` | XSS in admin retention feed (event.text rendered as HTML; full_name was user-controlled) — render as text |
 
 ---
 
