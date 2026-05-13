@@ -305,6 +305,7 @@ def create_app() -> FastAPI:
     )
     from app.api.v1.routes.resources import router as resources_router
     from app.api.v1.routes.practice import router as practice_router
+    from app.api.v1.routes.csp_report import router as csp_report_router
 
     api_routers = [
         auth_router,
@@ -361,9 +362,17 @@ def create_app() -> FastAPI:
         # D9 — canonical agentic + admin trace
         agentic_router,
         admin_journey_router,
+        # Security — CSP violation reporting (no auth, browsers send without credentials)
+        csp_report_router,
     ]
     for r in api_routers:
         app.include_router(r, prefix="/api/v1")
+
+    # T1 — test-support routes (never in production)
+    if settings.environment.lower() != "production":
+        from app.api.v1.routes.test_support import router as test_support_router
+
+        app.include_router(test_support_router, prefix="/api/v1")
 
     return app
 

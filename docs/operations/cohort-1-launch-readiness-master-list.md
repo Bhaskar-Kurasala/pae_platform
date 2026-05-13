@@ -86,6 +86,7 @@ Status:
 | E6 | Captcha on register/login | 🟢 | ❌ | Cohort-1 acceptable; spam will surface need. |
 | E7 | `.env` exclusion + secrets in repo | — | ✅ | gitignored + absent from image |
 | E8 | PII redaction in structlog | 🟡 | ❌ | D19.1 added denylist to Sentry only. `oauth.py:75,92`, `webhooks.py:107`, `email_service.py:63` emit raw email to log sink. Add a redaction processor to logging.py. |
+| E9 | Security headers (HSTS, X-Frame-Options, CSP, etc.) | 🟡 | ✅ | Batch 2A CP2 (2026-05-14). 6 headers via Next.js middleware + nginx. CSP in Report-Only mode; violations log to `/api/v1/csp-report`. See `docs/operations/security-headers.md`. |
 
 ## F. Reliability & ops
 
@@ -111,49 +112,50 @@ Status:
 
 ## H. Error handling & UX (from deep audit)
 
-### H1. Backend — replace raw exception-text leaks
+### H1. Backend — replace raw exception-text leaks ✅ DONE (Batch 2A CP1, 2026-05-14)
 
 Every site below currently forwards `str(exc)` or `f"…{exc}"` to the user. Replace each with a generic user-facing message + structured log of the underlying exception (`log.exception` with `trace_id`).
 
-| # | File:line | Sev |
-|---|-----------|-----|
-| H1.1 | `payments_v2.py:143` (`f"Payment provider unavailable: {exc}"`) | 🔴 |
-| H1.2 | `payments_v2.py:130, 152, 406` (ValueError / PaymentProviderError raw) | 🟡 |
-| H1.3 | `readiness.py:146, 148, 184, 186, 232, 234, 277, 304` (8 sites) | 🟡 |
-| H1.4 | `mock_interview.py:196, 241` (ValueError raw) | 🟡 |
-| H1.5 | `jd_decoder.py:69`, `billing.py:104`, `admin.py:947` (ValueError raw) | 🟡 |
+| # | File:line | Sev | Status |
+|---|-----------|-----|--------|
+| H1.1 | `payments_v2.py:143` (`f"Payment provider unavailable: {exc}"`) | 🔴 | ✅ Fixed |
+| H1.2 | `payments_v2.py:130, 152, 406` (ValueError / PaymentProviderError raw) | 🟡 | ✅ Fixed |
+| H1.3 | `readiness.py:146, 148, 184, 186, 232, 234, 277, 304` (8 sites) | 🟡 | ✅ Fixed |
+| H1.4 | `mock_interview.py:196, 241` (ValueError raw) | 🟡 | ✅ Fixed |
+| H1.5 | `jd_decoder.py:69`, `billing.py:104`, `admin.py:947` (ValueError raw) | 🟡 | ✅ Fixed |
+| H1.6 | `teach_back.py`, `senior_review.py`, `practice.py`, `portfolio_autopsy.py`, `admin.py:967` (5 additional sites found by Pattern 22 sweep) | 🟡 | ✅ Fixed |
 
 **Confirmed good:** global `exception_handler.py:115-139` returns `{error: {type, user_message, message, request_id, trace_id}}` — never leaks tracebacks. The leaks above are upstream of it.
 
-### H2. Frontend — replace `err.message` rendering with translated messages
+### H2. Frontend — replace `err.message` rendering with translated messages ✅ DONE (Batch 2A CP1, 2026-05-14)
 
-Use the existing `lib/error-toast.ts` translator path everywhere; render via `GracefulFailureMessage` for inline error states.
+Use the existing `lib/error-toast.ts` translator path everywhere; render via `GracefulFailureMessage` for inline error states. Added `translateError()` export to `lib/error-toast.ts` as Pattern 35 infrastructure.
 
-| # | File:line | Sev |
-|---|-----------|-----|
-| H2.1 | `(portal)/chat/page.tsx:1822` (`setError(err.message)`) | 🟡 |
-| H2.2 | `(portal)/interview/page.tsx:116, 190, 205` | 🟡 |
-| H2.3 | `(portal)/exercises/[id]/page.tsx:128` | 🟡 |
-| H2.4 | `features/goal-contract-form.tsx:197` | 🟡 |
-| H2.5 | `portfolio-autopsy-widget.tsx:77`, `teach-back-widget.tsx:52` | 🟡 |
-| H2.6 | `studio/prompt-preview-panel.tsx:51`, `studio/misconceptions-panel.tsx:248` | 🟡 |
-| H2.7 | `mock-interview/use-pyodide.ts:94` | 🟡 |
-| H2.8 | `(public)/login/page.tsx:49`, `(public)/register/page.tsx:42` (`setError(err.message)`) | 🟢 (admin-only severity OK; reconsider after H1 ships) |
-| H2.9 | `admin/courses/[id]/edit/page.tsx:34, 60` (`toast.error(err.message)`) | 🟢 |
+| # | File:line | Sev | Status |
+|---|-----------|-----|--------|
+| H2.1 | `(portal)/chat/page.tsx:1822` (`setError(err.message)`) | 🟡 | ✅ Fixed |
+| H2.2 | `(portal)/interview/page.tsx:116, 190, 205` | 🟡 | ✅ Fixed |
+| H2.3 | `(portal)/exercises/[id]/page.tsx:128` | 🟡 | ✅ Fixed |
+| H2.4 | `features/goal-contract-form.tsx:197` | 🟡 | ✅ Fixed |
+| H2.5 | `portfolio-autopsy-widget.tsx:77`, `teach-back-widget.tsx:52` | 🟡 | ✅ Fixed |
+| H2.6 | `studio/prompt-preview-panel.tsx:51`, `studio/misconceptions-panel.tsx:248` | 🟡 | ✅ Fixed |
+| H2.7 | `mock-interview/use-pyodide.ts:94` | 🟡 | ✅ Fixed |
+| H2.8 | `(public)/login/page.tsx:49`, `(public)/register/page.tsx:42` (`setError(err.message)`) | 🟢 | ⏭ Deferred to Batch 2B (PSC-1: auth-flow files in Batch 1 scope) |
+| H2.9 | `admin/courses/[id]/edit/page.tsx:34, 60` (`toast.error(err.message)`) | 🟢 | ✅ Fixed (showErrorToast path) |
 
-### H3. Frontend — error boundaries
+### H3. Frontend — error boundaries ✅ DONE (Batch 2A CP2, 2026-05-14)
 
 Present: `(public)/error.tsx`, `(portal)/error.tsx`, `(portal)/dashboard/error.tsx`, `(portal)/progress/error.tsx`, `admin/error.tsx`.
 
-| # | Missing | Sev |
-|---|---------|-----|
-| H3.1 | `app/error.tsx` (root) — a render error in `app/layout.tsx` white-screens | 🔴 |
-| H3.2 | `app/global-error.tsx` — fallback below root | 🔴 |
-| H3.3 | `app/not-found.tsx` — global 404 page; users land on Next.js default | 🔴 |
+| # | File | Sev | Status |
+|---|------|-----|--------|
+| H3.1 | `app/error.tsx` (root) — a render error in `app/layout.tsx` white-screens | 🔴 | ✅ Created — GracefulFailureMessage + Sentry.captureException |
+| H3.2 | `app/global-error.tsx` — fallback below root | 🔴 | ✅ Created — own html/body, inline styles, "Try again"/"Reload page" |
+| H3.3 | `app/not-found.tsx` — global 404 page; users land on Next.js default | 🔴 | ✅ Created — server component, metadata, home/login links |
 
-### H4. Graceful-failure UX integration
+### H4. Graceful-failure UX integration ✅ DONE (Batch 2A CP1, 2026-05-14)
 
-`components/errors/graceful-failure-message.tsx` exists but is only referenced by its own test + `route-error.tsx`. **None** of the inline error states in chat / interview / exercises / payments / studio use it. Wire it into the H2.1–H2.7 sites for consistent UX.
+`components/errors/graceful-failure-message.tsx` wired into all H2.1–H2.7 sites (chat, interview, exercises, goal form, portfolio autopsy, teach-back, studio prompt-preview, misconceptions panel, live-coding, admin courses edit). Every inline error state now shows consistent retry UX. H2.8 (auth pages) deferred to Batch 2B per PSC-1.
 
 ### H5. Logging hygiene
 
@@ -214,11 +216,12 @@ Group the 🔴 items by shared infrastructure so we don't build the same plumbin
 6. B3 — End-to-end test-mode walk
 7. H1.1 — Stop leaking provider exception strings
 
-**Wave 4 — error UX & frontend polish (~1 day):**
-8. H3.1 + H3.2 + H3.3 — Root error.tsx, global-error.tsx, not-found.tsx
-9. H4 — Wire GracefulFailureMessage into chat/interview/exercises/payments
-10. H1 batch — Replace remaining `str(exc)` leaks in backend routes
-11. H2 batch — Replace remaining `err.message` renders in frontend
+**Wave 4 — error UX & frontend polish (~1 day):** ✅ DONE (Batch 2A, 2026-05-14)
+8. ✅ H3.1 + H3.2 + H3.3 — Root error.tsx, global-error.tsx, not-found.tsx
+9. ✅ H4 — GracefulFailureMessage wired into all H2.1–H2.7 sites
+10. ✅ H1 batch — All `str(exc)` leaks fixed in backend routes
+11. ✅ H2 batch — All `err.message` renders replaced (H2.8 deferred to Batch 2B)
+12. ✅ E9 — Security headers (HSTS, X-Frame-Options, CSP Report-Only, etc.)
 
 **Wave 5 — uploads & infra (~half day):**
 12. D1 — Server-side MIME sniffing
