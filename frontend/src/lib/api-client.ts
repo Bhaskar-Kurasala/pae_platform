@@ -401,6 +401,8 @@ export const authApi = {
   }) => api.post<{ message: string }>("/api/v1/auth/register", body),
   verifyEmail: (token: string) =>
     api.post<{ message: string }>("/api/v1/auth/verify-email", { token }),
+  resendVerificationEmail: (email: string) =>
+    api.post<{ message: string }>("/api/v1/auth/verify-email/resend", { email }),
   requestPasswordReset: (email: string) =>
     api.post<{ message: string }>("/api/v1/auth/password-reset/request", { email }),
   confirmPasswordReset: (token: string, new_password: string) =>

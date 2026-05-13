@@ -1,4 +1,6 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
+
+from app.schemas.user import _COMMON_PASSWORDS
 
 
 class LoginRequest(BaseModel):
@@ -35,3 +37,16 @@ class PasswordResetRequestPayload(BaseModel):
 class PasswordResetConfirmPayload(BaseModel):
     token: str
     new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def password_complexity(cls, v: str) -> str:
+        if len(v) < 12:
+            raise ValueError("Password must be at least 12 characters")
+        if v.lower() in _COMMON_PASSWORDS:
+            raise ValueError("Password is too common")
+        return v
+
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr

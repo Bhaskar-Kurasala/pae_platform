@@ -115,6 +115,33 @@ class AuthService:
         log.info("auth.email_verified", user_id=str(user.id))
         return {"message": "Email verified. You can now log in."}
 
+    async def resend_verification_email(self, email: str) -> dict[str, str]:
+        """R1: always 202 — neutral message prevents email enumeration.
+
+        Branch 1 (not found): return neutral.
+        Branch 2 (already verified): return neutral (no token created).
+        Branch 3 (rate-limited): return neutral.
+        Branch 4 (unverified, within rate limit): create token, return neutral.
+        SendGrid is not wired in this environment, so the email send is skipped;
+        the token is created so the flow is testable end-to-end once email is wired.
+        """
+        _neutral = {"message": "If this email is registered and unverified, a new verification link has been sent."}
+        user = await self.repo.get_by_email(email)
+        if not user or user.is_deleted:
+            return _neutral
+        if user.is_verified:
+            return _neutral
+
+        rate_ok = await check_email_rate_limit(str(user.id), TokenType.email_verify)
+        if not rate_ok:
+            return _neutral
+
+        _raw_token, _record = await self.token_repo.create_token(
+            user_id=user.id, token_type=TokenType.email_verify
+        )
+        log.info("auth.verify_email_resent", user_id=str(user.id))
+        return _neutral
+
     async def request_password_reset(self, email: str, ip_address: str | None = None) -> dict[str, str]:
         """A1: always 202; rate-limited token creation + email send."""
         _neutral = {"message": "If that email is registered, a reset link has been sent."}
@@ -180,7 +207,9 @@ class AuthService:
 
         if not verify_password(password, user.hashed_password):
             user.record_failed_login()
-            await self.repo.db.flush()
+            # Commit before raising so the counter persists — HTTPException
+            # triggers the session's except branch (rollback) otherwise.
+            await self.repo.db.commit()
             self._record_auth_event("login_failure")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

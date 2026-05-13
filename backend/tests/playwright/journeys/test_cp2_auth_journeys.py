@@ -133,10 +133,11 @@ def test_email_verification_token_flow() -> None:
 
 def test_password_reset_request_always_202() -> None:
     """A1: request reset always returns 202 regardless of email existence."""
-    # Known non-existent email.
+    # Known non-existent email (must be a valid-format email — .invalid TLD is
+    # rejected by EmailStr validation; use a real-format non-existent domain).
     status, body = post_json(
         "/auth/password-reset/request",
-        body={"email": "nobody_exists@nope.invalid"},
+        body={"email": "nobody_exists@nonexistent-domain-xyz.com"},
     )
     assert status == 202, f"Expected 202, got {status}: {body}"
     assert "message" in body
@@ -218,6 +219,13 @@ def test_5_failed_logins_trigger_423() -> None:
         body={"email": email, "full_name": "Lockable", "password": "RealPassword123!"},
     )
 
+    # Verify email via T1 so login reaches the password check (unverified users
+    # get 403 before the lockout counter is incremented — D-C gate order).
+    verify_token = _fetch_latest_token(email, "email_verify")
+    if verify_token is None:
+        pytest.skip("test-support token endpoint not available")
+    post_json("/auth/verify-email", body={"token": verify_token})
+
     for attempt in range(5):
         status, _ = post_json(
             "/auth/login",
@@ -244,6 +252,13 @@ def test_lockout_clears_after_password_reset() -> None:
         "/auth/register",
         body={"email": email, "full_name": "LockReset", "password": pw},
     )
+
+    # Verify email via T1 so login attempts reach the password check and
+    # increment the lockout counter (unverified users get 403 before D-C lockout).
+    verify_token = _fetch_latest_token(email, "email_verify")
+    if verify_token is None:
+        pytest.skip("test-support token endpoint not available")
+    post_json("/auth/verify-email", body={"token": verify_token})
 
     # Trigger lockout.
     for _ in range(5):

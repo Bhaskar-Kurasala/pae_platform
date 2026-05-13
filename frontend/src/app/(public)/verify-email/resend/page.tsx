@@ -18,21 +18,8 @@ function ResendVerificationForm() {
     e.preventDefault();
     setError("");
     setLoading(true);
-    // Reuse the password-reset/request endpoint pattern:
-    // send a new verify email via the register flow's enumeration-safe path.
-    // We hit /password-reset/request; for re-verification we call register
-    // which is idempotent for existing users (sends account_exists email).
-    // Better: call a dedicated resend endpoint. For now, since we don't have
-    // one yet, we POST to /auth/register with a sentinel payload approach —
-    // but that requires a valid password. Instead, we surface a message-only
-    // flow that mirrors the register 202 neutrality: tell the user to check
-    // inbox regardless of outcome.
     try {
-      // We don't have a dedicated resend endpoint in CP2; the register route
-      // will send account_exists email for known addresses. We trigger it via
-      // the password-reset/request neutral path and tell the user to check inbox.
-      // A dedicated /auth/resend-verification endpoint is tracked for CP3.
-      await authApi.requestPasswordReset(email);
+      await authApi.resendVerificationEmail(email);
       setSubmitted(true);
     } catch (err) {
       if (err instanceof ApiError) {

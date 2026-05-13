@@ -12,6 +12,7 @@ from app.schemas.auth import (
     PasswordResetRequestPayload,
     RefreshRequest,
     RegisterResponse,
+    ResendVerificationRequest,
     TokenResponse,
     VerifyEmailRequest,
 )
@@ -101,6 +102,17 @@ async def verify_email(
 ) -> dict[str, str]:
     """A2: Consume an email_verify token and mark the account as verified."""
     return await service.verify_email(payload.token)
+
+
+@router.post("/verify-email/resend", response_model=RegisterResponse, status_code=202)
+@limiter.limit("5/minute")
+async def verify_email_resend(
+    request: Request,
+    payload: ResendVerificationRequest,
+    service: AuthService = Depends(get_auth_service),
+) -> dict[str, str]:
+    """R1: Always 202 — neutral message prevents email enumeration."""
+    return await service.resend_verification_email(payload.email)
 
 
 @router.post("/password-reset/request", response_model=RegisterResponse, status_code=202)
