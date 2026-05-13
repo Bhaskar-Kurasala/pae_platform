@@ -386,30 +386,57 @@ cost because the substrate is OTel-portable.
 
 ---
 
-## Founder approval
+## Founder approval — APPROVED γ Honeycomb (2026-05-13)
 
-The architect prompt explicitly named founder approval as the
-locking gate. **This document is a recommendation, not a
-decision.**
+**Decision locked:** γ Honeycomb.
+**Lock commit:** the post-D19.5 ops glue commit (this commit)
+landed the config side; founder execution of the Fly secrets
+commands documented at
+[`docs/operations/honeycomb-backend-lock.md`](../operations/honeycomb-backend-lock.md)
+brings the integration live.
 
-**Founder, please indicate:**
+What landed at lock-config time:
 
-  - [ ] **Approve γ Honeycomb.** Migration begins per the path
-    above. D19.2 (alerting) targets Honeycomb Triggers.
-  - [ ] **Choose α self-hosted.** Architect re-authors migration
-    path for self-hosted; D19.2 targets Grafana Alerting.
-  - [ ] **Choose β Datadog.** Architect re-authors migration path
-    for Datadog; D19.2 targets Datadog Monitors. Cost discussion
-    included.
-  - [ ] **Defer.** Specify what additional information is needed
-    (specific use case to validate, prior-experience verification,
-    etc.).
+  * `fly.toml` updated with the `[metrics]` block authored as
+    commented-out (per the auth-mismatch resolution in the lock
+    doc) — Fly's Prometheus scraper doesn't honor Basic auth via
+    `fly.toml` config, so the chosen path is OTLP/HTTP direct
+    export for metrics too (deferred to follow-up at
+    [`docs/followups/honeycomb-otlp-metrics-export.md`](../followups/honeycomb-otlp-metrics-export.md);
+    until then, /metrics remains an ad-hoc curl surface and
+    traces are the load-bearing telemetry pillar).
+  * Operations doc shipped at
+    [`docs/operations/honeycomb-backend-lock.md`](../operations/honeycomb-backend-lock.md)
+    with: founder-side Honeycomb account prerequisites, exact
+    `fly secrets set` commands for all 3 Celery-side apps,
+    verification procedure for Honeycomb UI, rollback procedure,
+    D19.5 gate impact.
+  * D19.5 gate doc Section 2 Item 4 status updated from RED
+    (NOT LANDED) to GREEN-config-shipped-pending-execution.
+  * Follow-up registered: OTLPMetricExporter wiring to migrate
+    metrics from "ad-hoc curl" to "live in Honeycomb alongside
+    traces" when daily founder review or a deferred alert
+    triggers re-engagement.
 
-After founder approval lands, a separate post-CP5 commit updates
-this document with the locked decision + executes the migration
-steps. Until then, D19.1 is sealed at the substrate level; D19.2
-is blocked on backend choice (alerting attaches to the chosen
-backend's alerting surface).
+What awaits founder execution:
+
+  1. Verify Honeycomb account + ingest API key exist (per
+     founder-side prerequisite section of the lock doc).
+  2. Run the 3 `fly secrets set` commands documented in the lock
+     doc against `pae-platform`, `pae-platform-worker`,
+     `pae-platform-beat`. Each triggers automatic Fly redeploy.
+  3. Verify in Honeycomb UI that the `aicareeros` service is
+     receiving events (5-10 min after redeploy).
+  4. Author the cost-spike Trigger per the procedure at
+     [`docs/operations/alerts/cost-spike-trigger.md`](../operations/alerts/cost-spike-trigger.md)
+     — that step un-yellows the D19.5 gate's Section 1 Item 5
+     (cost-spike alert).
+
+The candidates α (self-hosted) and β (Datadog) are no longer
+under consideration. Reversibility per the original assessment
+remains preserved: 1-2 dev-days to switch backends if γ stops
+fitting; CP3's OTel-native instrumentation + CP4's dashboards-
+as-code keep the substrate portable.
 
 ## Cross-references
 

@@ -4,9 +4,13 @@
 **Decision:** The agent reports state; **the founder makes the
 final go/no-go call**.
 **Headline:** Architect-led substrate **GREEN across all dimensions**.
-4 of 4 parallel ops-side items **NOT YET LANDED** — none are
-launch-blocking but each carries a specific impact on day-one
-operational visibility.
+3 of 4 parallel ops-side items **NOT YET LANDED**; the 4th
+(Honeycomb backend lock) is **CONFIG-SHIPPED post-D19.5
+(2026-05-13)** and awaits founder execution of the `fly secrets
+set` commands documented at
+[`docs/operations/honeycomb-backend-lock.md`](../operations/honeycomb-backend-lock.md).
+None of the remaining 3 are unambiguously launch-blocking; each
+carries a specific impact characterized in Section 2.
 
 This document is the architect-led closure for D19.5. It reports
 the state of every load-bearing dimension cohort-1 launch depends
@@ -177,46 +181,53 @@ pre-launch. If not: deferred to first paid-cohort deliverable.
 
 ### Item 4 — Honeycomb backend lock commit
 
-**State:** 🔴 RED — not landed.
+**State (D19.5 close):** 🔴 RED — not landed.
 
-**Evidence:**
-- `fly.toml` line 73 has a forward-looking comment about /metrics
-  under real load but no `[metrics]` config section.
-- No `OTEL_EXPORTER_OTLP_ENDPOINT` or `HONEYCOMB_API_KEY` in any
-  compose / fly config visible to the agent.
-- D19.1 CP3 backend logs from prior verification showed
-  `tracing.otlp_init_failed` not firing because the env was unset
-  (correct no-op behavior); production needs both env vars set
-  for actual ingest.
+**State (post-D19.5 lock-config commit, 2026-05-13):** 🟡
+YELLOW — **config-shipped, execution-pending**.
 
-**Fix scope (per `docs/architecture/d19-1-observability-backend-decision.md`
-migration path):**
-- Founder creates Honeycomb org + ingest key.
-- Set `OTEL_EXPORTER_OTLP_ENDPOINT=https://api.honeycomb.io` and
-  `OTEL_EXPORTER_OTLP_HEADERS=x-honeycomb-team=$HONEYCOMB_API_KEY`
-  on Fly backend + worker apps.
-- Set `METRICS_USERNAME` + `METRICS_PASSWORD` on Fly + add
-  `[metrics]` section to `fly.toml` so Fly's managed Prometheus
-  scrapes /metrics into the org-level Prometheus endpoint.
-- (Optional) Import the 6+1 backend-agnostic dashboards into
-  Honeycomb via the API.
+**Evidence (updated):**
+- Operations doc shipped at
+  [`docs/operations/honeycomb-backend-lock.md`](../operations/honeycomb-backend-lock.md)
+  with exact `fly secrets set` commands for `pae-platform`,
+  `pae-platform-worker`, `pae-platform-beat`, plus Honeycomb-UI
+  verification procedure + rollback path.
+- `fly.toml` updated with `[metrics]` documentation block
+  (commented-out per the auth-mismatch resolution; OTLP-direct
+  for metrics is the chosen path) + cross-reference to the lock
+  doc.
+- D19.1 backend-decision doc
+  ([`d19-1-observability-backend-decision.md`](d19-1-observability-backend-decision.md))
+  updated with "APPROVED γ Honeycomb (2026-05-13)" + lock-commit
+  marker.
+- Follow-up registered for the OTLPMetricExporter wiring
+  ([`docs/followups/honeycomb-otlp-metrics-export.md`](../followups/honeycomb-otlp-metrics-export.md))
+  that migrates metrics from ad-hoc-curl to Honeycomb-resident.
 
-Estimated: ~₹2-3 + 1 developer-day (founder-side or ops-side).
+**What remains for founder execution:**
+1. Confirm Honeycomb account + ingest API key exist.
+2. Run the 3 documented `fly secrets set` commands. Each triggers
+   automatic Fly redeploy (~30-60s downtime per app).
+3. Wait 5-10 min for first traces to flush; verify in Honeycomb UI
+   that `aicareeros` dataset is receiving events.
+4. Author the cost-spike Trigger per `cost-spike-trigger.md` —
+   that step also un-yellows Section 1 Item 5 (cost-spike alert).
 
-**Launch-impact assessment:** **MEDIUM** (depends on launch-day
-observability stance):
-- If launch-day stance is "we'll review logs / dashboards via Fly
-  console + cohort_events SQL queries for week 1": **NOT
-  launch-blocking**. Cost-spike Trigger goes-live in week 2.
-- If launch-day stance is "cost-spike Trigger fires on day 1
-  during the highest-burn-rate period": **LAUNCH-BLOCKING**. The
-  Trigger config doc can't fire without Honeycomb ingestion.
+**Launch-impact assessment (revised):** **LOW** post-config-ship.
+Founder can either:
+- **Path A:** Execute the secrets pre-launch (10 min including
+  verification) → Item 4 GREEN by launch.
+- **Path B:** Execute post-launch when settled (week-2 ops cycle)
+  → Item 4 stays YELLOW for cohort-1 launch week; defer cost-spike
+  Trigger going-live to week 2. Founder watches the cost
+  dashboard manually during the high-attention launch week
+  anyway, which is exactly the workflow the Trigger automates
+  for week-2+.
 
-Recommendation: **defer to first post-launch ops-cycle**. Cohort-1
-launch week is the highest-attention window — the founder is on
-the cost dashboard hourly anyway. The cost-spike Trigger's value
-is "automated catch when founder ISN'T watching"; that's the
-week-2+ value proposition.
+**Recommendation (revised):** Either path is acceptable. Path B
+matches the original D19.5 gate recommendation (defer to first
+post-launch ops cycle); Path A removes the deferral with 10 min
+of founder time. **Founder picks.**
 
 ---
 
@@ -224,11 +235,11 @@ week-2+ value proposition.
 
 ### Honest aggregate
 
-| Aggregate | State |
-|-----------|-------|
-| Architect-led substrate (10 dimensions) | 🟢 GREEN (8 green + 2 yellow; yellows are config-shipped-pending-ops-side) |
-| Parallel ops-side items (4 items) | 🔴 RED across all 4 |
-| **Net launch-readiness** | **CONDITIONAL** |
+| Aggregate | State (D19.5 close) | State (post-lock-config 2026-05-13) |
+|-----------|---------------------|--------------------------------------|
+| Architect-led substrate (10 dimensions) | 🟢 GREEN (8 green + 2 yellow) | 🟢 GREEN (unchanged) |
+| Parallel ops-side items (4 items) | 🔴 RED across all 4 | 🟡 1 YELLOW (Item 4, config-shipped) + 🔴 3 RED (Items 1-3) |
+| **Net launch-readiness** | **CONDITIONAL** | **CONDITIONAL** (improved) |
 
 ### The decision surface
 

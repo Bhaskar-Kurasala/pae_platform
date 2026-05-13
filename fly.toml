@@ -74,6 +74,38 @@ kill_timeout = "30s"
     soft_limit = 200
     hard_limit = 250
 
+# ─── Prometheus metrics scrape (Honeycomb backend lock, 2026-05-13) ───
+# Fly's managed Prometheus scrapes this endpoint every 15s and ships
+# the result to the org-level Prometheus at api.fly.io/prometheus/<org>.
+# Free at our metric volume (D19.1 CP5 research).
+#
+# Auth mismatch — declared up-front so future readers don't waste
+# time debugging: Fly's Prometheus scraper does NOT honor HTTP Basic
+# auth via fly.toml configuration; the [metrics] section accepts only
+# `port` + `path`. Our /metrics endpoint requires Basic auth per the
+# D19.1 CP2 fail-closed contract (METRICS_USERNAME + METRICS_PASSWORD
+# Fly secrets). Three resolution options were considered at lock time
+# (see docs/operations/honeycomb-backend-lock.md "Auth mismatch
+# resolution" section); the chosen path is:
+#
+#   Send metrics directly to Honeycomb via OTLP (same exporter the
+#   trace pillar uses post-lock). The OTLPMetricExporter wiring is a
+#   small follow-up; for the initial lock window, traces export and
+#   metrics stay on the platform's Prometheus client registry,
+#   readable via curl with Basic auth for ad-hoc debugging.
+#
+# Until the OTLPMetricExporter follow-up lands, this [metrics] block
+# stays commented out — adding it would produce 401s on every Fly
+# scrape (4 per minute, ~5800/day) which would pollute backend logs.
+#
+# [metrics]
+#   port = 8000
+#   path = "/metrics"
+#
+# Trace export to Honeycomb is wired via OTEL_EXPORTER_OTLP_ENDPOINT
+# + OTEL_EXPORTER_OTLP_HEADERS Fly secrets (set via `fly secrets set`,
+# documented at docs/operations/honeycomb-backend-lock.md).
+
 # ─── Health check (PR3/C6.1+C6.2) ──────────────────────────────────
 # /health/ready pings DB + Redis + (informational) Anthropic key
 # presence. Returns 503 if any required dep is unreachable, so Fly
