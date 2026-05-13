@@ -2581,10 +2581,16 @@ function ChatArea({
       persistedIdSet.add(dbId);
       // Fire-and-forget: pre-generate 3 quiz versions for every persisted
       // assistant message so Quiz Me is instant on the first click.
+      //
+      // Audit finding (2026-05-13): only fire when content is non-empty.
+      // Backend's QuizGenerateRequest enforces `content: min_length=1`;
+      // a race between persistence and streaming completion can leave
+      // msg.content empty momentarily, producing a noisy 422 in browser
+      // DevTools on every chat send.
       const msg = messages.find(
         (m) => m.id === ephemeralId && m.role === "assistant",
       );
-      if (msg) {
+      if (msg && msg.content.trim().length > 0) {
         chatApi.triggerQuizPregenerate(dbId, msg.content);
       }
     },
