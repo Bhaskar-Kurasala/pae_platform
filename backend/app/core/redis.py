@@ -21,6 +21,10 @@ _KEY_CATEGORIES = frozenset(
         # window of 3600s. See evaluation.RedisEscalationLimiter
         # for the full key shape.
         "escalation",
+        # Batch 1 / D-F — per-user per-type email rate limiter.
+        # Key shape: email_rate:{user_id}:{token_type}:{hour_bucket}
+        # INCR + EXPIRE pattern; max 5 emails of each type per user per hour.
+        "email_rate",
     }
 )
 

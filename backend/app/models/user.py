@@ -1,11 +1,15 @@
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.base import SoftDeleteMixin, TimestampMixin, UUIDMixin
+
+# D-C (Batch 1): configurable lockout parameters with safe defaults.
+_LOCKOUT_MAX_ATTEMPTS = 5
+_LOCKOUT_DURATION_MINUTES = 15
 
 
 class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
@@ -43,6 +47,41 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     daily_cost_ceiling_inr_override: Mapped[Decimal | None] = mapped_column(
         Numeric(precision=10, scale=2), nullable=True
     )
+    # Batch 1 / D-C — account lockout columns (added in migration 0069).
+    failed_login_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # ── Lockout helper methods (D-C) ──────────────────────────────────
+
+    def is_locked(self) -> bool:
+        """Return True if the account is currently locked."""
+        if self.locked_until is None:
+            return False
+        return datetime.now(UTC) < self.locked_until
+
+    def locked_seconds_remaining(self) -> int:
+        """Return seconds until lockout expires, rounded up. 0 if not locked."""
+        if not self.is_locked() or self.locked_until is None:
+            return 0
+        delta = self.locked_until - datetime.now(UTC)
+        return max(0, int(delta.total_seconds()) + 1)
+
+    def record_failed_login(self) -> None:
+        """Increment failed_login_count; extend lockout if threshold reached.
+
+        Sliding window: a failed attempt while already locked pushes
+        locked_until forward by another _LOCKOUT_DURATION_MINUTES.
+        """
+        self.failed_login_count += 1
+        if self.failed_login_count >= _LOCKOUT_MAX_ATTEMPTS:
+            self.locked_until = datetime.now(UTC) + timedelta(minutes=_LOCKOUT_DURATION_MINUTES)
+
+    def record_successful_login(self) -> None:
+        """Reset lockout state on a successful credential check."""
+        self.failed_login_count = 0
+        self.locked_until = None
 
     enrollments: Mapped[list["Enrollment"]] = relationship(back_populates="student", lazy="select")
     submissions: Mapped[list["ExerciseSubmission"]] = relationship(

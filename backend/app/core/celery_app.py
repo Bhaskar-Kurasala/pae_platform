@@ -37,6 +37,8 @@ celery_app = Celery(
         # entries built by `register_proactive_schedules` (below)
         # target this name.
         "app.tasks.proactive_runner",
+        # Batch 1 / D-A — hourly cleanup of expired auth_tokens rows.
+        "app.tasks.cleanup_auth_tokens",
     ],
 )
 
@@ -96,6 +98,13 @@ celery_app.conf.update(
         "refresh-student-daily-cost": {
             "task": "app.tasks.refresh_student_daily_cost.refresh",
             "schedule": 60.0,  # seconds; Celery accepts float for sub-minute
+        },
+        # Batch 1 / D-A — hourly purge of auth_tokens rows expired >7 days ago.
+        # Runs at :05 past every hour to avoid competing with the :00 burst
+        # of other scheduled tasks.
+        "cleanup-expired-auth-tokens": {
+            "task": "app.tasks.cleanup_auth_tokens.cleanup_expired_auth_tokens",
+            "schedule": crontab(minute=5),
         },
     },
 )

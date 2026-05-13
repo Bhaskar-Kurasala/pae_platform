@@ -119,6 +119,18 @@ class Settings(BaseSettings):
     # SendGrid
     sendgrid_from_email: str = "noreply@pae.dev"
 
+    # Batch 1 / D-E — base URL for constructing auth email links.
+    # Dev default: localhost:3002 (docker-compose maps 3000 → 3002).
+    # Production: set to the public-facing HTTPS URL (e.g. https://pae.dev).
+    # Used in password-reset and email-verification link construction;
+    # never hardcode localhost in email_service auth methods.
+    public_base_url: str = "http://localhost:3002"
+
+    # Batch 1 / D-E — smoke-send target for development verification.
+    # Empty → send_test_email.py prints a no-op message and exits cleanly.
+    # Set to a real inbox address to verify SendGrid delivery end-to-end.
+    test_email_recipient: str = ""
+
     # CORS — PR3/D3.1 allowlist driven by `CORS_ORIGINS` env var.
     #
     # Env-var form: comma-separated list of origins, e.g.
