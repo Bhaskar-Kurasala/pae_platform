@@ -6,6 +6,22 @@ direction; original D19.2-D19.5 launch-operations arc reduced to
 match cohort-1 economic reality (20-100 users, solo on-call,
 $0/month tooling budget, "try again" failure UX acceptable).
 
+**Update (D19.3 closure, 2026-05-13):** D19.3 shipped the cost-
+tracking dashboard refinements (founder-glance panels in
+`docs/operations/dashboards/cost.json`). Two cost-tracking
+follow-ups landed as separate deferral docs with their own
+re-evaluation triggers:
+  * [`provider-level-cost-attribution-via-gen-ai-otel.md`](provider-level-cost-attribution-via-gen-ai-otel.md)
+    — per-LLM-provider / per-model-version / per-token-class
+    attribution; trigger: Anthropic gen_ai conventions reach stable.
+  * [`cohort-membership-modeling.md`](cohort-membership-modeling.md)
+    — per-cohort attribution; trigger: cohort-2 onboarding planning,
+    corporate cohort commitment, or cohort-1 retrospective question.
+
+D19.3 added no items to the deferred-alerts table below; the
+table is unchanged. The dashboard refinement was the only D19.3
+substrate work and it shipped, not deferred.
+
 ## What this is
 
 D19.2 shipped two alerts (cost spike, uptime) and the per-student

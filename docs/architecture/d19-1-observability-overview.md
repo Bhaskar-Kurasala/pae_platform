@@ -433,6 +433,48 @@ The cross-reference goes both ways:
     pattern territory) — confirms the per-arc discipline that
     consumption arcs don't expand the pattern catalog.
 
+## D19.3 cost tracking polish (cross-reference, added 2026-05-13)
+
+D19.3 is the smallest deliverable in the D19 arc — closure work
+on top of D19.1 substrate + D19.2 cost ceiling. Substrate-changing
+work is zero; D19.3 ships:
+
+  * **Founder-glance cost-dashboard panels.** Three new panels +
+    one consolidated panel + one placeholder panel in
+    [`docs/operations/dashboards/cost.json`](../operations/dashboards/cost.json):
+    `todays-burn-vs-expected` (delta-vs-7d-median),
+    `students-near-or-at-ceiling` (DB-sourced, joins
+    `mv_student_daily_cost` + `users.daily_cost_ceiling_inr_override`),
+    `ceiling-hits-today` (cohort_events-sourced), the consolidated
+    `cumulative-cost-today-week-month` superseding three separate
+    panels, and `per-cohort-attribution-placeholder` documenting
+    the deferred cohort_id concept inside the dashboard itself.
+  * **Dashboard schema extension** — `panel_type: "placeholder"`
+    and `source: "db_query"` discriminators added to the JSON
+    schema; discipline tests in
+    [`backend/tests/test_core/test_d19_cp4_dashboards.py`](../../backend/tests/test_core/test_d19_cp4_dashboards.py)
+    extended to honor the new shapes. Placeholder panels carry
+    `placeholder_reason`; db_query panels carry `query.sql`.
+  * **Two deferral docs** with concrete re-evaluation triggers:
+    [`provider-level-cost-attribution-via-gen-ai-otel.md`](../followups/provider-level-cost-attribution-via-gen-ai-otel.md)
+    (trigger: Anthropic gen_ai conventions reach stable;
+    cohort-1 surfaces an un-answerable cost question; or
+    provider mix changes) and
+    [`cohort-membership-modeling.md`](../followups/cohort-membership-modeling.md)
+    (trigger: cohort-2 onboarding planning begins; corporate
+    cohort enrollment commitment; or cohort-1 retrospective
+    surfaces an un-answerable cost-attribution question).
+  * **Pattern catalog**: no new candidates. Per the per-arc
+    discipline, consumption / closure arcs don't expand the
+    catalog. The D19.3 work is structural housekeeping
+    (dashboard authoring + follow-up registration) plus the
+    architectural-discipline-shaped decision of *how to defer*
+    (concrete re-evaluation triggers, not vague "future work"
+    framing).
+
+The cross-reference back to D19.1+D19.2 is one-directional at
+this stage: D19.3 consumes the substrate; it doesn't extend it.
+
 ## Cross-references
 
 - Saved D19.1 prompt: [`docs/claude-code-prompts/d19-1-prompt.md`](../claude-code-prompts/d19-1-prompt.md)

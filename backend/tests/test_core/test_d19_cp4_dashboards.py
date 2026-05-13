@@ -137,7 +137,13 @@ def test_dashboard_directory_has_six_dashboards() -> None:
 
 @pytest.mark.parametrize("path", _dashboard_files(), ids=lambda p: p.stem)
 def test_dashboard_parses_and_has_schema(path: Path) -> None:
-    """Every dashboard file is valid JSON with the canonical fields."""
+    """Every dashboard file is valid JSON with the canonical fields.
+
+    D19.3 update: ``placeholder`` panels (deferred-feature stubs)
+    and ``source: db_query`` panels (DB-sourced rather than
+    metric-sourced) are exempt from the ``query.metric`` requirement
+    — they have other shape contracts validated elsewhere.
+    """
     data = json.loads(path.read_text(encoding="utf-8"))
     for field in _REQUIRED_DASHBOARD_FIELDS:
         assert field in data, (
@@ -151,11 +157,33 @@ def test_dashboard_parses_and_has_schema(path: Path) -> None:
         f"{path.name}: 'panels' must be a non-empty list"
     )
     for panel in panels:
-        for field in _REQUIRED_PANEL_FIELDS:
+        # All panel types share id / title / panel_type / description.
+        for field in ("id", "title", "panel_type", "description"):
             assert field in panel, (
                 f"{path.name} panel {panel.get('id', '?')}: "
                 f"missing required field {field!r}"
             )
+        panel_type = panel.get("panel_type")
+        source = panel.get("source", "metric")
+        if panel_type == "placeholder":
+            # Placeholder panels document deferred features.
+            assert "placeholder_reason" in panel, (
+                f"{path.name} panel {panel['id']}: placeholder panel "
+                f"missing required field 'placeholder_reason'"
+            )
+            continue
+        # Non-placeholder panels must carry a query.
+        assert "query" in panel, (
+            f"{path.name} panel {panel['id']}: missing required field 'query'"
+        )
+        if source == "db_query":
+            # DB-sourced panels use SQL, not a metric reference.
+            assert "sql" in panel["query"], (
+                f"{path.name} panel {panel['id']}: source=db_query "
+                f"requires query.sql"
+            )
+            continue
+        # Standard metric-backed panel.
         assert "metric" in panel["query"], (
             f"{path.name} panel {panel['id']}: query missing 'metric'"
         )
@@ -188,11 +216,19 @@ def _strip_histogram_suffix(metric: str) -> str:
 @pytest.mark.parametrize("path", _dashboard_files(), ids=lambda p: p.stem)
 def test_dashboard_panel_metrics_are_registered(path: Path) -> None:
     """Every metric referenced in a panel query resolves to a metric
-    registered in REGISTRY. Catches naming drift at CI time."""
+    registered in REGISTRY. Catches naming drift at CI time.
+
+    D19.3 update: ``placeholder`` panels (no query) and
+    ``source: db_query`` panels (sql, not metric) are skipped.
+    """
     registered = _registered_metric_names()
     data = json.loads(path.read_text(encoding="utf-8"))
     unknown: list[tuple[str, str]] = []
     for panel in data["panels"]:
+        if panel.get("panel_type") == "placeholder":
+            continue
+        if panel.get("source") == "db_query":
+            continue
         metric = panel["query"]["metric"]
         base_metric = _strip_histogram_suffix(metric)
         if base_metric not in registered:
