@@ -6,6 +6,7 @@ POST /api/v1/teach-back/evaluate
 Thin controller — real work lives in `teach_back_service`.
 """
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -13,6 +14,7 @@ from app.core.security import get_current_user
 from app.models.user import User
 from app.services.teach_back_service import evaluate_explanation
 
+log = structlog.get_logger()
 router = APIRouter(prefix="/teach-back", tags=["teach-back"])
 
 
@@ -49,7 +51,11 @@ async def evaluate(
             reference_notes=payload.reference_notes,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=502, detail=f"Evaluation parse failed: {exc}") from exc
+        log.warning("teach_back.evaluate.parse_failed", error=str(exc))
+        raise HTTPException(
+            status_code=502,
+            detail="Service temporarily unavailable. Please try again.",
+        ) from exc
 
     return EvaluateResponse(
         accuracy=RubricScoreResponse(**result.accuracy.__dict__),

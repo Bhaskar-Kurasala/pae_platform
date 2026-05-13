@@ -101,7 +101,10 @@ async def stripe_webhook(
     except ValueError as exc:
         log.warning("billing.webhook.invalid_signature", error=str(exc))
         # Return 400 for signature failures so Stripe knows the secret is wrong.
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Webhook signature verification failed.",
+        ) from exc
 
     event_type: str = event.get("event_type", "")
     data: dict[str, Any] = event.get("data", {})

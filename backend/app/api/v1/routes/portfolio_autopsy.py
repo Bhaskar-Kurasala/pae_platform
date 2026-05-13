@@ -89,7 +89,11 @@ async def create_autopsy(
             what_was_hard_self=payload.what_was_hard_self,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=502, detail=f"Autopsy parse failed: {exc}") from exc
+        log.warning("portfolio_autopsy.parse_failed", error=str(exc))
+        raise HTTPException(
+            status_code=502,
+            detail="Service temporarily unavailable. Please try again.",
+        ) from exc
 
     # Best-effort persistence: a DB hiccup must NEVER deny the user the score.
     persisted_id: str | None = None

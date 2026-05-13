@@ -66,7 +66,11 @@ async def post_decode_jd(
             detail="JD decoder cost cap reached for this decode. Try again.",
         ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        log.warning("jd_decoder.validation_error", error=str(exc))
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to decode job description. Please check your input.",
+        ) from exc
 
     return DecodeJdResponse(
         jd_analysis_id=result.jd_analysis_id,

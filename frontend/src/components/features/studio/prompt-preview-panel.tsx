@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { MarkdownRenderer } from "@/components/features/markdown-renderer";
+import { GracefulFailureMessage } from "@/components/errors/graceful-failure-message";
+import { translateError } from "@/lib/error-toast";
 
 interface PromptPreviewPanelProps {
   code: string;
@@ -48,7 +50,8 @@ export function PromptPreviewPanel({ code }: PromptPreviewPanelProps) {
       const data = (await resp.json()) as { response?: string };
       setPreview(data.response ?? "No response from agent.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error generating preview.");
+      console.error("[prompt-preview] run failed", e);
+      setError(translateError(e));
     } finally {
       setLoading(false);
     }
@@ -75,9 +78,12 @@ export function PromptPreviewPanel({ code }: PromptPreviewPanelProps) {
         </button>
       </div>
       {error && (
-        <p className="rounded border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
-          {error}
-        </p>
+        <GracefulFailureMessage
+          userMessage={error}
+          onRetry={() => void runPreview()}
+          retryLabel="Retry"
+          className="text-xs"
+        />
       )}
       {preview ? (
         <div className="flex-1 overflow-auto rounded border border-border p-2 text-sm">

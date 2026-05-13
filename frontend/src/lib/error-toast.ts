@@ -33,6 +33,26 @@ export function withReference(text: string, requestId: string | null): string {
   return `${text}\nReference: ${short}`;
 }
 
+/**
+ * Translate an unknown error into a user-facing message string.
+ * Use for setError() / inline rendering paths (not toast).
+ * For toast paths use showErrorToast() directly.
+ */
+export function translateError(err: unknown): string {
+  if (err instanceof ApiTimeoutError) return err.message;
+  if (err instanceof ApiError) {
+    if (err.status === 401) return "Session expired. Please log in again.";
+    const body = err.body as
+      | { error?: { message?: string } }
+      | { detail?: string }
+      | undefined;
+    const fromEnvelope = body && "error" in body ? body.error?.message : null;
+    const fromDetail = body && "detail" in body ? body.detail : null;
+    return fromEnvelope || fromDetail || err.message || "Something went wrong";
+  }
+  return "Something went wrong. Please try again.";
+}
+
 export function showErrorToast(
   err: unknown,
   meta: { skipErrorToast?: boolean } | undefined,

@@ -944,7 +944,8 @@ async def trigger_agent(
     try:
         agent = get_agent(agent_name)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        log.warning("admin.agent_trigger.unknown_agent", agent=agent_name, error=str(exc))
+        raise HTTPException(status_code=404, detail="Agent not found.") from exc
 
     task = payload.task or f"Admin-triggered run of {agent_name} for {student.email}."
     state = AgentState(
@@ -964,7 +965,9 @@ async def trigger_agent(
         status_out = "completed"
     except Exception as exc:  # log_action already persists the failure
         log.exception("admin.agent_trigger.failed", agent=agent_name, error=str(exc))
-        raise HTTPException(status_code=500, detail=f"Agent run failed: {exc}") from exc
+        raise HTTPException(
+            status_code=500, detail="Agent run failed. Please try again."
+        ) from exc
     duration = int((datetime.now(UTC) - start).total_seconds() * 1000)
 
     preview = (result.response or "").strip()

@@ -15,6 +15,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Motivation } from "@/lib/api-client";
+import { GracefulFailureMessage } from "@/components/errors/graceful-failure-message";
+import { translateError } from "@/lib/error-toast";
 
 type MotivationChoice = {
   value: Motivation;
@@ -194,7 +196,8 @@ export function GoalContractForm({
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      console.error("[goal-contract] submit failed", err);
+      setError(translateError(err));
       setSubmitting(false);
     }
   }
@@ -432,12 +435,11 @@ export function GoalContractForm({
 
       {/* Error */}
       {error && (
-        <p
-          role="alert"
-          className="mt-4 text-sm text-destructive"
-        >
-          {error}
-        </p>
+        <GracefulFailureMessage
+          userMessage={error}
+          onRetry={() => void handleSubmit()}
+          className="mt-4 text-sm"
+        />
       )}
 
       {/* Controls */}

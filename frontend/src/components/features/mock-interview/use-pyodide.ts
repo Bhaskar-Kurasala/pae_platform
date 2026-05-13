@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { translateError } from "@/lib/error-toast";
 
 const PYODIDE_VERSION = "0.26.4";
 const PYODIDE_CDN = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full`;
@@ -91,7 +92,8 @@ export function usePyodide(options: UsePyodideOptions = {}) {
       setReady(true);
       return py;
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Pyodide failed to load.");
+      console.error("[pyodide] load failed", exc);
+      setError(translateError(exc));
       throw exc;
     } finally {
       setLoading(false);

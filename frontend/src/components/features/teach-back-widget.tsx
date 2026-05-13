@@ -6,6 +6,8 @@ import {
   teachBackApi,
   type TeachBackEvaluation,
 } from "@/lib/api-client";
+import { GracefulFailureMessage } from "@/components/errors/graceful-failure-message";
+import { translateError } from "@/lib/error-toast";
 
 function AxisRow({
   label,
@@ -49,7 +51,8 @@ export function TeachBackWidget() {
       });
       setResult(ev);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Evaluation failed");
+      console.error("[teach-back] evaluate failed", err);
+      setError(translateError(err));
     } finally {
       setSubmitting(false);
     }
@@ -110,9 +113,12 @@ export function TeachBackWidget() {
             />
           </div>
           {error && (
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {error}
-            </div>
+            <GracefulFailureMessage
+              userMessage={error}
+              onRetry={() => setError(null)}
+              retryLabel="Dismiss"
+              className="text-xs"
+            />
           )}
           <button
             type="submit"

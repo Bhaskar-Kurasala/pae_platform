@@ -100,7 +100,10 @@ async def request_practice_review(
         )
     except anthropic.APIError as exc:
         log.error("practice.review.api_error", err=str(exc))
-        raise HTTPException(status_code=502, detail=f"Reviewer API error: {exc}")
+        raise HTTPException(
+            status_code=502,
+            detail="Service temporarily unavailable. Please try again.",
+        )
 
     try:
         review_dict = json.loads(new_state.response or "{}")

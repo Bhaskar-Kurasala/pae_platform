@@ -34,6 +34,8 @@ import {
   type QuizQuestion,
 } from "@/lib/chat-api";
 import { toast } from "@/lib/toast";
+import { translateError } from "@/lib/error-toast";
+import { GracefulFailureMessage } from "@/components/errors/graceful-failure-message";
 import { ChatSkeleton } from "./chat-skeleton";
 import { FeedbackControls } from "./feedback-controls";
 import { SaveNoteModal } from "@/components/features/notebook/save-note-modal";
@@ -1808,10 +1810,13 @@ function ContextPickerPopover({
   const [data, setData] = useState<ContextSuggestionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let alive = true;
+    setLoading(true);
+    setError(null);
     (async () => {
       try {
         const res = await chatApi.getContextSuggestions();
@@ -1819,7 +1824,8 @@ function ContextPickerPopover({
         setData(res);
       } catch (err) {
         if (!alive) return;
-        setError(err instanceof Error ? err.message : "Failed to load");
+        console.error("[chat] context suggestions failed", err);
+        setError(translateError(err));
       } finally {
         if (alive) setLoading(false);
       }
@@ -1827,7 +1833,7 @@ function ContextPickerPopover({
     return () => {
       alive = false;
     };
-  }, []);
+  }, [retryCount]);
 
   // Click-outside dismiss.
   useEffect(() => {
@@ -1853,7 +1859,13 @@ function ContextPickerPopover({
       {loading ? (
         <div className="p-4 text-muted-foreground">Loading…</div>
       ) : error ? (
-        <div className="p-4 text-destructive">{error}</div>
+        <div className="p-4">
+          <GracefulFailureMessage
+            userMessage={error}
+            onRetry={() => setRetryCount((n) => n + 1)}
+            className="text-sm"
+          />
+        </div>
       ) : data ? (
         <div className="py-2">
           {data.submissions.length > 0 && (

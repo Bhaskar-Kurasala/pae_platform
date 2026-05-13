@@ -60,7 +60,10 @@ async def request_senior_review(
         )
     except anthropic.APIError as exc:
         log.error("senior_review.api_error", err=str(exc))
-        raise HTTPException(status_code=502, detail=f"Claude API error: {exc}")
+        raise HTTPException(
+            status_code=502,
+            detail="Service temporarily unavailable. Please try again.",
+        )
 
     try:
         review = json.loads(new_state.response or "{}")

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api-client";
 import { toast } from "@/lib/toast";
+import { showErrorToast } from "@/lib/error-toast";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -31,7 +32,8 @@ export default function CourseEditPage({ params }: PageProps) {
       await api.patch(`/api/v1/admin/courses/${id}`, parsed);
       toast.success("Course metadata saved.");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Save failed.");
+      console.error("[admin/courses/edit] save metadata failed", err);
+      showErrorToast(err, undefined);
     } finally {
       setSavingCourse(false);
     }
@@ -57,7 +59,8 @@ export default function CourseEditPage({ params }: PageProps) {
       );
       toast.success("Rubric saved.");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Save failed.");
+      console.error("[admin/courses/edit] save rubric failed", err);
+      showErrorToast(err, undefined);
     } finally {
       setSavingRubric(false);
     }

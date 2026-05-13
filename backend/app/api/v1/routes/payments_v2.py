@@ -127,11 +127,12 @@ async def create_order_route(
         # Domain-level rejection: unpublished course / zero amount / unknown
         # target. Surface as 400 so the client can show the user a message
         # rather than a 500.
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        log.warning("payments.order.validation_error", error=str(exc))
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to create payment order. Please check your request and try again.",
+        ) from exc
     except ProviderUnavailableError as exc:
-        # Razorpay/Stripe is misconfigured or down — return 502 so the caller
-        # can retry with backoff. Logged with full context already by the
-        # provider service.
         log.warning(
             "payments.order.provider_unavailable",
             provider=payload.provider,
@@ -140,7 +141,7 @@ async def create_order_route(
         )
         raise HTTPException(
             status_code=502,
-            detail=f"Payment provider unavailable: {exc}",
+            detail="Payment provider is temporarily unavailable. Please try again.",
         ) from exc
     except PaymentProviderError as exc:
         log.error(
@@ -149,7 +150,8 @@ async def create_order_route(
             error=str(exc),
         )
         raise HTTPException(
-            status_code=502, detail=str(exc)
+            status_code=502,
+            detail="Payment provider is temporarily unavailable. Please try again.",
         ) from exc
 
     target_title = (
@@ -401,9 +403,10 @@ async def free_enroll_route(
             course_id=payload.course_id,
         )
     except ValueError as exc:
+        log.warning("payments.free_enroll.validation_error", error=str(exc))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
+            detail="Unable to grant free enrollment. Please check your request.",
         ) from exc
 
     await db.commit()

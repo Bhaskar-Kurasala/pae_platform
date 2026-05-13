@@ -9,6 +9,7 @@ import {
 } from "@/lib/hooks/use-mock-interview";
 import { COPY } from "./copy";
 import { usePyodide } from "./use-pyodide";
+import { translateError } from "@/lib/error-toast";
 
 interface LiveCodingProps {
   session: StartMockResponse;
@@ -113,9 +114,8 @@ export function LiveCoding({
       }
       submitStartedAtRef.current = Date.now();
     } catch (exc) {
-      setError(
-        exc instanceof Error ? exc.message : COPY.errors.answerFailed,
-      );
+      console.error("[live-coding] submit answer failed", exc);
+      setError(translateError(exc));
     }
   }, [
     code,
@@ -263,14 +263,15 @@ export function LiveCoding({
         ) : null}
 
         {error ? (
-          <div
-            style={{
-              marginTop: 10,
-              fontSize: 13,
-              color: "var(--rose)",
-            }}
-          >
-            {error}
+          <div style={{ marginTop: 10 }}>
+            <p style={{ fontSize: 13, color: "var(--rose)", margin: 0 }}>{error}</p>
+            <button
+              type="button"
+              onClick={() => { setError(null); void submit(); }}
+              style={{ marginTop: 6, fontSize: 12, cursor: "pointer" }}
+            >
+              Try again
+            </button>
           </div>
         ) : null}
       </div>

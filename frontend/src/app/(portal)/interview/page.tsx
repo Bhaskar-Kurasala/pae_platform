@@ -19,6 +19,8 @@ import {
 } from "@/lib/api-client";
 import { PageShell } from "@/components/layouts/page-shell";
 import { PageHeader } from "@/components/layouts/page-header";
+import { GracefulFailureMessage } from "@/components/errors/graceful-failure-message";
+import { translateError } from "@/lib/error-toast";
 
 interface Turn {
   id: string;
@@ -113,7 +115,8 @@ export default function InterviewPage() {
       setTurns([{ id: crypto.randomUUID(), role: "interviewer", content: res.prompt }]);
       setDebrief(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't start interview");
+      console.error("[interview] start failed", err);
+      setError(translateError(err));
     } finally {
       setStarting(false);
     }
@@ -187,7 +190,8 @@ export default function InterviewPage() {
       }
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") return;
-      setError(err instanceof Error ? err.message : "Stream failed");
+      console.error("[interview] stream failed", err);
+      setError(translateError(err));
     } finally {
       setStreaming(false);
       abortRef.current = null;
@@ -202,7 +206,8 @@ export default function InterviewPage() {
       const d = await interviewApi.debrief(session.session_id);
       setDebrief(d);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Debrief failed");
+      console.error("[interview] debrief failed", err);
+      setError(translateError(err));
     } finally {
       setDebriefing(false);
     }
@@ -271,9 +276,11 @@ export default function InterviewPage() {
           </div>
 
           {error && (
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error}
-            </div>
+            <GracefulFailureMessage
+              userMessage={error}
+              onRetry={handleStart}
+              className="text-sm"
+            />
           )}
 
           <button
@@ -424,9 +431,12 @@ export default function InterviewPage() {
       </div>
 
       {error && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          {error}
-        </div>
+        <GracefulFailureMessage
+          userMessage={error}
+          onRetry={handleReset}
+          retryLabel="Reset interview"
+          className="text-xs"
+        />
       )}
 
       <form

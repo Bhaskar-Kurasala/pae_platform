@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import { useMisconceptions } from "@/lib/hooks/use-misconceptions";
 import { useStudio } from "./studio-context";
+import { GracefulFailureMessage } from "@/components/errors/graceful-failure-message";
+import { translateError } from "@/lib/error-toast";
 
 // ---------------------------------------------------------------------------
 // Mental Model Check panel
@@ -244,9 +246,12 @@ export function MisconceptionsPanel() {
         </header>
 
         {error && (
-          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
-            {error.message}
-          </div>
+          <GracefulFailureMessage
+            userMessage={translateError(error)}
+            onRetry={() => { reset(); mutate(code); }}
+            retryLabel="Re-check"
+            className="text-xs"
+          />
         )}
 
         {data && data.items.length === 0 && !isPending && (

@@ -143,9 +143,11 @@ async def post_turn(
             student_message=payload.content,
         )
     except SessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        log.warning("readiness.turn.session_not_found", error=str(exc))
+        raise HTTPException(status_code=404, detail="Session not found.") from exc
     except SessionAlreadyClosedError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        log.warning("readiness.turn.session_closed", error=str(exc))
+        raise HTTPException(status_code=409, detail="Session is already closed.") from exc
     except CostCapExceededError as exc:
         raise HTTPException(
             status_code=429,
@@ -181,9 +183,11 @@ async def post_finalize_session(
             closing_note=payload.closing_note,
         )
     except SessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        log.warning("readiness.finalize.session_not_found", error=str(exc))
+        raise HTTPException(status_code=404, detail="Session not found.") from exc
     except SessionAlreadyClosedError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        log.warning("readiness.finalize.session_closed", error=str(exc))
+        raise HTTPException(status_code=409, detail="Session is already closed.") from exc
     except CostCapExceededError as exc:
         raise HTTPException(
             status_code=429,
@@ -229,9 +233,11 @@ async def post_abandon_session(
             db, user_id=current_user.id, session_id=session_id
         )
     except SessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        log.warning("readiness.abandon.session_not_found", error=str(exc))
+        raise HTTPException(status_code=404, detail="Session not found.") from exc
     except SessionAlreadyClosedError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        log.warning("readiness.abandon.session_closed", error=str(exc))
+        raise HTTPException(status_code=409, detail="Session is already closed.") from exc
 
 
 @router.get("/sessions", response_model=PastDiagnosesResponse)
@@ -274,7 +280,8 @@ async def post_next_action_click(
             db, user_id=current_user.id, session_id=session_id
         )
     except SessionMissingVerdictError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        log.warning("readiness.click.session_missing_verdict", error=str(exc))
+        raise HTTPException(status_code=404, detail="Session verdict not found.") from exc
     return NextActionClickResponse(
         session_id=session_id, clicked_at=clicked_at
     )
@@ -301,7 +308,8 @@ async def post_check_completion(
             db, user_id=current_user.id, session_id=session_id
         )
     except SessionMissingVerdictError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        log.warning("readiness.completion.session_missing_verdict", error=str(exc))
+        raise HTTPException(status_code=404, detail="Session verdict not found.") from exc
     return CompletionCheckResponse(
         session_id=result.session_id,
         clicked_at=result.clicked_at,
