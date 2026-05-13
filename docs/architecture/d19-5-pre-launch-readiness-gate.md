@@ -101,6 +101,22 @@ GREEN-config — code fix + regression-guard tests landed; **backfill
 execution against production pending founder run** (10-second
 dev-DB verification proves the apply path works end-to-end).
 
+**Closure-time test verification (2026-05-13 evening):** 80/80
+D19 unit tests pass in 3.93s; Phase B sweep on canonical
+playwright-runner: **52 passed + 2 failed + 4 xfailed** in 12m39s.
+The 2 failures (`test_career_coach_response_has_real_llm_cost` +
+`test_career_coach_writes_agent_actions_with_full_cost_tracking`)
+are the documented supervisor-malformed-JSON batch-flake cluster
+registered in
+[`docs/followups/cp3-traceability-supervisor-flake.md`](../followups/cp3-traceability-supervisor-flake.md)
+— 100% isolation pass per D19.1 CP3 evidence. Within the
+documented flake band; not auth-signup-grace-fix regressions.
+A first Phase B attempt earlier today produced 8 failures, all
+`anthropic.APIConnectionError` — root cause was a transient
+MiniMax outage (`api.minimax.io` timed out from the runner
+network for ~30 min). Retry post-MiniMax-recovery produced the
+2-failure documented-flake result.
+
 **What landed in the fix commit:**
 - `entitlement_service.py:677` + `:732` — dropped the `::jsonb`
   cast suffix on both call sites. Postgres auto-casts the
