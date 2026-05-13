@@ -19,7 +19,7 @@ from app.services.jd_parser import ParsedJd
 REGISTER_PAYLOAD = {
     "email": "tailored@example.com",
     "full_name": "Tailored Tester",
-    "password": "testpass123",
+    "password": "testpass12345",
 }
 
 

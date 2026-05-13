@@ -6,11 +6,11 @@ from httpx import AsyncClient
 async def _admin_token(client: AsyncClient) -> str:
     await client.post(
         "/api/v1/auth/register",
-        json={"email": "admintest@example.com", "full_name": "Admin", "password": "admin1234", "role": "admin"},
+        json={"email": "admintest@example.com", "full_name": "Admin", "password": "admin12345678", "role": "admin"},
     )
     resp = await client.post(
         "/api/v1/auth/login",
-        json={"email": "admintest@example.com", "password": "admin1234"},
+        json={"email": "admintest@example.com", "password": "admin12345678"},
     )
     return resp.json()["access_token"]
 
@@ -18,13 +18,29 @@ async def _admin_token(client: AsyncClient) -> str:
 async def _student_token(client: AsyncClient) -> str:
     await client.post(
         "/api/v1/auth/register",
-        json={"email": "stutest@example.com", "full_name": "Student", "password": "pass1234"},
+        json={"email": "stutest@example.com", "full_name": "Student", "password": "pass12345678"},
     )
     resp = await client.post(
         "/api/v1/auth/login",
-        json={"email": "stutest@example.com", "password": "pass1234"},
+        json={"email": "stutest@example.com", "password": "pass12345678"},
     )
     return resp.json()["access_token"]
+
+
+async def _register_student_get_id(
+    client: AsyncClient, email: str, full_name: str = "Target", extra: dict | None = None
+) -> str:
+    """Register a student and return their user_id via /me (D-B: register returns 202 not user data)."""
+    payload: dict = {"email": email, "full_name": full_name, "password": "pass12345678"}
+    if extra:
+        payload.update(extra)
+    await client.post("/api/v1/auth/register", json=payload)
+    login = await client.post(
+        "/api/v1/auth/login", json={"email": email, "password": "pass12345678"}
+    )
+    token = login.json()["access_token"]
+    me = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+    return str(me.json()["id"])
 
 
 @pytest.mark.asyncio
@@ -63,7 +79,7 @@ async def test_admin_students_list(client: AsyncClient) -> None:
     # Register a student first
     await client.post(
         "/api/v1/auth/register",
-        json={"email": "teststudent2@example.com", "full_name": "Test Student", "password": "pass1234"},
+        json={"email": "teststudent2@example.com", "full_name": "Test Student", "password": "pass12345678"},
     )
     resp = await client.get("/api/v1/admin/students", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
@@ -81,17 +97,12 @@ async def test_admin_log_manual_outreach_writes_outreach_log(
     triggered_by_user_id=<admin>, status='sent'.
     """
     admin_token = await _admin_token(client)
-    student_resp = await client.post(
-        "/api/v1/auth/register",
-        json={
-            "email": "outreach-target@example.com",
-            "full_name": "Outreach Target",
-            "password": "pass1234",
-            "whatsapp_number": "+919999988888",
-        },
+    student_id = await _register_student_get_id(
+        client,
+        "outreach-target@example.com",
+        "Outreach Target",
+        extra={"whatsapp_number": "+919999988888"},
     )
-    assert student_resp.status_code == 201
-    student_id = student_resp.json()["id"]
 
     resp = await client.post(
         f"/api/v1/admin/students/{student_id}/outreach",
@@ -111,15 +122,7 @@ async def test_admin_log_manual_outreach_writes_outreach_log(
 async def test_admin_log_manual_outreach_phone_channel(client: AsyncClient) -> None:
     """D16/CP3.2 — channel='phone' is also accepted for voice-call records."""
     admin_token = await _admin_token(client)
-    student_resp = await client.post(
-        "/api/v1/auth/register",
-        json={
-            "email": "phone-target@example.com",
-            "full_name": "Phone Target",
-            "password": "pass1234",
-        },
-    )
-    student_id = student_resp.json()["id"]
+    student_id = await _register_student_get_id(client, "phone-target@example.com", "Phone Target")
 
     resp = await client.post(
         f"/api/v1/admin/students/{student_id}/outreach",
@@ -137,11 +140,7 @@ async def test_admin_log_manual_outreach_rejects_unknown_channel(
     """D16/CP3.2 — only whatsapp + phone allowed; email/in_app go through
     their own service paths and shouldn't be admin-loggable retroactively."""
     admin_token = await _admin_token(client)
-    student_resp = await client.post(
-        "/api/v1/auth/register",
-        json={"email": "reject-target@example.com", "full_name": "Reject", "password": "pass1234"},
-    )
-    student_id = student_resp.json()["id"]
+    student_id = await _register_student_get_id(client, "reject-target@example.com", "Reject")
 
     resp = await client.post(
         f"/api/v1/admin/students/{student_id}/outreach",
@@ -164,15 +163,7 @@ async def test_admin_log_manual_outreach_surfaces_on_timeline(
     with the correct kind + channel, so the frontend badge renders.
     """
     admin_token = await _admin_token(client)
-    student_resp = await client.post(
-        "/api/v1/auth/register",
-        json={
-            "email": "timeline-target@example.com",
-            "full_name": "Timeline Target",
-            "password": "pass1234",
-        },
-    )
-    student_id = student_resp.json()["id"]
+    student_id = await _register_student_get_id(client, "timeline-target@example.com", "Timeline Target")
 
     log_resp = await client.post(
         f"/api/v1/admin/students/{student_id}/outreach",
@@ -202,11 +193,7 @@ async def test_admin_log_manual_outreach_requires_admin(
 ) -> None:
     """Non-admin can't log outreach against another student."""
     student_token = await _student_token(client)
-    other_resp = await client.post(
-        "/api/v1/auth/register",
-        json={"email": "other-target@example.com", "full_name": "Other", "password": "pass1234"},
-    )
-    other_id = other_resp.json()["id"]
+    other_id = await _register_student_get_id(client, "other-target@example.com", "Other")
 
     resp = await client.post(
         f"/api/v1/admin/students/{other_id}/outreach",

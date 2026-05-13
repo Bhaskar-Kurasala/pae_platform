@@ -18,3 +18,20 @@ class RefreshRequest(BaseModel):
     # this body field. Body is still accepted for the legacy
     # localStorage frontend flow until that's migrated.
     refresh_token: str = ""
+
+
+class RegisterResponse(BaseModel):
+    message: str
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+class PasswordResetRequestPayload(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmPayload(BaseModel):
+    token: str
+    new_password: str

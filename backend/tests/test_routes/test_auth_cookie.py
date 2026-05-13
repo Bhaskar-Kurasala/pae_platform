@@ -29,13 +29,13 @@ async def _register_and_login(
         json={
             "email": email,
             "full_name": "Cookie Tester",
-            "password": "pass1234",
+            "password": "pass12345678",
             "role": "student",
         },
     )
     resp = await client.post(
         "/api/v1/auth/login",
-        json={"email": email, "password": "pass1234"},
+        json={"email": email, "password": "pass12345678"},
     )
     assert resp.status_code == 200, resp.text
     set_cookie = resp.headers.get("set-cookie", "")

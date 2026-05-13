@@ -117,6 +117,8 @@ export const useAuthStore = create<AuthState>()(
       },
 
       register: async (email, fullName, password, whatsappNumber) => {
+        // D-B: register always returns 202 with a neutral message.
+        // No auto-login: the user must verify their email before login is allowed.
         await authApi.register({
           email,
           full_name: fullName,
@@ -126,30 +128,6 @@ export const useAuthStore = create<AuthState>()(
           // skips the optional input.
           ...(whatsappNumber ? { whatsapp_number: whatsappNumber } : {}),
         });
-        const tokens = await authApi.login({ email, password });
-        set({
-          token: tokens.access_token,
-          refreshToken: tokens.refresh_token,
-          isAuthenticated: true,
-        });
-        try {
-          const userResp = await authApi.me();
-          const user = toUser(userResp);
-          set({ user });
-          setRoleCookie(user.role);
-          // PR3/C3.2 — track signup (method = email since OAuth
-          // signup goes through a different code path).
-          trackSignedUp(user.id, "email");
-        } catch (err) {
-          set({
-            user: null,
-            token: null,
-            refreshToken: null,
-            isAuthenticated: false,
-          });
-          setRoleCookie(null);
-          throw err;
-        }
       },
 
       logout: () => {

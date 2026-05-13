@@ -40,19 +40,28 @@ _GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 _GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 
-_FRONTEND_DASHBOARD = "http://localhost:3000/dashboard"
-_FRONTEND_ERROR = "http://localhost:3000/login?error=oauth_failed"
+def _frontend_dashboard() -> str:
+    return f"{settings.public_base_url}/dashboard"
+
+
+def _frontend_error() -> str:
+    return f"{settings.public_base_url}/login?error=oauth_failed"
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 
 def _github_callback_url() -> str:
-    return "http://localhost:8000/api/v1/auth/oauth/github/callback"
+    # Backend callback must go through the API host, not the frontend base URL.
+    # In production, PUBLIC_BASE_URL is the frontend domain; the backend sits at
+    # the same domain under /api via nginx. We strip trailing slashes defensively.
+    base = settings.public_base_url.rstrip("/")
+    return f"{base}/api/v1/auth/oauth/github/callback"
 
 
 def _google_callback_url() -> str:
-    return "http://localhost:8000/api/v1/auth/oauth/google/callback"
+    base = settings.public_base_url.rstrip("/")
+    return f"{base}/api/v1/auth/oauth/google/callback"
 
 
 async def _upsert_oauth_user(db: AsyncSession, info: OAuthUserInfo) -> Any:
@@ -125,7 +134,7 @@ async def github_callback(
     """Handle the GitHub OAuth callback, issue a JWT, and redirect to the dashboard."""
     if not settings.github_client_id or not settings.github_client_secret:
         log.error("oauth.github.not_configured")
-        return RedirectResponse(url=_FRONTEND_ERROR, status_code=302)
+        return RedirectResponse(url=_frontend_error(), status_code=302)
 
     async with httpx.AsyncClient() as client:
         # Exchange the authorisation code for an access token.
@@ -142,13 +151,13 @@ async def github_callback(
 
     if token_resp.status_code != 200:
         log.warning("oauth.github.token_exchange_failed", status=token_resp.status_code)
-        return RedirectResponse(url=_FRONTEND_ERROR, status_code=302)
+        return RedirectResponse(url=_frontend_error(), status_code=302)
 
     token_data = token_resp.json()
     access_token: str | None = token_data.get("access_token")
     if not access_token:
         log.warning("oauth.github.no_access_token", response=token_data)
-        return RedirectResponse(url=_FRONTEND_ERROR, status_code=302)
+        return RedirectResponse(url=_frontend_error(), status_code=302)
 
     # Fetch the GitHub user profile.
     headers = {
@@ -161,7 +170,7 @@ async def github_callback(
 
     if user_resp.status_code != 200:
         log.warning("oauth.github.user_fetch_failed", status=user_resp.status_code)
-        return RedirectResponse(url=_FRONTEND_ERROR, status_code=302)
+        return RedirectResponse(url=_frontend_error(), status_code=302)
 
     gh_user = user_resp.json()
     email: str | None = gh_user.get("email")
@@ -175,7 +184,7 @@ async def github_callback(
 
     if not email:
         log.warning("oauth.github.no_email", github_id=gh_user.get("id"))
-        return RedirectResponse(url=_FRONTEND_ERROR, status_code=302)
+        return RedirectResponse(url=_frontend_error(), status_code=302)
 
     info = OAuthUserInfo(
         email=email,
@@ -190,10 +199,10 @@ async def github_callback(
         user = await _upsert_oauth_user(db, info)
     except Exception as exc:
         log.error("oauth.github.db_error", error=str(exc))
-        return RedirectResponse(url=_FRONTEND_ERROR, status_code=302)
+        return RedirectResponse(url=_frontend_error(), status_code=302)
 
     jwt_token = create_access_token({"sub": str(user.id), "role": user.role})
-    redirect_url = f"{_FRONTEND_DASHBOARD}?token={jwt_token}"
+    redirect_url = f"{_frontend_dashboard()}?token={jwt_token}"
     log.info("oauth.github.success", user_id=str(user.id))
     return RedirectResponse(url=redirect_url, status_code=status.HTTP_302_FOUND)
 
@@ -232,7 +241,7 @@ async def google_callback(
     """Handle the Google OAuth callback, issue a JWT, and redirect to the dashboard."""
     if not settings.google_client_id or not settings.google_client_secret:
         log.error("oauth.google.not_configured")
-        return RedirectResponse(url=_FRONTEND_ERROR, status_code=302)
+        return RedirectResponse(url=_frontend_error(), status_code=302)
 
     async with httpx.AsyncClient() as client:
         token_resp = await client.post(
@@ -248,13 +257,13 @@ async def google_callback(
 
     if token_resp.status_code != 200:
         log.warning("oauth.google.token_exchange_failed", status=token_resp.status_code)
-        return RedirectResponse(url=_FRONTEND_ERROR, status_code=302)
+        return RedirectResponse(url=_frontend_error(), status_code=302)
 
     token_data = token_resp.json()
     google_access_token: str | None = token_data.get("access_token")
     if not google_access_token:
         log.warning("oauth.google.no_access_token", response=token_data)
-        return RedirectResponse(url=_FRONTEND_ERROR, status_code=302)
+        return RedirectResponse(url=_frontend_error(), status_code=302)
 
     # Fetch the Google user info.
     async with httpx.AsyncClient() as client:
@@ -265,13 +274,13 @@ async def google_callback(
 
     if userinfo_resp.status_code != 200:
         log.warning("oauth.google.userinfo_failed", status=userinfo_resp.status_code)
-        return RedirectResponse(url=_FRONTEND_ERROR, status_code=302)
+        return RedirectResponse(url=_frontend_error(), status_code=302)
 
     userinfo = userinfo_resp.json()
     email: str | None = userinfo.get("email")
     if not email:
         log.warning("oauth.google.no_email", sub=userinfo.get("sub"))
-        return RedirectResponse(url=_FRONTEND_ERROR, status_code=302)
+        return RedirectResponse(url=_frontend_error(), status_code=302)
 
     info = OAuthUserInfo(
         email=email,
@@ -285,9 +294,9 @@ async def google_callback(
         user = await _upsert_oauth_user(db, info)
     except Exception as exc:
         log.error("oauth.google.db_error", error=str(exc))
-        return RedirectResponse(url=_FRONTEND_ERROR, status_code=302)
+        return RedirectResponse(url=_frontend_error(), status_code=302)
 
     jwt_token = create_access_token({"sub": str(user.id), "role": user.role})
-    redirect_url = f"{_FRONTEND_DASHBOARD}?token={jwt_token}"
+    redirect_url = f"{_frontend_dashboard()}?token={jwt_token}"
     log.info("oauth.google.success", user_id=str(user.id))
     return RedirectResponse(url=redirect_url, status_code=status.HTTP_302_FOUND)

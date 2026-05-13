@@ -6,7 +6,15 @@ from app.core.database import get_db
 from app.core.rate_limit import limiter
 from app.core.security import get_current_user
 from app.models.user import User
-from app.schemas.auth import LoginRequest, RefreshRequest, TokenResponse
+from app.schemas.auth import (
+    LoginRequest,
+    PasswordResetConfirmPayload,
+    PasswordResetRequestPayload,
+    RefreshRequest,
+    RegisterResponse,
+    TokenResponse,
+    VerifyEmailRequest,
+)
 from app.schemas.user import UserCreate, UserResponse
 from app.services.auth_service import AuthService
 
@@ -72,14 +80,50 @@ def get_auth_service(db: AsyncSession = Depends(get_db)) -> AuthService:
     return AuthService(db)
 
 
-@router.post("/register", response_model=UserResponse, status_code=201)
+@router.post("/register", response_model=RegisterResponse, status_code=202)
 @limiter.limit("10/minute")
 async def register(
     request: Request,
     payload: UserCreate,
     service: AuthService = Depends(get_auth_service),
-) -> User:
+) -> dict[str, str]:
+    """D-B: Always returns 202 with a neutral message — never reveals whether
+    the email is new or already registered (enumeration prevention)."""
     return await service.register(payload)
+
+
+@router.post("/verify-email", response_model=RegisterResponse, status_code=200)
+@limiter.limit("10/minute")
+async def verify_email(
+    request: Request,
+    payload: VerifyEmailRequest,
+    service: AuthService = Depends(get_auth_service),
+) -> dict[str, str]:
+    """A2: Consume an email_verify token and mark the account as verified."""
+    return await service.verify_email(payload.token)
+
+
+@router.post("/password-reset/request", response_model=RegisterResponse, status_code=202)
+@limiter.limit("5/minute")
+async def password_reset_request(
+    request: Request,
+    payload: PasswordResetRequestPayload,
+    service: AuthService = Depends(get_auth_service),
+) -> dict[str, str]:
+    """A1: Always 202 — neutral message prevents email enumeration."""
+    ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else None)
+    return await service.request_password_reset(payload.email, ip_address=ip)
+
+
+@router.post("/password-reset/confirm", response_model=RegisterResponse, status_code=200)
+@limiter.limit("10/minute")
+async def password_reset_confirm(
+    request: Request,
+    payload: PasswordResetConfirmPayload,
+    service: AuthService = Depends(get_auth_service),
+) -> dict[str, str]:
+    """A1: Validate reset token and set new password."""
+    return await service.confirm_password_reset(payload.token, payload.new_password)
 
 
 @router.post("/login", response_model=TokenResponse)

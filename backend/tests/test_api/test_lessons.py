@@ -18,13 +18,13 @@ async def _admin_token(client: AsyncClient) -> str:
         json={
             "email": "lessonadmin@example.com",
             "full_name": "Admin",
-            "password": "admin123",
+            "password": "admin1234567",
             "role": "admin",
         },
     )
     resp = await client.post(
         "/api/v1/auth/login",
-        json={"email": "lessonadmin@example.com", "password": "admin123"},
+        json={"email": "lessonadmin@example.com", "password": "admin1234567"},
     )
     return resp.json()["access_token"]
 

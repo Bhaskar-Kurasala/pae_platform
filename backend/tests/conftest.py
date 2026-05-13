@@ -158,6 +158,45 @@ async def db_session() -> AsyncSession:
 
 
 @pytest.fixture(autouse=True)
+def _auto_verify_registered_users(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Batch 1 test-env shim: auto-set is_verified=True after every register().
+
+    D-C: login now gates on is_verified=True (migration 0069 grandfather).
+    Test helpers across ~50 test files do register→login without the verification
+    step. Rather than update every helper, we patch AuthService.register to
+    return a user dict AND set is_verified on the DB object before returning.
+
+    This only patches the test environment — the production code path is
+    unchanged. Intentionally autouse so every test file gets it automatically.
+    """
+    from app.services import auth_service as _auth_svc_mod
+
+    _original_register = _auth_svc_mod.AuthService.register
+
+    async def _patched_register(self, payload):  # type: ignore[no-untyped-def]
+        result = await _original_register(self, payload)
+        # After registration, mark the user as verified in the shared test session
+        # so the subsequent login call in test helpers succeeds.
+        try:
+            from sqlalchemy import select
+
+            from app.models.user import User
+
+            db_result = await self.repo.db.execute(
+                select(User).where(User.email == payload.email)
+            )
+            user = db_result.scalar_one_or_none()
+            if user is not None and not user.is_verified:
+                user.is_verified = True
+                await self.repo.db.flush()
+        except Exception:  # noqa: BLE001
+            pass
+        return result
+
+    monkeypatch.setattr(_auth_svc_mod.AuthService, "register", _patched_register)
+
+
+@pytest.fixture(autouse=True)
 def reset_rate_limiter() -> None:
     """Reset slowapi storage between tests so rate limits don't accumulate.
 
@@ -200,3 +239,57 @@ async def client(db_session: AsyncSession) -> AsyncClient:
     ) as ac:
         yield ac
     app.dependency_overrides.clear()
+
+
+# ── Batch 1 auth helper ─────────────────────────────────────────────────────
+#
+# D-B: register now returns 202 (never 201). D-D: password must be ≥12 chars.
+# D-C: login is gated on is_verified=True.
+#
+# All test helpers that previously did register→login with an 8-char password
+# now use this fixture-level function. It:
+#   1. Registers the user (202).
+#   2. Sets is_verified=True on the ORM object via the shared session (same
+#      connection as the HTTP client uses, so changes are visible immediately).
+#   3. Logs in and returns the access token.
+#
+# Tests import this via `from tests.conftest import register_and_login` OR use
+# the `auth_token` fixture below which provides a pre-authed token string.
+
+_TEST_PASSWORD = "TestPassword123!"  # ≥12 chars, not in common-password list
+
+
+async def register_and_login(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    email: str = "testuser@example.com",
+    full_name: str = "Test User",
+    role: str = "student",
+    password: str = _TEST_PASSWORD,
+) -> str:
+    """Register a user, mark them verified, login, return access token."""
+    from sqlalchemy import select
+
+    from app.models.user import User
+
+    await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "full_name": full_name, "password": password, "role": role},
+    )
+    result = await db_session.execute(select(User).where(User.email == email))
+    user = result.scalar_one_or_none()
+    if user is not None:
+        user.is_verified = True
+        await db_session.flush()
+
+    login_resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": password},
+    )
+    return login_resp.json()["access_token"]
+
+
+@pytest.fixture
+async def auth_token(client: AsyncClient, db_session: AsyncSession) -> str:
+    """Fixture: returns an access token for a freshly-registered verified user."""
+    return await register_and_login(client, db_session)

@@ -398,7 +398,13 @@ export const authApi = {
     password: string;
     // D16/CP3.1 — optional, E.164 recommended (e.g. "+919876543210").
     whatsapp_number?: string;
-  }) => api.post<UserResponse>("/api/v1/auth/register", body),
+  }) => api.post<{ message: string }>("/api/v1/auth/register", body),
+  verifyEmail: (token: string) =>
+    api.post<{ message: string }>("/api/v1/auth/verify-email", { token }),
+  requestPasswordReset: (email: string) =>
+    api.post<{ message: string }>("/api/v1/auth/password-reset/request", { email }),
+  confirmPasswordReset: (token: string, new_password: string) =>
+    api.post<{ message: string }>("/api/v1/auth/password-reset/confirm", { token, new_password }),
   login: (body: { email: string; password: string }) =>
     api.post<TokenResponse>("/api/v1/auth/login", body),
   refresh: (body: { refresh_token: string }) =>

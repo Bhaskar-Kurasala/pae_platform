@@ -7,7 +7,7 @@ from httpx import AsyncClient
 REGISTER_PAYLOAD = {
     "email": "billing_user@example.com",
     "full_name": "Billing User",
-    "password": "secret123",
+    "password": "secret1234567",
 }
 
 

@@ -16,16 +16,19 @@ from app.models.lesson import Lesson
 async def _register_and_login(
     client: AsyncClient, email: str, role: str = "student"
 ) -> tuple[str, str]:
-    reg = await client.post(
+    await client.post(
         "/api/v1/auth/register",
-        json={"email": email, "full_name": "T", "password": "pass1234", "role": role},
+        json={"email": email, "full_name": "T", "password": "pass12345678", "role": role},
     )
-    user_id = reg.json()["id"]
     resp = await client.post(
         "/api/v1/auth/login",
-        json={"email": email, "password": "pass1234"},
+        json={"email": email, "password": "pass12345678"},
     )
-    return resp.json()["access_token"], user_id
+    token = resp.json()["access_token"]
+    # D-B: register no longer returns user data; get user_id from /me.
+    me = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+    user_id = me.json()["id"]
+    return token, user_id
 
 
 async def _seed_exercise(db: AsyncSession) -> uuid.UUID:
