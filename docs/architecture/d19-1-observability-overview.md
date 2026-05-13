@@ -475,6 +475,58 @@ work is zero; D19.3 ships:
 The cross-reference back to D19.1+D19.2 is one-directional at
 this stage: D19.3 consumes the substrate; it doesn't extend it.
 
+## D19.5 pre-launch readiness gate (cross-reference, added 2026-05-13)
+
+D19.5 is the final architect-led deliverable in the D19 arc.
+Gate-keeping, not authoring. Ships:
+
+  * **9 functional-shape smoke tests** at
+    [`backend/tests/test_core/test_d19_5_pre_launch_readiness.py`](../../backend/tests/test_core/test_d19_5_pre_launch_readiness.py)
+    verifying every load-bearing path cohort-1 launch depends on:
+    /health (UptimeRobot contract), /metrics auth + 4 of 15
+    canonical metrics, per-student ceiling enforcement (both
+    branches: at-threshold blocks + below-threshold allows),
+    graceful-failure envelope shape, correlation-ID flow into
+    structlog context, cost dashboard schema, both follow-up
+    docs with concrete triggers. All passing in 0.23s in the
+    canonical playwright-runner environment.
+  * **Gate document** at
+    [`d19-5-pre-launch-readiness-gate.md`](d19-5-pre-launch-readiness-gate.md)
+    with honest green/yellow/red classification across 10
+    architect-led substrate dimensions + 4 parallel ops-side
+    items + go/no-go aggregate. The agent reports state; the
+    founder makes the call.
+  * **No new substrate.** D-A: D19.5 is verification-only. If
+    smoke tests had surfaced gaps, the gaps land as separate
+    deliverables.
+
+The cross-reference back to D19.1+D19.2+D19.3: D19.5 consumes
+every substrate piece these three deliverables shipped. Each
+smoke test names the substrate dimension it verifies in its
+docstring; each gate-doc row links to the substrate it confirms.
+
+## D19 arc final state (2026-05-13)
+
+| Deliverable | State | Commit | Notes |
+|-------------|-------|--------|-------|
+| **D19.1** observability substrate | ✅ SEALED | `3a7f211` | structlog + prometheus + OpenTelemetry + dashboards-as-code + backend decision (γ Honeycomb) |
+| **D19.2** alerting + cost ceiling + UX | ✅ SEALED | `2f8a367` | 2 alerts (config-shipped), per-student ceiling enforcement live, graceful-failure UX unified |
+| **D19.3** cost tracking polish | ✅ SEALED | `3285199` | 5 founder-glance dashboard panels + 2 deferred follow-ups with concrete triggers |
+| **D19.4** on-call rotation / runbooks | 🛑 PARKED | — | Re-evaluation trigger: second engineer joins OR cohort >200 users (per D19.2 D-D) |
+| **D19.5** pre-launch readiness gate | ✅ SEALED | _this commit_ | 9 smoke tests + gate doc; 10 substrate dimensions GREEN, 4 ops-side items RED (founder-side / bug-fix-team work, not architect-led) |
+
+**D19 arc: CLOSED.** Cumulative cost: ~₹21-31 of ~₹15-25 original
+envelope. Overage explained by closure-time test verification
+discipline (D19.1 CP5 canonical sub-rule); the verification is
+what makes the gate document trustworthy.
+
+Post-D19.5 engagement shape changes: from architect-led
+deliverables to incident-response + iteration shaped by real
+cohort-1 evidence. Architect returns for specific architectural
+decisions (cohort_id schema when triggers fire, D19.4 un-park
+when triggers fire, future agent design, schema migration,
+scaling decisions) rather than continuous deliverable shaping.
+
 ## Cross-references
 
 - Saved D19.1 prompt: [`docs/claude-code-prompts/d19-1-prompt.md`](../claude-code-prompts/d19-1-prompt.md)

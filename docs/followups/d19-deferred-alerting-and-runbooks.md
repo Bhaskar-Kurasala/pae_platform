@@ -22,6 +22,18 @@ D19.3 added no items to the deferred-alerts table below; the
 table is unchanged. The dashboard refinement was the only D19.3
 substrate work and it shipped, not deferred.
 
+**Update (D19.5 closure, 2026-05-13):** D19.5 (pre-launch
+readiness gate) confirmed this deferred-alerts table remains
+accurate. The 12 deferred alerts continue tracked-not-blocking;
+no items moved to GREEN (none have triggered re-engagement) and
+no items moved to RED (no new operational pain). The parked D19.4
+trigger ("second engineer joins OR cohort >200 users") remains
+valid; no re-evaluation needed at this gate. D19.5 gate doc
+([`docs/architecture/d19-5-pre-launch-readiness-gate.md`](../architecture/d19-5-pre-launch-readiness-gate.md))
+is the canonical post-D19-arc readiness reference; the deferred-
+alerts table here remains the pre-launch inventory of "what's
+NOT being paged at cohort-1 launch."
+
 ## What this is
 
 D19.2 shipped two alerts (cost spike, uptime) and the per-student
