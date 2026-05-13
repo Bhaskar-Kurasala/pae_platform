@@ -123,6 +123,8 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             request_id=request_id,
             trace_id=trace_id,
         )
+        from app.core.sentry import set_request_context
+        set_request_context(request_id, trace_id)
         # D19.2 / CP1.5 — also surface the IDs on request.state so
         # the global exception handler (which runs OUTSIDE this
         # middleware's dispatch via Starlette's outer exception

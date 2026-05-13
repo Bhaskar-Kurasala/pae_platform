@@ -141,6 +141,26 @@ def set_agent_context(agent_name: str | None) -> None:
         log.debug("sentry.set_tag_failed", error=str(exc))
 
 
+def set_request_context(request_id: str | None, trace_id: str | None) -> None:
+    """Tag the current Sentry scope with the request and trace IDs.
+
+    Called by RequestIDMiddleware once per request so every Sentry event
+    captured during that request carries these IDs for issue correlation.
+    No-op when Sentry is disabled or both IDs are None.
+    """
+    if not _enabled:
+        return
+    try:
+        import sentry_sdk
+
+        if request_id:
+            sentry_sdk.set_tag("request_id", request_id)
+        if trace_id:
+            sentry_sdk.set_tag("trace_id", trace_id)
+    except Exception as exc:
+        log.debug("sentry.set_request_context_failed", error=str(exc))
+
+
 def capture_exception(exc: BaseException) -> None:
     """Manually report an exception that's been swallowed (e.g. inside
     a fire-and-forget background task that won't trip the FastAPI
