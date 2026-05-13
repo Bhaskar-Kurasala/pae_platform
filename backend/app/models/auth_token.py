@@ -53,7 +53,10 @@ class AuthToken(Base):
     user: Mapped["User"] = relationship("User", lazy="select")
 
     def is_expired(self) -> bool:
-        return datetime.now(UTC) >= self.expires_at
+        expires = self.expires_at
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        return datetime.now(UTC) >= expires
 
     def is_used(self) -> bool:
         return self.used_at is not None

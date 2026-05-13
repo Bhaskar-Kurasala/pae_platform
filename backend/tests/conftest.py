@@ -159,15 +159,39 @@ async def db_session() -> AsyncSession:
 
 @pytest.fixture(autouse=True)
 def _auto_verify_registered_users(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Batch 1 test-env shim: auto-set is_verified=True after every register().
+    """Batch 1 test infrastructure: auto-set is_verified=True after every register().
 
-    D-C: login now gates on is_verified=True (migration 0069 grandfather).
-    Test helpers across ~50 test files do register→login without the verification
-    step. Rather than update every helper, we patch AuthService.register to
-    return a user dict AND set is_verified on the DB object before returning.
+    PURPOSE
+    -------
+    D-C (login gate) requires is_verified=True before issuing tokens. ~52 test
+    helpers do register→login in sequence without a verification step. This
+    fixture patches AuthService.register so every test helper's register call
+    automatically marks the new user verified in the shared DB session — no
+    changes needed in individual test files.
 
-    This only patches the test environment — the production code path is
-    unchanged. Intentionally autouse so every test file gets it automatically.
+    SCOPE
+    -----
+    Test environment only. Production AuthService.register is unchanged.
+    Autouse ensures every test file gets it without explicit opt-in.
+
+    BYPASS PATTERN (for tests that need an unverified user)
+    -------------------------------------------------------
+    Tests that specifically need is_verified=False MUST bypass the service
+    entirely and create the User directly via ORM:
+
+        user = User(email=..., hashed_password=hash_password(...), is_verified=False)
+        db_session.add(user)
+        await db_session.flush()
+
+    Do NOT call client.post("/api/v1/auth/register") for unverified-state tests
+    — the patch will auto-verify the user before your test can assert on the
+    unverified state. See test_auth_token_service.py and test_auth.py for examples.
+
+    PATTERN 35 REFERENCE
+    --------------------
+    This is test infrastructure, not a workaround. The production login
+    state-machine (Pattern 35, N=6) is exercised directly in test_auth.py
+    and test_services/test_auth_token_service.py using the ORM bypass path.
     """
     from app.services import auth_service as _auth_svc_mod
 

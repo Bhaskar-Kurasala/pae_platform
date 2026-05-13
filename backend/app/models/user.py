@@ -59,7 +59,10 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         """Return True if the account is currently locked."""
         if self.locked_until is None:
             return False
-        return datetime.now(UTC) < self.locked_until
+        locked_until = self.locked_until
+        if locked_until.tzinfo is None:
+            locked_until = locked_until.replace(tzinfo=UTC)
+        return datetime.now(UTC) < locked_until
 
     def locked_seconds_remaining(self) -> int:
         """Return seconds until lockout expires, rounded up. 0 if not locked."""

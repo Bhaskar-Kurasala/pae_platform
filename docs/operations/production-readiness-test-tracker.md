@@ -1,6 +1,6 @@
 # Production-readiness test tracker
 
-Living document. Last updated: 2026-05-13.
+Living document. Last updated: 2026-05-14.
 
 Owner: founder. Update every time a test is run or an edge case is
 discovered. The `Status` column uses:
@@ -170,6 +170,79 @@ unknowns. **Low** rows are post-launch polish.
 | `ad43f2d` | /logout route (was 404); chat quiz pregenerate 422 race-condition guard; docker-compose API URL realigned to :8001 |
 | `425602c` | Stale conversation 404 self-heal (strip `?c=` + clear localStorage) |
 | `9ea91a2` | XSS in admin retention feed (event.text rendered as HTML; full_name was user-controlled) — render as text |
+
+---
+
+---
+
+## Section 2 — Batch 1 automated test coverage (2026-05-14)
+
+### 2.1 Auth API (pytest, tests/test_api/test_auth.py)
+
+| # | Test case | Status | Notes |
+|---|-----------|--------|-------|
+| 2.1.1 | Register returns 202 + neutral message | ✅ | D-B |
+| 2.1.2 | Duplicate email registration returns 202 (not 409) | ✅ | D-B enumeration prevention |
+| 2.1.3 | Password < 12 chars rejected 422 | ✅ | D-D |
+| 2.1.4 | WhatsApp number accepted on register | ✅ | D16/CP3.1 |
+| 2.1.5 | Login success (verified user) | ✅ | D-C |
+| 2.1.6 | Login blocked for unverified user (403) | ✅ | A2 |
+| 2.1.7 | Login wrong password (401) | ✅ | D-C |
+| 2.1.8 | Login unknown email (401) | ✅ | D-C |
+| 2.1.9 | GET /me returns user data | ✅ | |
+| 2.1.10 | GET /me with invalid token (401) | ✅ | |
+
+### 2.2 AuthToken service unit tests (pytest, tests/test_services/test_auth_token_service.py)
+
+45 tests covering:
+
+| Group | Tests | Status |
+|-------|-------|--------|
+| (a) Token lifecycle — create/retrieve/mark-used/cleanup | 11 | ✅ 11/11 |
+| (b) Register — all 3 branches return identical 202 shape | 4 | ✅ 4/4 |
+| (c) Password complexity boundary | 5 | ✅ 5/5 |
+| (e) Email verification — happy path, expired, reuse, wrong type | 5 | ✅ 5/5 |
+| (f) Password reset — happy path, lockout clear, complexity, reuse, expired, wrong type | 6 | ✅ 6/6 |
+| (g) Account lockout — thresholds, sliding window, reset paths | 6 | ✅ 6/6 |
+| (h) Login blocked for unverified | 1 | ✅ 1/1 |
+| (i) Login blocked for locked user + failure counter | 3 | ✅ 3/3 |
+| (j) OAuth new user sets is_verified=True; existing preserved | 2 | ✅ 2/2 |
+| (k) Email rate limit key structure independence | 2 | ✅ 2/2 |
+| (l) grant_signup_grace JSONB regression guard | 1 | ✅ 1/1 |
+
+**Critical regression guard:** test (l) `test_grant_signup_grace_jsonb_path_intact` — if this fails, the Batch 1 best-effort wrapper has regressed and must be investigated immediately.
+
+### 2.3 Frontend auth page UI tests (Vitest, src/app/(public)/__tests__/auth-pages.test.tsx)
+
+| # | Test case | Status | Notes |
+|---|-----------|--------|-------|
+| 2.3.1 | Register: 12-char hint visible | ✅ | D-D frontend |
+| 2.3.2 | Register: password input has minLength=12 | ✅ | D-D frontend |
+| 2.3.3 | Register: success state shown after 202 | ✅ | D-B frontend |
+| 2.3.4 | Register: no /onboarding redirect on success | ✅ | D-B contract |
+| 2.3.5 | Password reset request: email form renders | ✅ | A1 frontend |
+| 2.3.6 | Password reset request: success message is generic (no email-existence leak) | ✅ | A1 + D-B pattern |
+| 2.3.7 | Password reset confirm: renders new password form | ✅ | A1 frontend |
+| 2.3.8 | Password reset confirm: success state + sign-in link | ✅ | A1 frontend |
+| 2.3.9 | Login: locked message shown on 423 | ✅ | D-C frontend |
+| 2.3.10 | Login: forgot password link present | ✅ | A1 frontend |
+| 2.3.11 | Login: resend verification link shown on 403 unverified | ✅ | A2 frontend |
+
+### 2.4 Phase B journey tests (pytest, tests/playwright/journeys/test_cp2_auth_journeys.py)
+
+| # | Journey | Status | Notes |
+|---|---------|--------|-------|
+| 2.4.1 | Register returns 202 + neutral message (live API) | 🔲 | Requires Docker stack |
+| 2.4.2 | Duplicate register still 202 (live API) | 🔲 | Requires Docker stack |
+| 2.4.3 | Login blocked for unverified user (live API) | 🔲 | Requires Docker stack |
+| 2.4.4 | Email verification token flow (live API) | 🔲 | Requires test-support token endpoint |
+| 2.4.5 | Password reset request always 202 (live API) | 🔲 | Requires Docker stack |
+| 2.4.6 | Password reset confirm flow + token reuse (live API) | 🔲 | Requires test-support token endpoint |
+| 2.4.7 | Weak password rejected on reset confirm (live API) | 🔲 | Requires test-support token endpoint |
+| 2.4.8 | 5 failed logins → 423 lockout (live API) | 🔲 | Requires Docker stack |
+| 2.4.9 | Lockout clears after password reset (live API) | 🔲 | Requires test-support token endpoint |
+
+Note: journeys 2.4.4/2.4.6/2.4.7/2.4.9 require a `/api/v1/auth/test-support/latest-token` endpoint that reads the latest auth_token row from the DB. This endpoint should only be mounted when `settings.testing = True`. Deferred to Batch 2 infrastructure work.
 
 ---
 
