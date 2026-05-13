@@ -893,7 +893,14 @@ export default function AdminConsoleV1Page() {
                         >
                           {TAG_LABELS[e.kind] ?? e.kind}
                         </span>
-                        <span dangerouslySetInnerHTML={{ __html: e.text }} />
+                        {/* Audit 2026-05-13: event.text is composed
+                            from user-controlled fields (full_name,
+                            exercise.title) in services/{auth,exercise,
+                            promotion_summary}.py. dangerouslySetInnerHTML
+                            here would let a registering student inject
+                            HTML into every admin's dashboard. Render as
+                            text — no intentional HTML in these labels. */}
+                        <span>{e.text}</span>
                       </div>
                     </div>
                   ))

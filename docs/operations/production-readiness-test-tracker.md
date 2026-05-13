@@ -1,0 +1,181 @@
+# Production-readiness test tracker
+
+Living document. Last updated: 2026-05-13.
+
+Owner: founder. Update every time a test is run or an edge case is
+discovered. The `Status` column uses:
+
+- ✅ — passed in browser/integration
+- ❌ — failed; bug filed or fix shipped
+- ⚠️ — partial / blocked / needs infra
+- 🔲 — not yet tested
+- 🔁 — deferred (post-launch acceptable)
+
+---
+
+## Section 1 — Tested so far (MCP browser audit, 2026-05-13)
+
+### 1.1 Auth & navigation
+
+| # | Test case | Status | Notes |
+|---|-----------|--------|-------|
+| 1.1.1 | Student login (cp3-smoke-student@example.com) | ✅ | Lands on /today |
+| 1.1.2 | Admin login (admin-1776497996@example.com) | ✅ | Lands on /admin |
+| 1.1.3 | Direct nav to `/logout` (was 404) | ✅ | Fixed in `ad43f2d` — now redirects to /login |
+| 1.1.4 | Logout clears auth state | ✅ | Verified — login form re-rendered |
+
+### 1.2 Chat (student)
+
+| # | Test case | Status | Notes |
+|---|-----------|--------|-------|
+| 1.2.1 | Send a chat message → assistant response streams | ✅ | "Say hi…" round-trip clean |
+| 1.2.2 | Quiz pregenerate 422 on every send | ✅ | Fixed in `ad43f2d` — content non-empty guard |
+| 1.2.3 | Stale `?c=` ID produces 404 spam | ✅ | Fixed in `425602c` — self-heals to /chat |
+
+### 1.3 Admin pages (admin role)
+
+| # | Test case | Status | Notes |
+|---|-----------|--------|-------|
+| 1.3.1 | /admin home renders | ✅ | 0 errors |
+| 1.3.2 | /admin/students | ✅ | 0 errors |
+| 1.3.3 | /admin/courses | ✅ | 0 errors |
+| 1.3.4 | /admin/at-risk | ✅ | 0 errors |
+| 1.3.5 | /admin/audit-log | ✅ | 0 errors |
+| 1.3.6 | /admin/confusion | ✅ | 0 errors |
+| 1.3.7 | /admin/content | ✅ | 0 errors |
+| 1.3.8 | /admin/content-performance | ⚠️ | Redirects to /admin/content — intentional? |
+| 1.3.9 | /admin/pulse | ✅ | 0 errors |
+
+### 1.4 Authz boundaries
+
+| # | Test case | Status | Notes |
+|---|-----------|--------|-------|
+| 1.4.1 | Student → /api/v1/admin/students | ✅ | 403 |
+| 1.4.2 | Student → /api/v1/admin/audit-log | ✅ | 403 |
+| 1.4.3 | Student → /api/v1/admin/pulse | ✅ | 403 |
+| 1.4.4 | Student → other student's conversation | ✅ | 404 (canonical safe response — no info leak) |
+
+### 1.5 Mobile / responsive
+
+| # | Test case | Status | Notes |
+|---|-----------|--------|-------|
+| 1.5.1 | 375×812 viewport — /today | ✅ | 0 errors |
+| 1.5.2 | 375×812 viewport — /chat | ✅ | 0 errors |
+| 1.5.3 | 375×812 viewport — /catalog | ✅ | 0 errors |
+
+### 1.6 Payments
+
+| # | Test case | Status | Notes |
+|---|-----------|--------|-------|
+| 1.6.1 | GET /api/v1/payments/orders responds | ✅ | 200 |
+| 1.6.2 | Razorpay test-mode checkout flow | ⚠️ | Skipped — no Razorpay creds wired in dev |
+
+---
+
+## Section 2 — Edge cases identified, not yet tested
+
+Brainstormed 2026-05-13. **High** rows are launch-blockers or close
+to it. **Medium** rows worth checking but acceptable to launch with
+unknowns. **Low** rows are post-launch polish.
+
+### 2.1 Auth & sessions
+
+| # | Test case | Priority | Status | Notes |
+|---|-----------|----------|--------|-------|
+| 2.1.1 | Expired access token mid-SSE stream — does refresh kick in or does stream die silently? | High | 🔲 | |
+| 2.1.2 | Two tabs, one user — logout in tab A; tab B still operates until next 401 | Low | 🔲 | |
+| 2.1.3 | Refresh-token rotation race — two parallel 401s both try to refresh | Medium | 🔲 | |
+| 2.1.4 | Login with leading/trailing whitespace in email | Medium | 🔲 | Trim on frontend AND backend? |
+| 2.1.5 | Password reset flow exists + works end-to-end | **High** | 🔲 | Launch blocker if missing |
+| 2.1.6 | Email verification on signup — required? Bypassable? | Medium | 🔲 | |
+| 2.1.7 | "Remember me" / session persistence across browser restart | Low | 🔲 | |
+| 2.1.8 | Email enumeration on signup ("user exists" vs "ok") | **High** | 🔲 | Security baseline |
+
+### 2.2 Chat & streaming
+
+| # | Test case | Priority | Status | Notes |
+|---|-----------|----------|--------|-------|
+| 2.2.1 | User closes tab mid-stream — does backend stop generating? | **High** | 🔲 | Burns LLM tokens otherwise |
+| 2.2.2 | Network drop mid-stream — UI shows recoverable error or hangs? | Medium | 🔲 | |
+| 2.2.3 | Double-submit while stream in flight — send button disabled? | Medium | 🔲 | |
+| 2.2.4 | Empty / whitespace-only message — API 422 cleanly? | Low | 🔲 | Frontend likely blocks |
+| 2.2.5 | Very long message (>20KB paste) — UX when exceeded? | Medium | 🔲 | |
+| 2.2.6 | XSS / markdown injection in assistant output | **High** | 🔲 | grep `dangerouslySetInnerHTML` |
+| 2.2.7 | Mode switch mid-conversation — applies to next message or retroactive? | Low | 🔲 | |
+
+### 2.3 Cost ceilings & rate limits
+
+| # | Test case | Priority | Status | Notes |
+|---|-----------|----------|--------|-------|
+| 2.3.1 | Hitting daily cost ceiling mid-stream — graceful abort? | Medium | 🔲 | |
+| 2.3.2 | SlowAPI rate-limit response — frontend shows meaningful message? | Medium | 🔲 | |
+| 2.3.3 | Midnight IST rollover mid-conversation — ceiling resets cleanly? | Low | 🔲 | |
+
+### 2.4 Data integrity
+
+| # | Test case | Priority | Status | Notes |
+|---|-----------|----------|--------|-------|
+| 2.4.1 | Account self-deletion (GDPR endpoint exists?) | Medium | 🔲 | Matters when first EU user signs up |
+| 2.4.2 | Edit a message with child quiz/notebook attached — orphans? | Medium | 🔲 | |
+| 2.4.3 | Concurrent edits from two tabs to same message | Low | 🔲 | |
+| 2.4.4 | Conversation deletion cascade (notebook, quiz, flashcards) | Medium | 🔲 | |
+
+### 2.5 Network / infra
+
+| # | Test case | Priority | Status | Notes |
+|---|-----------|----------|--------|-------|
+| 2.5.1 | Backend cold start — frontend retries? | Low | 🔲 | |
+| 2.5.2 | Nginx restart mid-request — graceful 502 + retry? | Low | 🔲 | |
+| 2.5.3 | Slow LLM response (>30s) — proxy/keepalive timeout? | Medium | 🔲 | |
+
+### 2.6 Browser / device
+
+| # | Test case | Priority | Status | Notes |
+|---|-----------|----------|--------|-------|
+| 2.6.1 | Safari iOS — SSE + send-on-enter + IME | Medium | 🔲 | |
+| 2.6.2 | Browser back button from /chat?c=ID → scroll + hydrate clean? | Low | 🔲 | |
+| 2.6.3 | Screen-reader signup → chat-send a11y flow | 🔁 | 🔲 | Post-launch |
+| 2.6.4 | Dark mode persists across refresh + login/logout | Low | 🔲 | |
+
+### 2.7 Security (IDOR sweep — same probe as 1.4.4 across other resources)
+
+| # | Test case | Priority | Status | Notes |
+|---|-----------|----------|--------|-------|
+| 2.7.1 | Student A → student B's notebook entry | **High** | 🔲 | |
+| 2.7.2 | Student A → student B's flashcards | **High** | 🔲 | |
+| 2.7.3 | Student A → student B's quiz attempts | **High** | 🔲 | |
+| 2.7.4 | Student A → student B's mock-interview report | **High** | 🔲 | |
+| 2.7.5 | Student A → student B's portfolio | **High** | 🔲 | |
+| 2.7.6 | File-upload MIME check (chat attachments) | Medium | 🔲 | |
+| 2.7.7 | File-upload size limit | Medium | 🔲 | |
+| 2.7.8 | File-upload path traversal in filenames | Medium | 🔲 | |
+| 2.7.9 | `.env` excluded from docker image + git | **High** | 🔲 | One-line grep |
+| 2.7.10 | CORS allowlist — rejects `null` and `*` | Medium | 🔲 | |
+
+### 2.8 Operational
+
+| # | Test case | Priority | Status | Notes |
+|---|-----------|----------|--------|-------|
+| 2.8.1 | Sentry receives events in prod | **High** | 🔲 | Verify post-deploy with a forced exception |
+| 2.8.2 | Honeycomb spans flowing in prod | **High** | 🔲 | Verify post-deploy |
+| 2.8.3 | Backup job runs + restore tested | **High** | 🔲 | Launch blocker |
+| 2.8.4 | Migration 0067 rollback exists + tested | **High** | 🔲 | |
+
+---
+
+## Section 3 — Fixes shipped during this audit
+
+| Commit | Fix |
+|--------|-----|
+| `ad43f2d` | /logout route (was 404); chat quiz pregenerate 422 race-condition guard; docker-compose API URL realigned to :8001 |
+| `425602c` | Stale conversation 404 self-heal (strip `?c=` + clear localStorage) |
+
+---
+
+## How to use this doc
+
+- When you run a test, update the row's Status + Notes.
+- When you find a new edge case, add a row in the right section.
+- When you ship a fix, add a row to Section 3.
+- Treat **High**-priority 🔲 rows as launch blockers until they
+  flip to ✅ or get a justified 🔁 with reasoning.
