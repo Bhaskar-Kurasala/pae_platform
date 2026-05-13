@@ -4027,9 +4027,17 @@ function ChatPageInner() {
         }
       } catch {
         // Fall back to a fresh conversation if the server returns 404/403.
+        // Also strip `?c=` from the URL so a refresh doesn't re-fire the
+        // doomed request (audit 2026-05-13: stale IDs in localStorage or
+        // shared links produced noisy 404s in DevTools on every page load).
         setHydratedMessages(undefined);
         setActiveConvId(null);
         writeLastViewedId(null);
+        // Always strip `?c=` on 404/403 — including initial mount where
+        // pushUrl is false — so a refresh doesn't re-fire the doomed
+        // request. The 404 itself still logs to DevTools once (browser
+        // built-in; cannot suppress), but subsequent navigations are clean.
+        router.replace("/chat");
       }
     },
     [router],
