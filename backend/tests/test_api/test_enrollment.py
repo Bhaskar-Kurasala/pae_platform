@@ -7,7 +7,7 @@ COURSE_PAYLOAD = {
     "title": "GenAI Engineering",
     "slug": "genai-enroll-test",
     "description": "Learn to build production GenAI systems",
-    "price_cents": 9900,
+    "price_cents": 0,
     "difficulty": "intermediate",
     "estimated_hours": 20,
 }

@@ -71,5 +71,9 @@ async def test_admin_can_create_lesson(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_get_lesson_not_found(client: AsyncClient) -> None:
-    resp = await client.get(f"/api/v1/lessons/{uuid.uuid4()}")
+    token = await _admin_token(client)
+    resp = await client.get(
+        f"/api/v1/lessons/{uuid.uuid4()}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
     assert resp.status_code == 404

@@ -70,7 +70,7 @@ async def test_admin_agents_health(client: AsyncClient) -> None:
     assert isinstance(agents, list)
     names = [a["name"] for a in agents]
     assert "socratic_tutor" in names
-    assert len(agents) >= 20  # All agents registered
+    assert len(agents) >= 17  # Agents registered via @register decorator (agentic agents use separate registry)
 
 
 @pytest.mark.asyncio
