@@ -560,31 +560,6 @@ export function PracticeScreen() {
                     ? `Quality ${qualityScore}/100`
                     : "Ready to run"}
                 </span>
-                <button
-                  type="button"
-                  className="editor-btn"
-                  onClick={openSaveDialog}
-                  data-testid="save-to-notebook"
-                  aria-label="Save to notebook"
-                >
-                  <BookmarkPlus className="inline-block h-3 w-3 mr-1" />
-                  Save to Notebook
-                </button>
-                <button
-                  type="button"
-                  className={cn("editor-btn run", running && "running")}
-                  onClick={handleRunAndReview}
-                  disabled={running || seniorReview.isPending}
-                  data-testid="run-and-review"
-                  aria-label="Run and review"
-                >
-                  <Play className="inline-block h-3 w-3 mr-1" />
-                  {running
-                    ? "Running…"
-                    : seniorReview.isPending
-                      ? "Reviewing…"
-                      : "Run & review"}
-                </button>
               </div>
             </div>
 
@@ -616,6 +591,59 @@ export function PracticeScreen() {
             ) : showTestsTab ? (
               <TestsPane result={runResult} />
             ) : null}
+
+            {/* P-Practice2 — editor footer. Bottom-anchored Save + Run match
+                the v10 mock; left side shows lightweight code-meta + an
+                inline Reset that restores the starter. */}
+            <div className="practice-editor-footer">
+              <div className="practice-editor-footer-left">
+                <button
+                  type="button"
+                  className="editor-chip"
+                  onClick={() => {
+                    const starter =
+                      selectedExerciseDetail?.starter_code ?? STARTER_CAPSTONE;
+                    setCode(starter);
+                    codeChangedSinceMount.current = false;
+                  }}
+                  data-testid="editor-reset"
+                  aria-label="Reset to starter code"
+                  title="Reset to starter code"
+                >
+                  ↺ Reset
+                </button>
+                <span className="practice-editor-meta">
+                  python 3.11 · {code.split("\n").length} lines
+                </span>
+              </div>
+              <div className="practice-editor-footer-right">
+                <button
+                  type="button"
+                  className="editor-btn"
+                  onClick={openSaveDialog}
+                  data-testid="save-to-notebook"
+                  aria-label="Save to notebook"
+                >
+                  <BookmarkPlus className="inline-block h-3 w-3 mr-1" />
+                  Save to Notebook
+                </button>
+                <button
+                  type="button"
+                  className={cn("editor-btn run", running && "running")}
+                  onClick={handleRunAndReview}
+                  disabled={running || seniorReview.isPending}
+                  data-testid="run-and-review"
+                  aria-label="Run and review"
+                >
+                  <Play className="inline-block h-3 w-3 mr-1" />
+                  {running
+                    ? "Running…"
+                    : seniorReview.isPending
+                      ? "Reviewing…"
+                      : "Run & request review"}
+                </button>
+              </div>
+            </div>
           </section>
 
           {/* ─── RIGHT RAIL: review panel ─── */}
@@ -645,6 +673,44 @@ export function PracticeScreen() {
                 </div>
               </div>
             </div>
+
+            {/* P-Practice2 — 4-lens checklist. Static visual shell for now;
+                once the senior-review API returns lens scores, we can light
+                up each checkbox. Hidden after a real review lands (so the
+                live review-items below take over). */}
+            {qualityScore === null && (
+              <div
+                className="practice-lens-list"
+                data-testid="practice-lens-list"
+              >
+                {[
+                  {
+                    title: "Failure modes covered",
+                    hint: "Retries, timeouts, rate limits, auth.",
+                  },
+                  {
+                    title: "Cost & latency awareness",
+                    hint: "Token budgets, model choice, caching.",
+                  },
+                  {
+                    title: "Observability",
+                    hint: "Structured logs, request IDs, replay.",
+                  },
+                  {
+                    title: "Composability",
+                    hint: "Pure surface, no hidden state, testable.",
+                  },
+                ].map((lens) => (
+                  <div className="practice-lens-row" key={lens.title}>
+                    <span className="practice-lens-check" aria-hidden="true" />
+                    <div>
+                      <strong>{lens.title}</strong>
+                      <span>{lens.hint}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="review-stack">
               {reviewItems.map((item, idx) => (
