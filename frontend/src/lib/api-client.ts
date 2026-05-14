@@ -1521,6 +1521,8 @@ export interface CatalogCourseResponse {
   price_cents: number;
   currency: string;
   is_published: boolean;
+  /** Featured courses are pinned to the top of the student catalog with a badge. */
+  is_featured?: boolean;
   difficulty: string;
   bullets: CatalogBullet[];
   metadata: Record<string, unknown>;

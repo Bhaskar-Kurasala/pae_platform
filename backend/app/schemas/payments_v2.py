@@ -131,6 +131,7 @@ class CatalogCourseResponse(BaseModel):
     # overrides arrive in a later phase.
     currency: str
     is_published: bool
+    is_featured: bool = False
     difficulty: str
     bullets: list[dict]
     metadata: dict

@@ -185,9 +185,8 @@ export default function CourseEditPage({ params }: PageProps) {
               />
               <span>·</span>
               <a
-                href={`/courses/${course.slug}`}
-                target="_blank"
-                rel="noopener noreferrer"
+                href={`/courses/${id}`}
+                target="careeros-student-preview"
                 style={{
                   fontSize: 11,
                   fontWeight: 700,

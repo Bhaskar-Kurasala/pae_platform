@@ -104,6 +104,7 @@ class HealthMetric(PydanticModel):
     tone: str
     delta: float | None
     delta_text: str | None
+    sparkline_7d: list[float] = []
 
 
 class HealthStripResponse(PydanticModel):
@@ -2585,6 +2586,24 @@ async def admin_log_manual_outreach(
 # ── Admin health strip (6 aggregate metrics) ─────────────────────────────────
 
 
+def _fill_daily_buckets(
+    rows: list[tuple[Any, int]], today: date, days: int = 7
+) -> list[float]:
+    """Fill a 7-day series oldest-first; missing days become 0."""
+    by_day: dict[date, float] = {}
+    for day_key, count in rows:
+        if day_key is None:
+            continue
+        if isinstance(day_key, datetime):
+            day_key = day_key.date()
+        by_day[day_key] = float(count or 0)
+    out: list[float] = []
+    for i in range(days - 1, -1, -1):
+        d = today - timedelta(days=i)
+        out.append(by_day.get(d, 0.0))
+    return out
+
+
 @router.get("/health-strip", response_model=HealthStripResponse)
 async def get_health_strip(
     db: AsyncSession = Depends(get_db),
@@ -2597,9 +2616,12 @@ async def get_health_strip(
     from app.models.payment import Payment
 
     now = datetime.now(UTC)
+    today = now.date()
     seven_days_ago = now - timedelta(days=7)
     fourteen_days_ago = now - timedelta(days=14)
     thirty_days_ago = now - timedelta(days=30)
+    sparkline_since = now - timedelta(days=6)
+    sparkline_since = sparkline_since.replace(hour=0, minute=0, second=0, microsecond=0)
 
     # Assumption: User has no `last_active_at`; using `last_login_at` as the
     # most recent activity proxy. Null last_login_at counts as inactive.
@@ -2628,6 +2650,7 @@ async def get_health_strip(
         tone="danger" if revenue_cents > 0 else "ok",
         delta=None,
         delta_text=None,
+        sparkline_7d=[float(revenue_dollars)] * 7,
     )
 
     # 2. review_queue — submissions awaiting review.
@@ -2657,6 +2680,19 @@ async def get_health_strip(
         review_tone = "warn"
     else:
         review_tone = "ok" if pending_count == 0 else "neutral"
+    review_spark_rows = (
+        await db.execute(
+            select(
+                func.date_trunc("day", ExerciseSubmission.created_at).label("day"),
+                func.count(ExerciseSubmission.id),
+            )
+            .where(
+                ExerciseSubmission.score.is_(None),
+                ExerciseSubmission.created_at >= sparkline_since,
+            )
+            .group_by("day")
+        )
+    ).all()
     review_metric = HealthMetric(
         key="review_queue",
         label="Review queue",
@@ -2665,6 +2701,9 @@ async def get_health_strip(
         tone=review_tone,
         delta=None,
         delta_text=None,
+        sparkline_7d=_fill_daily_buckets(
+            [(r[0], r[1]) for r in review_spark_rows], today
+        ),
     )
 
     # 3. top_confusion — distinct topics from socratic_tutor actions last 7d.
@@ -2691,6 +2730,19 @@ async def get_health_strip(
         conf_tone = "warn"
     else:
         conf_tone = "ok" if distinct_topics == 0 else "neutral"
+    confusion_spark_rows = (
+        await db.execute(
+            select(
+                func.date_trunc("day", AgentAction.created_at).label("day"),
+                func.count(AgentAction.id),
+            )
+            .where(
+                AgentAction.agent_name == "socratic_tutor",
+                AgentAction.created_at >= sparkline_since,
+            )
+            .group_by("day")
+        )
+    ).all()
     confusion_metric = HealthMetric(
         key="top_confusion",
         label="Confusion topics",
@@ -2699,6 +2751,9 @@ async def get_health_strip(
         tone=conf_tone,
         delta=None,
         delta_text=None,
+        sparkline_7d=_fill_daily_buckets(
+            [(r[0], r[1]) for r in confusion_spark_rows], today
+        ),
     )
 
     # 4. worst_lessons — lessons whose confusion_rate (>30%) over last 30d.
@@ -2744,6 +2799,7 @@ async def get_health_strip(
         tone="warn" if worst_lessons else "ok",
         delta=None,
         delta_text=None,
+        sparkline_7d=[float(len(worst_lessons))] * 7,
     )
 
     # 5. stale_students — students inactive 7d+.
@@ -2758,6 +2814,7 @@ async def get_health_strip(
         tone="warn" if (stale_count or 0) > 5 else "ok",
         delta=None,
         delta_text=None,
+        sparkline_7d=[float(stale_count or 0)] * 7,
     )
 
     # 6. cohort_delta — signups this week vs last week.
@@ -2822,6 +2879,16 @@ async def get_health_strip(
     if sentiment_counts.get("positive", 0):
         feedback_sub_parts.append(f"{sentiment_counts['positive']} positive")
     feedback_sub = " · ".join(feedback_sub_parts) if feedback_sub_parts else "No open feedback"
+    feedback_spark_rows = (
+        await db.execute(
+            select(
+                func.date_trunc("day", Feedback.created_at).label("day"),
+                func.count(Feedback.id),
+            )
+            .where(Feedback.created_at >= sparkline_since)
+            .group_by("day")
+        )
+    ).all()
     feedback_metric = HealthMetric(
         key="open_feedback",
         label="Open feedback",
@@ -2830,8 +2897,25 @@ async def get_health_strip(
         tone=feedback_tone,
         delta=None,
         delta_text=None,
+        sparkline_7d=_fill_daily_buckets(
+            [(r[0], r[1]) for r in feedback_spark_rows], today
+        ),
     )
 
+    cohort_spark_rows = (
+        await db.execute(
+            select(
+                func.date_trunc("day", User.created_at).label("day"),
+                func.count(User.id),
+            )
+            .where(
+                User.role == "student",
+                User.is_deleted.is_(False),
+                User.created_at >= sparkline_since,
+            )
+            .group_by("day")
+        )
+    ).all()
     cohort_metric = HealthMetric(
         key="cohort_delta",
         label="Cohort delta",
@@ -2840,6 +2924,9 @@ async def get_health_strip(
         tone=cohort_tone,
         delta=round(pct, 2),
         delta_text=f"{sign}{pct:.0f}% WoW",
+        sparkline_7d=_fill_daily_buckets(
+            [(r[0], r[1]) for r in cohort_spark_rows], today
+        ),
     )
 
     log.info(
@@ -3250,6 +3337,7 @@ class CourseHealth(PydanticModel):
     difficulty: str
     price_cents: int
     is_published: bool
+    is_featured: bool = False
     lessons_count: int
     enrollments: int
     completion_rate: float
@@ -3280,7 +3368,9 @@ async def get_courses_health(
 
     course_rows = (
         await db.execute(
-            select(Course).where(Course.is_deleted.is_(False)).order_by(Course.created_at.desc())
+            select(Course)
+            .where(Course.is_deleted.is_(False))
+            .order_by(Course.created_at.desc(), Course.title.asc(), Course.id.asc())
         )
     ).scalars().all()
 
@@ -3383,6 +3473,7 @@ async def get_courses_health(
                 difficulty=course.difficulty,
                 price_cents=course.price_cents,
                 is_published=course.is_published,
+                is_featured=bool(getattr(course, "is_featured", False)),
                 lessons_count=lessons_count,
                 enrollments=enrollments,
                 completion_rate=round(completion_rate, 4),
@@ -8412,3 +8503,154 @@ async def undismiss_audit_anomaly(
     except Exception as exc:  # noqa: BLE001
         log.warning("admin.anomaly_undismiss_audit_failed", error=str(exc))
     return None
+
+
+# =============================================================================
+# ── RETENTION-V2: top urgent students across ALL slip patterns
+# =============================================================================
+
+
+class MostUrgentTile(PydanticModel):
+    slip_type: str
+    label: str
+    count: int
+    description: str
+    tone: str
+
+
+class MostUrgentStudent(PydanticModel):
+    user_id: str
+    name: str
+    email: str
+    risk_score: float
+    risk_reason: str | None
+    slip_type: str
+    days_since_last_session: int | None
+    paid: bool
+    last_active_text: str
+    recommended_intervention: str | None
+
+
+class MostUrgentResponse(PydanticModel):
+    tiles: list[MostUrgentTile]
+    students: list[MostUrgentStudent]
+    generated_at: datetime
+
+
+# Tile spec — order matters (triage priority). `ready_but_stalled` is NOT a
+# slip_type stored in StudentRiskSignals (model enumerates: none, cold_signup,
+# unpaid_stalled, streak_broken, paid_silent, capstone_stalled,
+# promotion_avoidant). We surface the 5 slip types the existing /risk-panels
+# endpoint uses; `ready_but_stalled` is intentionally omitted.
+_MOST_URGENT_TILE_SPEC: list[tuple[str, str, str, str]] = [
+    ("paid_silent", "Paid + silent", "danger", "Refund risk · reach out today"),
+    ("capstone_stalled", "Capstone stalled", "warn", "Confidence churn near the payoff"),
+    ("streak_broken", "Streak broken", "warn", "Most recoverable"),
+    ("promotion_avoidant", "Ready but stalled", "info", "Earned but won't claim"),
+    ("cold_signup", "Cold signup", "neutral", "Bulk-email candidates"),
+]
+
+
+def _relative_last_active(last_login_at: datetime | None, now: datetime) -> str:
+    """Human-readable relative time since `last_login_at`."""
+    if last_login_at is None:
+        return "never"
+    ts = last_login_at
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    delta = now - ts
+    secs = int(delta.total_seconds())
+    if secs < 60:
+        return "just now"
+    mins = secs // 60
+    if mins < 60:
+        return f"{mins}m ago"
+    hours = mins // 60
+    if hours < 24:
+        return f"{hours}h ago"
+    days = hours // 24
+    return f"{days}d ago"
+
+
+@router.get("/most-urgent-students", response_model=MostUrgentResponse)
+async def get_most_urgent_students(
+    limit: int = Query(5, ge=1, le=25),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(_require_admin),
+) -> MostUrgentResponse:
+    """RETENTION-V2 — top urgent students deduped across ALL slip patterns.
+
+    Returns a tile-summary block (one tile per slip type for the metric
+    strip) and the top-N students by risk_score DESC, deduped by
+    user_id (a student appearing under multiple slip types keeps the
+    highest-risk row).
+
+    Two SQL queries total:
+      1. Top-50 risk_signals + users join, ordered by risk_score DESC.
+      2. GROUP BY slip_type COUNT(*) for tile counts.
+    """
+    from app.models.student_risk_signals import StudentRiskSignals
+
+    now = datetime.now(UTC)
+    student_filter = (User.role == "student") & (User.is_deleted.is_(False))
+
+    # Query 1 — fetch top 50 (over-fetch to allow dedup) signals joined with
+    # users for the deduped student list.
+    rows_q = await db.execute(
+        select(StudentRiskSignals, User)
+        .join(User, StudentRiskSignals.user_id == User.id)
+        .where(student_filter)
+        .order_by(StudentRiskSignals.risk_score.desc())
+        .limit(50)
+    )
+    seen: set[uuid.UUID] = set()
+    students: list[MostUrgentStudent] = []
+    for signal, user in rows_q.all():
+        if user.id in seen:
+            continue
+        seen.add(user.id)
+        students.append(
+            MostUrgentStudent(
+                user_id=str(user.id),
+                name=user.full_name,
+                email=user.email,
+                risk_score=float(signal.risk_score),
+                risk_reason=signal.risk_reason,
+                slip_type=signal.slip_type,
+                days_since_last_session=signal.days_since_last_session,
+                paid=signal.paid,
+                last_active_text=_relative_last_active(user.last_login_at, now),
+                recommended_intervention=signal.recommended_intervention,
+            )
+        )
+        if len(students) >= limit:
+            break
+
+    # Query 2 — tile counts via GROUP BY slip_type.
+    counts_q = await db.execute(
+        select(StudentRiskSignals.slip_type, func.count(StudentRiskSignals.id))
+        .join(User, StudentRiskSignals.user_id == User.id)
+        .where(student_filter)
+        .group_by(StudentRiskSignals.slip_type)
+    )
+    counts_by_slip: dict[str, int] = {row[0]: int(row[1]) for row in counts_q.all()}
+
+    tiles = [
+        MostUrgentTile(
+            slip_type=slip_type,
+            label=label,
+            count=counts_by_slip.get(slip_type, 0),
+            description=description,
+            tone=tone,
+        )
+        for slip_type, label, tone, description in _MOST_URGENT_TILE_SPEC
+    ]
+
+    log.info(
+        "admin.most_urgent_students",
+        returned=len(students),
+        limit=limit,
+        tile_total=sum(t.count for t in tiles),
+    )
+
+    return MostUrgentResponse(tiles=tiles, students=students, generated_at=now)

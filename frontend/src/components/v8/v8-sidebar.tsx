@@ -170,8 +170,10 @@ export function V8Sidebar() {
 
       <div className="sidebar-foot reveal delay-3">
         {user?.role === "admin" && (
-          <Link
+          <a
             href="/admin"
+            target="careeros-admin-console"
+            title="Open the admin console in its dedicated tab"
             style={{
               display: "flex",
               alignItems: "center",
@@ -195,7 +197,7 @@ export function V8Sidebar() {
               <rect x="8.5" y="8.5" width="4" height="4" rx="1" />
             </svg>
             Admin console
-          </Link>
+          </a>
         )}
         <div className="student">
           <div className="avatar" aria-hidden>

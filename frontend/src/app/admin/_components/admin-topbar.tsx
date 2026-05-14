@@ -95,11 +95,10 @@ export function AdminTopbar({
       ) : null}
       <a
         href="/today"
-        target="_blank"
-        rel="noopener noreferrer"
+        target="careeros-student-preview"
         className="cf-topbar-preview"
-        aria-label="Preview portal as a student (opens in new tab)"
-        title="Opens the student portal in a new tab"
+        aria-label="Preview portal as a student (opens in a dedicated tab)"
+        title="Opens the student portal in a dedicated preview tab"
       >
         <Eye className="cf-topbar-preview-icon" />
         <span className="cf-topbar-preview-label">Student view</span>

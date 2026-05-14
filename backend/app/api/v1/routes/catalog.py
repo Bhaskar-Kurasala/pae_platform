@@ -56,6 +56,7 @@ async def get_catalog(
     course_rows = list((await db.execute(course_stmt)).scalars().all())
     course_rows.sort(
         key=lambda c: (
+            0 if getattr(c, "is_featured", False) else 1,
             _DIFFICULTY_RANK.get(c.difficulty, 99),
             c.title.lower(),
         )
@@ -113,6 +114,7 @@ async def get_catalog(
                 price_cents=course.price_cents,
                 currency=settings.payments_default_currency,
                 is_published=course.is_published,
+                is_featured=bool(getattr(course, "is_featured", False)),
                 difficulty=course.difficulty,
                 bullets=list(course.bullets or []),
                 metadata=meta,

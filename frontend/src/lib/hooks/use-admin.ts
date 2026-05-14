@@ -359,6 +359,10 @@ export interface HealthMetric {
   tone: "danger" | "warn" | "ok" | "neutral";
   delta: number | null;
   delta_text: string | null;
+  // Parallel backend adds a 7-day daily trend per metric. Optional so
+  // the FE stays compatible while the backend rolls out — render a
+  // flat baseline when this is empty/undefined.
+  sparkline_7d?: number[];
 }
 
 export interface HealthStripData {
@@ -381,6 +385,45 @@ export function useRiskPanels() {
     // Panels recompute nightly via Celery; a 1-hour staleness is fine.
     // Manual refresh on the page covers the "I just ran the task" case.
     staleTime: 60 * 60_000,
+  });
+}
+
+// ── RETENTION-V2 — Most-urgent metric strip + top-N urgent students ──
+export interface MostUrgentTile {
+  slip_type: string;
+  label: string;
+  count: number;
+  description: string;
+  tone: "danger" | "warn" | "info" | "neutral";
+}
+
+export interface MostUrgentStudent {
+  user_id: string;
+  name: string;
+  email: string;
+  risk_score: number;
+  risk_reason: string | null;
+  slip_type: string;
+  days_since_last_session: number | null;
+  paid: boolean;
+  last_active_text: string;
+  recommended_intervention: string | null;
+}
+
+export interface MostUrgentResponse {
+  tiles: MostUrgentTile[];
+  students: MostUrgentStudent[];
+  generated_at: string;
+}
+
+export function useMostUrgentStudents(limit: number = 5) {
+  return useQuery<MostUrgentResponse>({
+    queryKey: ["admin", "most-urgent", limit],
+    queryFn: () =>
+      api.get<MostUrgentResponse>(
+        `/api/v1/admin/most-urgent-students?limit=${limit}`,
+      ),
+    staleTime: 30_000,
   });
 }
 

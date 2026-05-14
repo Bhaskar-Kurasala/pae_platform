@@ -10,6 +10,7 @@ export interface CourseHealth {
   difficulty: string;
   price_cents: number;
   is_published: boolean;
+  is_featured?: boolean;
   lessons_count: number;
   enrollments: number;
   completion_rate: number;

@@ -383,7 +383,31 @@ function CourseCard({ course, index }: CourseCardProps) {
       }
     >
       {ribbonText ? <div className="ribbon">{ribbonText}</div> : null}
-      <div className="level">{levelLabel(course.difficulty, index)}</div>
+      <div className="level">
+        {levelLabel(course.difficulty, index)}
+        {course.is_featured ? (
+          <span
+            aria-label="Featured"
+            style={{
+              marginLeft: 8,
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+              color: "#7a4f00",
+              background: "rgba(214,165,77,0.18)",
+              border: "1px solid rgba(214,165,77,0.45)",
+              padding: "2px 8px",
+              borderRadius: 999,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+          >
+            ★ Featured
+          </span>
+        ) : null}
+      </div>
       <h4>{course.title}</h4>
       <div className="role-sub">{description}</div>
       <div className="course-outcomes">

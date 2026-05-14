@@ -1,293 +1,461 @@
 "use client";
 
 /**
- * F4 — Retention engine panels for the admin console.
+ * RETENTION-V2 — compact metric strip + "Most urgent" panel.
  *
- * Five real, query-driven panels that turn the abstract "at-risk"
- * concept into a triage-ready list of names + recommended action.
+ * Replaces the bulky six-panel layout. Two sections:
+ *   A) Metric strip — one tile per slip pattern, click → onSeeAll(slip_type).
+ *   B) "Most urgent" — top-N students by risk_score across ALL slip types,
+ *      deduped by user_id. Click row → onOpenStudent(user_id).
  *
- * Each panel maps to one slip pattern from
- * docs/RETENTION-ENGINE.md. Priority order matches the F1 service's
- * SCORE_BASE — paid_silent at the top because that's where refund
- * risk lives.
- *
- * The component is intentionally read-only. Click "Open profile" →
- * navigates to /admin/students/{id} where the admin takes action
- * (write a note, trigger an agent, whatever). Per F2/F5 we'll add
- * inline CTAs (Send email, Schedule call) once those workflows exist.
+ * Reads from /api/v1/admin/most-urgent-students (RETENTION-V2 endpoint).
+ * The legacy useRiskPanels hook is preserved — the cockpit still uses it
+ * for slipUserIds bucketing in the roster view.
  */
 
-import Link from "next/link";
-import {
-  AlertTriangle,
-  Award,
-  BookOpen,
-  Flame,
-  Snowflake,
-  type LucideIcon,
-} from "lucide-react";
-import {
-  useRiskPanels,
-  type RiskPanelStudent,
-  type RiskPanels,
-} from "@/lib/hooks/use-admin";
-
-interface PanelDef {
-  key: keyof RiskPanels;
-  title: string;
-  blurb: string;
-  icon: LucideIcon;
-  // Tailwind tone — feeds the title bar accent. Roughly: red for the
-  // ones that need action today, amber for thoughtful intervention,
-  // blue/green for "easy win" / "monitor."
-  tone: "red" | "amber" | "blue" | "green" | "slate";
-}
-
-const PANEL_ORDER: PanelDef[] = [
-  {
-    key: "paid_silent",
-    title: "Paid + silent",
-    blurb: "Refund risk. Reach out today — every day silent compounds the regret.",
-    icon: AlertTriangle,
-    tone: "red",
-  },
-  {
-    key: "capstone_stalled",
-    title: "Capstone stalled",
-    blurb: "Confidence churn near the payoff. They got close — help them finish.",
-    icon: BookOpen,
-    tone: "amber",
-  },
-  {
-    key: "streak_broken",
-    title: "Streak broken",
-    blurb: "MOST recoverable. They proved they can do it — life pulled them away.",
-    icon: Flame,
-    tone: "amber",
-  },
-  {
-    key: "promotion_avoidant",
-    title: "Ready but stalled",
-    blurb: "Passed senior review, hasn't claimed the gate. Easy wins.",
-    icon: Award,
-    tone: "green",
-  },
-  {
-    key: "cold_signup",
-    title: "Never returned",
-    blurb: "Bigger volume, lower per-student value. Bulk-email candidates.",
-    icon: Snowflake,
-    tone: "slate",
-  },
-];
-
-// Tone classes use explicit color stops so they look right on BOTH the
-// light Tailwind admin shell AND the CareerForge console (which sets
-// its own data-theme="dark" island and bypasses Tailwind's `dark`
-// variant). Each entry includes a translucent panel fill that reads
-// over both white and dark-green surfaces.
-const TONE_CLASSES: Record<PanelDef["tone"], string> = {
-  red: "border-red-400/40 bg-red-500/[0.06]",
-  amber: "border-amber-400/40 bg-amber-500/[0.06]",
-  blue: "border-blue-400/40 bg-blue-500/[0.06]",
-  green: "border-emerald-400/40 bg-emerald-500/[0.06]",
-  slate: "border-zinc-400/30 bg-zinc-500/[0.05]",
-};
-
-function avatarLabel(name: string): string {
-  return name
-    .split(" ")
-    .map((w) => w[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-}
-
-function StudentRow({
-  s,
-  onOpen,
-}: {
-  s: RiskPanelStudent;
-  onOpen?: (id: string) => void;
-}) {
-  // currentColor-based tints so the row reads correctly under both
-  // the light Tailwind shell and the dark CareerForge console island.
-  // Uses a button + onOpen callback when the parent provides one
-  // (modal-in-place flow on /admin), otherwise falls back to a
-  // route navigation so the component is still usable in other
-  // contexts (e.g. tests, alternate hosts).
-  const inner = (
-    <>
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-current/10 text-xs font-semibold">
-        {avatarLabel(s.name)}
-      </div>
-      <div className="min-w-0 flex-1 text-left">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-sm font-medium">{s.name}</span>
-          {s.paid && (
-            <span className="rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-violet-500">
-              Paid
-            </span>
-          )}
-        </div>
-        <div className="truncate text-xs opacity-70">
-          {s.risk_reason ?? `Score ${s.risk_score}`}
-        </div>
-      </div>
-      <div className="shrink-0 text-right">
-        <div className="text-sm font-semibold tabular-nums">{s.risk_score}</div>
-        <div className="text-[10px] uppercase opacity-60">risk</div>
-      </div>
-    </>
-  );
-  const cls =
-    "flex w-full items-center gap-3 rounded-lg border border-current/10 bg-current/[0.04] px-3 py-2.5 text-left transition hover:bg-current/[0.08]";
-  if (onOpen) {
-    return (
-      <button type="button" onClick={() => onOpen(s.user_id)} className={cls}>
-        {inner}
-      </button>
-    );
-  }
-  return (
-    <Link href={`/admin/students/${s.user_id}`} className={cls}>
-      {inner}
-    </Link>
-  );
-}
-
-function Panel({
-  def,
-  panel,
-  onSeeAll,
-  onOpenStudent,
-}: {
-  def: PanelDef;
-  panel: RiskPanels[keyof RiskPanels];
-  onSeeAll?: (slipKey: keyof RiskPanels) => void;
-  onOpenStudent?: (id: string) => void;
-}) {
-  const Icon = def.icon;
-  return (
-    <section
-      className={`rounded-xl border ${TONE_CLASSES[def.tone]} p-4`}
-      aria-labelledby={`panel-${def.key}-title`}
-    >
-      <div className="mb-3 flex items-start justify-between gap-2">
-        <div className="flex items-start gap-2">
-          <Icon className="mt-0.5 h-4 w-4 shrink-0 opacity-70" aria-hidden="true" />
-          <div>
-            <h3
-              id={`panel-${def.key}-title`}
-              className="text-sm font-semibold tracking-tight"
-            >
-              {def.title}
-            </h3>
-            <p className="mt-0.5 text-xs opacity-70">{def.blurb}</p>
-          </div>
-        </div>
-        <span className="shrink-0 rounded-full bg-current/10 px-2 py-0.5 text-xs font-semibold tabular-nums">
-          {panel.total}
-        </span>
-      </div>
-
-      {panel.students.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-current/20 bg-current/[0.03] py-3 text-center text-xs opacity-70">
-          {def.tone === "red"
-            ? "Nice — every paid student is active."
-            : "No students in this bucket right now."}
-        </p>
-      ) : (
-        <div className="space-y-1.5">
-          {panel.students.slice(0, 5).map((s) => (
-            <StudentRow key={s.user_id} s={s} onOpen={onOpenStudent} />
-          ))}
-          {panel.total > 5 &&
-            (onSeeAll ? (
-              <button
-                type="button"
-                onClick={() => onSeeAll(def.key)}
-                className="block w-full rounded-lg py-1.5 text-center text-xs font-medium text-emerald-500 hover:underline"
-              >
-                See all {panel.total} →
-              </button>
-            ) : (
-              <Link
-                href={`/admin/students?slip_type=${def.key}`}
-                className="block rounded-lg py-1.5 text-center text-xs font-medium text-emerald-500 hover:underline"
-              >
-                See all {panel.total} →
-              </Link>
-            ))}
-        </div>
-      )}
-    </section>
-  );
-}
+import { useMostUrgentStudents, type MostUrgentTile } from "@/lib/hooks/use-admin";
+import { useAdminTheme } from "@/lib/hooks/use-admin-theme";
 
 interface RetentionPanelsProps {
-  /**
-   * Called when the operator clicks "See all N →" on a panel. Lets
-   * the parent /admin page scroll the existing roster into view +
-   * apply a slip-type filter chip — no navigation. When omitted,
-   * the link falls back to /admin/students?slip_type=… for use in
-   * standalone contexts.
-   */
-  onSeeAll?: (slipKey: keyof RiskPanels) => void;
-  /**
-   * Called when the operator clicks a student row inside a panel.
-   * Same pattern: parent opens the modal in place. When omitted,
-   * row click navigates to /admin/students/[id].
-   */
-  onOpenStudent?: (id: string) => void;
+  onSeeAll?: (slipKey: string) => void;
+  onOpenStudent?: (studentId: string) => void;
+}
+
+type Tone = "danger" | "warn" | "info" | "neutral";
+
+const TONE_COLOR: Record<Tone, string> = {
+  danger: "#d96252",
+  warn: "#d6a54d",
+  info: "#356d50",
+  neutral: "#8f897d",
+};
+
+function toneColor(t: string): string {
+  return TONE_COLOR[(t as Tone) in TONE_COLOR ? (t as Tone) : "neutral"];
+}
+
+function avatarLabel(name: string): string {
+  return (
+    name
+      .split(" ")
+      .map((w) => w[0])
+      .filter(Boolean)
+      .slice(0, 2)
+      .join("")
+      .toUpperCase() || "?"
+  );
+}
+
+function Tile({
+  tile,
+  onClick,
+  isDark,
+}: {
+  tile: MostUrgentTile;
+  onClick?: () => void;
+  isDark: boolean;
+}) {
+  const empty = tile.count === 0;
+  const accent = empty ? TONE_COLOR.neutral : toneColor(tile.tone);
+  const bg = isDark ? "#1d2a23" : "#fbfaf6";
+  const border = isDark ? "#2a3a30" : "#e8e3d6";
+  const textMain = isDark ? "#f3efe5" : "#2a2a2a";
+  const textMuted = isDark ? "#a8a496" : "#6f6a5f";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="ret-tile"
+      style={{
+        background: bg,
+        border: `1px solid ${border}`,
+        boxShadow: empty ? "none" : `inset 4px 0 0 0 ${accent}`,
+        color: textMain,
+      }}
+    >
+      <div
+        className="ret-tile-eyebrow"
+        style={{ color: empty ? textMuted : accent }}
+      >
+        {tile.label}
+      </div>
+      <div
+        className="ret-tile-count"
+        style={{ color: empty ? textMuted : textMain }}
+      >
+        {tile.count}
+      </div>
+      <div className="ret-tile-desc" style={{ color: textMuted }}>
+        {tile.description}
+      </div>
+    </button>
+  );
 }
 
 export function RetentionPanels({
   onSeeAll,
   onOpenStudent,
 }: RetentionPanelsProps = {}) {
-  const { data, isLoading, isError, error } = useRiskPanels();
+  const { theme } = useAdminTheme();
+  const isDark = theme === "dark";
+  const { data, isLoading, isError, error } = useMostUrgentStudents(5);
+
+  const surface = isDark ? "#1d2a23" : "#fbfaf6";
+  const border = isDark ? "#2a3a30" : "#e8e3d6";
+  const textMain = isDark ? "#f3efe5" : "#2a2a2a";
+  const textMuted = isDark ? "#a8a496" : "#6f6a5f";
+  const rowBg = isDark ? "#243329" : "#fffdf7";
+  const rowBorder = isDark ? "#2f3f35" : "#ece7d8";
+
+  const styleBlock = (
+    <style>{`
+      .ret-strip {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0,1fr));
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+      @media (min-width: 768px) {
+        .ret-strip { grid-template-columns: repeat(3, minmax(0,1fr)); }
+      }
+      @media (min-width: 1024px) {
+        .ret-strip { grid-template-columns: repeat(6, minmax(0,1fr)); }
+      }
+      .ret-tile {
+        text-align: left;
+        padding: 12px 14px;
+        border-radius: 10px;
+        cursor: pointer;
+        transition: transform 120ms ease, box-shadow 120ms ease;
+        font-family: Inter, system-ui, sans-serif;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-height: 88px;
+      }
+      .ret-tile:hover { transform: translateY(-1px); }
+      .ret-tile-eyebrow {
+        font: 700 10px/1.2 Inter, system-ui, sans-serif;
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+      }
+      .ret-tile-count {
+        font: 600 24px/1 'Fraunces', Georgia, serif;
+        font-variant-numeric: tabular-nums;
+      }
+      .ret-tile-desc {
+        font: 400 12px/1.35 Inter, system-ui, sans-serif;
+      }
+      .ret-card {
+        border-radius: 12px;
+        padding: 16px 18px;
+      }
+      .ret-card-title {
+        font: 600 18px/1.2 'Fraunces', Georgia, serif;
+      }
+      .ret-card-sub {
+        font: 400 12px/1.4 Inter, system-ui, sans-serif;
+      }
+      .ret-see-all-link {
+        font: 600 12px/1.2 Inter, system-ui, sans-serif;
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        padding: 4px 6px;
+      }
+      .ret-see-all-link:hover { text-decoration: underline; }
+      .ret-row {
+        width: 100%;
+        text-align: left;
+        display: grid;
+        grid-template-columns: 36px minmax(0,1fr) auto auto auto auto;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        cursor: pointer;
+        transition: background 120ms ease;
+      }
+      .ret-row + .ret-row { margin-top: 6px; }
+      .ret-row:hover { filter: brightness(1.03); }
+      .ret-avatar {
+        width: 32px; height: 32px;
+        border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font: 700 11px/1 Inter, system-ui, sans-serif;
+        color: #fffdf7;
+        background: #8f897d;
+      }
+      .ret-name {
+        font: 600 13px/1.2 Inter, system-ui, sans-serif;
+      }
+      .ret-email {
+        font: 400 11px/1.3 Inter, system-ui, sans-serif;
+        margin-top: 2px;
+      }
+      .ret-pill {
+        font: 700 10px/1 Inter, system-ui, sans-serif;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        padding: 4px 8px;
+        border-radius: 999px;
+      }
+      .ret-score {
+        font: 600 14px/1 'Fraunces', Georgia, serif;
+        font-variant-numeric: tabular-nums;
+        padding: 4px 8px;
+        border-radius: 8px;
+      }
+      .ret-last {
+        font: 400 11px/1.2 Inter, system-ui, sans-serif;
+      }
+      .ret-open {
+        font: 700 11px/1 Inter, system-ui, sans-serif;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid currentColor;
+        background: transparent;
+        cursor: pointer;
+      }
+      .ret-empty {
+        font: 400 13px/1.4 Inter, system-ui, sans-serif;
+        text-align: center;
+        padding: 24px 12px;
+        border-radius: 10px;
+        border: 1px dashed;
+      }
+    `}</style>
+  );
 
   if (isLoading) {
     return (
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
-        {[1, 2, 3, 4, 5].map((i) => (
-          <div
-            key={i}
-            className="h-44 animate-pulse rounded-xl border border-current/10 bg-current/[0.05]"
-          />
-        ))}
-      </div>
-    );
-  }
-  if (isError || !data) {
-    return (
-      <div className="rounded-xl border border-red-500/40 bg-red-500/[0.06] p-4 text-sm text-red-500">
-        Failed to load retention panels: {(error as Error)?.message ?? "unknown error"}
-      </div>
+      <section aria-label="Retention metric strip and most urgent students">
+        {styleBlock}
+        <div className="ret-strip">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div
+              key={i}
+              style={{
+                height: 88,
+                borderRadius: 10,
+                background: surface,
+                border: `1px solid ${border}`,
+                opacity: 0.6,
+              }}
+            />
+          ))}
+        </div>
+        <div
+          className="ret-card"
+          style={{
+            background: surface,
+            border: `1px solid ${border}`,
+            color: textMuted,
+          }}
+        >
+          Loading urgent students...
+        </div>
+      </section>
     );
   }
 
+  if (isError || !data) {
+    return (
+      <section aria-label="Retention metric strip and most urgent students">
+        {styleBlock}
+        <div
+          className="ret-card"
+          style={{
+            background: surface,
+            border: `1px solid ${toneColor("danger")}`,
+            color: toneColor("danger"),
+          }}
+        >
+          Failed to load retention data: {(error as Error)?.message ?? "unknown error"}
+        </div>
+      </section>
+    );
+  }
+
+  // Map slip_type → tile tone, for color-coding student rows.
+  const toneBySlip: Record<string, Tone> = {};
+  for (const t of data.tiles) {
+    toneBySlip[t.slip_type] = (t.tone as Tone) ?? "neutral";
+  }
+
+  const handleSeeAllClick = () => {
+    // The "See all in roster below" link smooth-scrolls to the roster section.
+    const el = document.getElementById("studentSection");
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
   return (
-    <section aria-label="Retention engine — student slip patterns">
-      <div className="mb-4">
-        <h2 className="text-base font-semibold tracking-tight">Retention engine</h2>
-        <p className="mt-0.5 text-xs opacity-70">
-          Six slip patterns, ordered by urgency. Click any student to open their profile and
-          intervene. Numbers refresh nightly from the F1 risk-scoring Celery task.
-        </p>
-      </div>
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
-        {PANEL_ORDER.map((def) => (
-          <Panel
-            key={def.key}
-            def={def}
-            panel={data[def.key]}
-            onSeeAll={onSeeAll}
-            onOpenStudent={onOpenStudent}
+    <section aria-label="Retention metric strip and most urgent students">
+      {styleBlock}
+
+      {/* Section A — Metric strip */}
+      <div className="ret-strip" role="list">
+        {data.tiles.map((tile) => (
+          <Tile
+            key={tile.slip_type}
+            tile={tile}
+            isDark={isDark}
+            onClick={() => onSeeAll?.(tile.slip_type)}
           />
         ))}
+      </div>
+
+      {/* Section B — Most urgent panel */}
+      <div
+        className="ret-card"
+        style={{
+          background: surface,
+          border: `1px solid ${border}`,
+          color: textMain,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 12,
+            marginBottom: 12,
+          }}
+        >
+          <div>
+            <div className="ret-card-title" style={{ color: textMain }}>
+              Most urgent
+            </div>
+            <div className="ret-card-sub" style={{ color: textMuted }}>
+              Top {data.students.length || 5} across all slip patterns
+            </div>
+          </div>
+          <button
+            type="button"
+            className="ret-see-all-link"
+            onClick={handleSeeAllClick}
+            style={{ color: toneColor("info") }}
+          >
+            See all in roster below ↓
+          </button>
+        </div>
+
+        {data.students.length === 0 ? (
+          <div
+            className="ret-empty"
+            style={{ borderColor: rowBorder, color: textMuted }}
+          >
+            No urgent students right now. Roster sorted by risk is below ↓
+          </div>
+        ) : (
+          <div>
+            {data.students.map((s) => {
+              const tone = toneBySlip[s.slip_type] ?? "neutral";
+              const accent = toneColor(tone);
+              return (
+                <div
+                  key={s.user_id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onOpenStudent?.(s.user_id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onOpenStudent?.(s.user_id);
+                    }
+                  }}
+                  className="ret-row"
+                  style={{
+                    background: rowBg,
+                    border: `1px solid ${rowBorder}`,
+                  }}
+                >
+                  <div className="ret-avatar">{avatarLabel(s.name)}</div>
+                  <div style={{ minWidth: 0 }}>
+                    <div
+                      className="ret-name"
+                      style={{
+                        color: textMain,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {s.name}
+                      {s.paid && (
+                        <span
+                          className="ret-pill"
+                          style={{
+                            marginLeft: 8,
+                            color: "#7c3aed",
+                            background: isDark
+                              ? "rgba(124,58,237,0.18)"
+                              : "rgba(124,58,237,0.10)",
+                          }}
+                        >
+                          Paid
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      className="ret-email"
+                      style={{
+                        color: textMuted,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {s.email}
+                    </div>
+                  </div>
+                  <span
+                    className="ret-pill"
+                    style={{
+                      color: accent,
+                      background: isDark
+                        ? `${accent}26`
+                        : `${accent}1f`,
+                    }}
+                  >
+                    {s.slip_type.replace(/_/g, " ")}
+                  </span>
+                  <span
+                    className="ret-score"
+                    style={{
+                      color: accent,
+                      background: isDark
+                        ? `${accent}1f`
+                        : `${accent}14`,
+                    }}
+                    aria-label={`Risk score ${s.risk_score}`}
+                  >
+                    {Math.round(s.risk_score)}
+                  </span>
+                  <span className="ret-last" style={{ color: textMuted }}>
+                    {s.last_active_text}
+                  </span>
+                  <button
+                    type="button"
+                    className="ret-open"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenStudent?.(s.user_id);
+                    }}
+                    style={{ color: accent }}
+                  >
+                    Open
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </section>
   );

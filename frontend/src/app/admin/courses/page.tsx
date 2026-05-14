@@ -159,6 +159,15 @@ export default function AdminCoursesPage() {
         fontFamily: "var(--font-inter), Inter, system-ui, sans-serif",
       }}
     >
+      <style>{`
+        .cf-feature-star:hover {
+          transform: scale(1.15);
+          background: rgba(214, 165, 77, 0.12);
+        }
+        .cf-feature-star[aria-pressed="true"] {
+          color: #d6a54d;
+        }
+      `}</style>
       <div className="w-full px-6 py-8 md:px-10 md:py-10 max-w-[1400px] mx-auto space-y-6">
         <header className="flex flex-col gap-1">
           <span
@@ -608,12 +617,12 @@ function Th({
       style={{
         textAlign: align,
         width,
-        fontSize: 10,
+        fontSize: 12,
         fontWeight: 700,
-        letterSpacing: "0.14em",
+        letterSpacing: "0.10em",
         textTransform: "uppercase",
         color: "currentColor",
-        opacity: 0.6,
+        opacity: 0.85,
       }}
     >
       {children}
@@ -724,18 +733,28 @@ function CourseRow({
               isFeatured ? `Unfeature ${c.title}` : `Feature ${c.title}`
             }
             aria-pressed={isFeatured}
+            title={
+              isFeatured
+                ? "Featured course — pinned to the top of the student catalog"
+                : "Feature this course on the student catalog"
+            }
             onClick={() => onToggleFeature(isFeatured)}
+            className="cf-feature-star"
             style={{
               background: "transparent",
               border: "none",
               cursor: "pointer",
               color: isFeatured ? "#d6a54d" : muted,
+              padding: 6,
+              borderRadius: 999,
+              transition: "transform 0.12s ease, color 0.18s ease, background 0.18s ease",
             }}
           >
             <Star
               size={16}
               fill={isFeatured ? "#d6a54d" : "none"}
               strokeWidth={1.8}
+              style={{ pointerEvents: "none" }}
             />
           </button>
         </td>
@@ -809,9 +828,8 @@ function CourseRow({
               )}
             </IconBtn>
             <a
-              href={`/catalog/${c.slug}`}
-              target="_blank"
-              rel="noopener noreferrer"
+              href={`/courses/${c.course_id}`}
+              target="careeros-student-preview"
               aria-label={`Preview ${c.title} as a student`}
               className="inline-grid place-items-center rounded-md transition"
               style={{
@@ -1056,10 +1074,18 @@ function DifficultyEdit({
           padding: "2px 6px",
           fontSize: 12,
           textTransform: "capitalize",
+          colorScheme: isDark ? "dark" : "light",
         }}
       >
         {DIFFICULTIES.map((d) => (
-          <option key={d} value={d}>
+          <option
+            key={d}
+            value={d}
+            style={{
+              background: isDark ? "#1a221d" : "#fff",
+              color: isDark ? "#f0ece1" : "#10120e",
+            }}
+          >
             {d}
           </option>
         ))}
