@@ -16,6 +16,7 @@ import {
   type StreamMessage,
 } from "@/hooks/use-stream";
 import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
+import { useAuthStore } from "@/stores/auth-store";
 import { exercisesApi, srsApi } from "@/lib/api-client";
 import { useDueCards } from "@/lib/hooks/use-srs";
 import { useWelcomePrompts } from "@/lib/hooks/use-welcome-prompts";
@@ -978,9 +979,30 @@ function UserBubble({
           </>
         )}
       </div>
-      <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0 mt-1 border border-border/50">
-        <User className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-      </div>
+      <UserAvatar />
+    </div>
+  );
+}
+
+function UserAvatar() {
+  const fullName = useAuthStore((s) => s.user?.full_name);
+  const text = (() => {
+    if (!fullName) return "YOU";
+    const parts = fullName.trim().split(/\s+/).slice(0, 2);
+    const ini = parts.map((p) => p[0]?.toUpperCase() ?? "").join("");
+    return ini || "YOU";
+  })();
+  return (
+    <div
+      className="h-8 w-8 rounded-full flex items-center justify-center shrink-0 mt-1 text-[11px] font-extrabold"
+      style={{
+        background: "linear-gradient(135deg, var(--gold, #d6a54d), #f0d6a2)",
+        color: "#1f160a",
+        boxShadow: "0 6px 14px rgba(214,165,77,0.22)",
+      }}
+      aria-hidden="true"
+    >
+      {text}
     </div>
   );
 }
@@ -3352,9 +3374,15 @@ function ChatArea({
           type="button"
           onClick={jumpToBottom}
           aria-label="Jump to bottom"
-          className="absolute bottom-28 right-6 z-10 h-9 w-9 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:opacity-90 transition-opacity"
+          className={cn(
+            "absolute bottom-28 right-6 z-10 h-8 w-8 rounded-full",
+            "bg-background/70 backdrop-blur-sm border border-border/40 text-muted-foreground",
+            "shadow-sm flex items-center justify-center",
+            "opacity-60 hover:opacity-100 hover:text-foreground hover:border-border",
+            "transition-all duration-150",
+          )}
         >
-          <ArrowDown className="h-4 w-4" aria-hidden="true" />
+          <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
       )}
 
