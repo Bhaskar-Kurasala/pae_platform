@@ -181,65 +181,61 @@ export function TutorScreen({
               type="button"
               className="tutor-rail-reopen"
               onClick={toggleRail}
-              aria-label="Show recent conversations"
-              title="Show recent conversations"
+              aria-label="Show recent threads"
+              title="Show recent threads"
             >
               <span aria-hidden="true">‹</span>
-              <span>Recent</span>
+              <span>Recent threads</span>
             </button>
           ) : null}
 
-          {/* ─── Left column: dark conversation card only ─── */}
+          {/* P-Tutor5 — minimal layout. Meta strip on the page, no card chrome.
+              The .tutor-conv-card wrapper is kept (height + min-height drive
+              the chat scroll surface) but its visual chrome is removed via CSS. */}
           <div className="grid">
             <section className="tutor-conv-card reveal">
               <div className="tutor-conv-eyebrow">
                 <span className="tutor-conv-eyebrow-left">
                   Tutor session · {activeMode.label} mode
-                </span>
-                <span
-                  className="tutor-conv-eyebrow-right"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                  }}
-                >
-                  <span>
-                    {activeConversationId
-                      ? "Resumed conversation"
-                      : "Fresh thread"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={openHelp}
-                    aria-label="How the tutor works"
-                    title="How the tutor works"
+                  <span
                     style={{
-                      width: 22,
-                      height: 22,
-                      borderRadius: 11,
-                      border: "1px solid rgba(255,255,255,0.25)",
-                      background: "transparent",
-                      color: "rgba(255,255,255,0.85)",
-                      fontSize: 12,
-                      fontWeight: 600,
-                      lineHeight: 1,
-                      cursor: "pointer",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      padding: 0,
+                      marginLeft: 12,
+                      color: "var(--muted)",
+                      fontWeight: 500,
+                      letterSpacing: 0.02,
+                      textTransform: "none",
                     }}
                   >
-                    ?
-                  </button>
+                    {activeConversationId ? "Resumed" : "Fresh thread"}
+                  </span>
                 </span>
+                <button
+                  type="button"
+                  onClick={openHelp}
+                  aria-label="How the tutor works"
+                  title="How the tutor works"
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: 11,
+                    border: "1px solid var(--line)",
+                    background: "transparent",
+                    color: "var(--muted)",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    lineHeight: 1,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: 0,
+                  }}
+                >
+                  ?
+                </button>
               </div>
 
               <div className="tutor-conv-body">
-                {/* The actual <ChatArea> — passed in by the page. The composer
-                    lives inside <ChatArea> and already shows the mode chips,
-                    so a separate "Pick a tutor mode" card above is redundant. */}
                 <div className="tutor-conv-inner">{children}</div>
               </div>
             </section>

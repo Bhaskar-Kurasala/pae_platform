@@ -2380,31 +2380,21 @@ button{cursor:pointer;border:0}
 /* The conversation card. Uses the same panel surface as the rest of the
    portal (Exercises, Today, Studio) so light/dark mode swap is consistent
    across the whole app. */
+/* P-Tutor5 (2026-05-14) — minimal layout. The card chrome (dark panel,
+   border, radius, gold blob) is gone; the tutor session reads as part of
+   the page so the chat surface gets the maximum width and the composer's
+   focus shadow no longer bleeds past a card edge. */
 .tutor-conv-card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 22px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   padding: 0;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   flex-direction: column;
-  /* P-Tutor3 (2026-04-26) — the mode picker + session-flow rows that
-     justified a 72vh cap were removed in P-Tutor2. The card now claims the
-     full available vertical space so the chat fills the laptop viewport
-     end-to-end (topbar ≈ 70px, .pad top/bottom 28+54 = 82px → 152px chrome,
-     plus a few pixels of breathing room).  Transcript scrolls inside. */
   height: calc(100vh - 160px);
   min-height: 520px;
-}
-.tutor-conv-card::after {
-  content: "";
-  position: absolute;
-  top: -40%; right: -10%;
-  width: 320px; height: 320px;
-  background: radial-gradient(circle, rgba(214, 165, 77, 0.08), transparent 60%);
-  filter: blur(40px);
-  pointer-events: none;
 }
 
 /* P-Tutor4 (2026-04-26) — Tutor screen has its own grid (was sharing Today's
@@ -2495,12 +2485,14 @@ button{cursor:pointer;border:0}
   .tutor-grid.rail-collapsed .rail { opacity: 1; visibility: visible; transform: none; }
 }
 
+/* P-Tutor5 — meta strip now sits on the page background, not a card header,
+   so no bottom border and the padding is content-aligned (not card-aligned). */
 .tutor-conv-eyebrow {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 22px 12px;
-  border-bottom: 1px solid var(--line);
+  padding: 4px 0 14px;
+  border-bottom: 0;
 }
 .tutor-conv-eyebrow-left {
   font-size: 11px;
@@ -2706,14 +2698,17 @@ button{cursor:pointer;border:0}
 /* Inner shell that wraps <ChatArea>'s message stream + composer. Uses the
    same panel-2 surface as other secondary cards so the chat reads as part
    of the page, not a separate dark-themed widget. */
+/* P-Tutor5 — inner shell is now transparent. The page background shows
+   through so messages flow on the cream surface; composer sits inside
+   with its own breathing room. */
 .tutor-conv-inner {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: var(--panel-2);
+  background: transparent;
   margin: 0;
-  border-top: 1px solid var(--line);
+  border-top: 0;
 }
 
 /* ──────────────────────────────────────────────────────────────────────

@@ -2170,13 +2170,14 @@ function InputBar({
   };
 
   return (
-    <div className="shrink-0 px-4 pb-4 pt-2">
+    <div className="shrink-0 px-6 pb-5 pt-3">
       <div
         className={cn(
-          "w-full mx-auto rounded-3xl border bg-card shadow-lg transition-shadow",
-          "focus-within:shadow-xl focus-within:border-primary/40",
+          "w-full mx-auto rounded-3xl border bg-card transition-shadow",
+          "shadow-[0_2px_8px_rgba(0,0,0,0.05)]",
+          "focus-within:shadow-[0_4px_16px_rgba(0,0,0,0.08)] focus-within:border-primary/30",
           isStreaming ? "border-primary/30" : "border-border/60",
-          isDragging && "ring-2 ring-primary/40",
+          isDragging && "ring-1 ring-primary/30",
         )}
         onDragOver={(e) => {
           e.preventDefault();
