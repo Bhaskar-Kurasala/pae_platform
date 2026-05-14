@@ -2350,7 +2350,8 @@ function InputBar({
             rows={1}
             disabled={isStreaming}
             aria-label="Message input"
-            className="w-full resize-none bg-transparent px-5 pt-4 pb-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground/50 disabled:opacity-60 max-h-[160px] overflow-y-auto"
+            className="w-full resize-none bg-transparent px-5 pt-4 pb-2 text-sm leading-relaxed outline-none focus:outline-none focus-visible:outline-none placeholder:text-muted-foreground/50 disabled:opacity-60 max-h-[160px] overflow-y-auto"
+            style={{ outline: "none" }}
           />
         </div>
         <div className="flex items-center justify-between px-4 pb-3 gap-3">
