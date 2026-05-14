@@ -3375,10 +3375,10 @@ function ChatArea({
           onClick={jumpToBottom}
           aria-label="Jump to bottom"
           className={cn(
-            "absolute bottom-28 right-6 z-10 h-8 w-8 rounded-full",
-            "bg-background/70 backdrop-blur-sm border border-border/40 text-muted-foreground",
-            "shadow-sm flex items-center justify-center",
-            "opacity-60 hover:opacity-100 hover:text-foreground hover:border-border",
+            "absolute bottom-28 left-1/2 -translate-x-1/2 z-10 h-8 w-8 rounded-full",
+            "bg-primary/15 backdrop-blur-sm border border-primary/25 text-primary",
+            "flex items-center justify-center",
+            "opacity-75 hover:opacity-100 hover:bg-primary/25 hover:border-primary/40",
             "transition-all duration-150",
           )}
         >
