@@ -2824,6 +2824,19 @@ button{cursor:pointer;border:0}
   grid-template-columns: 240px minmax(0, 1fr) 360px;
   gap: 18px;
   align-items: start;
+  transition: grid-template-columns 0.28s var(--ease);
+}
+/* P-Practice2 (2026-05-14) — collapsed rail. Shrinks the left column to a
+   compact 56px strip showing badge codes (F1, C2, P1…). Editor + review
+   take the recovered width. */
+.practice-grid.rail-collapsed {
+  grid-template-columns: 56px minmax(0, 1fr) 360px;
+  gap: 12px;
+}
+@media (max-width: 1280px) {
+  .practice-grid.rail-collapsed {
+    grid-template-columns: 56px minmax(0, 1fr) 320px;
+  }
 }
 
 /* ── Left rail ── */
@@ -3033,6 +3046,103 @@ button{cursor:pointer;border:0}
   background: var(--panel);
   border-top: 1px solid var(--line);
   min-height: 560px;
+}
+/* P-Practice2 — when the left rail is collapsed, let the Monaco surface
+   claim the recovered vertical space too. The runtime height passed to
+   Monaco is computed in JS (so the editor's internal layout reflows),
+   this rule just ensures the shell box doesn't cap us. */
+.practice-grid.rail-collapsed .practice-monaco-shell {
+  min-height: calc(100vh - 280px);
+}
+
+/* P-Practice2 — collapsed rail. Each exercise renders as a small square
+   badge with its code (F1, C2, P1, …). Active badge gets the dark pill
+   treatment from the mock. */
+.practice-rail-compact {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 6px;
+}
+.practice-rail-compact .practice-badge-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 0;
+  position: relative;
+  width: 100%;
+}
+.practice-rail-compact .practice-badge-group + .practice-badge-group {
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+  padding-top: 10px;
+}
+.practice-badge {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease),
+    border-color 0.15s var(--ease);
+  padding: 0;
+}
+.practice-badge:hover {
+  background: var(--panel-2);
+  color: var(--ink);
+  border-color: var(--line);
+}
+.practice-badge.active {
+  background: var(--ink, #10120e);
+  color: #f7f2e8;
+  border-color: var(--ink, #10120e);
+}
+[data-theme="dark"] .practice-badge.active {
+  background: var(--gold);
+  color: #1f160a;
+  border-color: var(--gold);
+}
+
+/* P-Practice2 — rail toggle (matches the tutor pattern). Sits in the
+   rail's top-right when expanded, anchored above the rail when collapsed. */
+.practice-rail-toggle {
+  width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: transparent;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--ink);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+.practice-rail-toggle:hover {
+  background: var(--panel-2);
+  border-color: var(--gold-2);
+}
+.practice-grid.rail-collapsed .practice-rail {
+  padding: 6px 4px;
+}
+@media (max-width: 1100px) {
+  /* On tablet/mobile the grid already stacks; hide the toggle to avoid
+     a confusing affordance. */
+  .practice-rail-toggle { display: none; }
+  .practice-grid.rail-collapsed { grid-template-columns: 1fr; }
+  .practice-grid.rail-collapsed .practice-rail { padding: 12px 10px; }
 }
 
 /* ── Output / Tests pane shells ── */

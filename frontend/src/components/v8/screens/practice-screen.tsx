@@ -199,6 +199,32 @@ export function PracticeScreen() {
   const seniorReview = useSeniorReview();
   const codeChangedSinceMount = useRef(false);
 
+  // P-Practice2 (2026-05-14) — collapsible left rail. When collapsed the
+  // rail shrinks to a 56px strip of badge codes (F1, C2, P1, …); the editor
+  // and review panel claim the recovered width. Persisted across reloads.
+  const [railCollapsed, setRailCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem("practice-rail-collapsed-v1") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleRail = useCallback(() => {
+    setRailCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(
+          "practice-rail-collapsed-v1",
+          next ? "1" : "0",
+        );
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
   // ── data ────────────────────────────────────────────────────────────
   const workspace = usePracticeWorkspace();
 
@@ -447,26 +473,56 @@ export function PracticeScreen() {
           </div>
         </div>
 
-        <div className="practice-grid">
+        <div className={cn("practice-grid", railCollapsed && "rail-collapsed")}>
           {/* ─── LEFT RAIL ─── */}
           <aside className="practice-rail reveal" data-testid="practice-rail">
-            <div className="rail-expanded">
-              {mode === "capstone" ? (
-                <CapstoneRail
-                  capstone={workspace.capstone}
-                  loading={workspace.isLoading}
-                  selectedLabId={selectedExerciseId}
-                  onSelectLab={(id) => selectExercise(id, null)}
-                />
-              ) : (
-                <ExerciseRail
-                  exercises={workspace.exercises}
-                  loading={workspace.isLoading}
-                  selectedId={selectedExerciseId}
-                  onSelect={(ex) => selectExercise(ex.id, ex.starter_code ?? null)}
-                />
-              )}
-            </div>
+            {railCollapsed ? (
+              <CompactRail
+                exercises={workspace.exercises}
+                selectedId={selectedExerciseId}
+                onSelect={(ex) =>
+                  selectExercise(ex.id, ex.starter_code ?? null)
+                }
+                onExpand={toggleRail}
+              />
+            ) : (
+              <div className="rail-expanded">
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    padding: "0 4px 4px",
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="practice-rail-toggle"
+                    onClick={toggleRail}
+                    aria-label="Collapse exercises rail"
+                    title="Collapse exercises rail"
+                  >
+                    <span aria-hidden="true">‹</span>
+                  </button>
+                </div>
+                {mode === "capstone" ? (
+                  <CapstoneRail
+                    capstone={workspace.capstone}
+                    loading={workspace.isLoading}
+                    selectedLabId={selectedExerciseId}
+                    onSelectLab={(id) => selectExercise(id, null)}
+                  />
+                ) : (
+                  <ExerciseRail
+                    exercises={workspace.exercises}
+                    loading={workspace.isLoading}
+                    selectedId={selectedExerciseId}
+                    onSelect={(ex) =>
+                      selectExercise(ex.id, ex.starter_code ?? null)
+                    }
+                  />
+                )}
+              </div>
+            )}
           </aside>
 
           {/* ─── CENTER: editor + tabs ─── */}
@@ -535,7 +591,7 @@ export function PracticeScreen() {
             {activeTab === "code" ? (
               <div className="practice-monaco-shell">
                 <Monaco
-                  height="560px"
+                  height={railCollapsed ? "calc(100vh - 280px)" : "560px"}
                   defaultLanguage="python"
                   language="python"
                   value={code}
@@ -715,6 +771,81 @@ function CapstoneRail({
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * P-Practice2 — Compact rail. Shown when the user collapses the exercises
+ * list. Each exercise becomes a square badge with a short code derived from
+ * its difficulty group (F = Foundations, C = Core craft, P = Capstone) and
+ * its 1-based index inside that group.
+ */
+interface CompactRailProps {
+  exercises: ExerciseResponse[];
+  selectedId: string | null;
+  onSelect: (ex: ExerciseResponse) => void;
+  onExpand: () => void;
+}
+
+function CompactRail({
+  exercises,
+  selectedId,
+  onSelect,
+  onExpand,
+}: CompactRailProps) {
+  const groups = useMemo(() => {
+    const F: ExerciseResponse[] = [];
+    const C: ExerciseResponse[] = [];
+    const P: ExerciseResponse[] = [];
+    for (const ex of exercises) {
+      const d = (ex.difficulty || "").toLowerCase();
+      if (d === "beginner" || d === "easy") F.push(ex);
+      else if (d === "advanced" || d === "hard") P.push(ex);
+      else C.push(ex);
+    }
+    return [
+      { prefix: "F", items: F },
+      { prefix: "C", items: C },
+      { prefix: "P", items: P },
+    ] as const;
+  }, [exercises]);
+
+  return (
+    <div className="practice-rail-compact" data-testid="practice-rail-compact">
+      <button
+        type="button"
+        className="practice-rail-toggle"
+        onClick={onExpand}
+        aria-label="Expand exercises rail"
+        title="Expand exercises rail"
+      >
+        <span aria-hidden="true">›</span>
+      </button>
+      {groups.map(({ prefix, items }) =>
+        items.length === 0 ? null : (
+          <div className="practice-badge-group" key={prefix}>
+            {items.map((ex, idx) => {
+              const code = `${prefix}${idx + 1}`;
+              const isActive = ex.id === selectedId;
+              return (
+                <button
+                  key={ex.id}
+                  type="button"
+                  className={cn("practice-badge", isActive && "active")}
+                  onClick={() => onSelect(ex)}
+                  title={ex.title}
+                  aria-label={`${ex.title} (${code})`}
+                  aria-pressed={isActive}
+                  data-testid={`practice-badge-${ex.id}`}
+                >
+                  {code}
+                </button>
+              );
+            })}
+          </div>
+        ),
+      )}
     </div>
   );
 }
