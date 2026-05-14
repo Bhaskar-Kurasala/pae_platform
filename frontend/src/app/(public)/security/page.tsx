@@ -1,6 +1,6 @@
 import { StubPage } from "../_components/stub-page";
 
-export const metadata = { title: "Security · PAE Platform" };
+export const metadata = { title: "Security · AI Career OS" };
 
 export default function SecurityPage() {
   return (

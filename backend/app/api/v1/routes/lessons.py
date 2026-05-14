@@ -53,6 +53,8 @@ async def get_lesson(
     current_user: User = Depends(get_current_user),
 ) -> Lesson:
     lesson = await service.get_lesson(lesson_id)
+    if not lesson.is_published and current_user.role != "admin":
+        raise HTTPException(status_code=404, detail="Lesson not found")
     course = await CourseRepository(db).get_active(lesson.course_id)
     if course is not None and course.price_cents > 0 and current_user.role != "admin":
         enrollment = await EnrollmentRepository(db).get_by_student_and_course(

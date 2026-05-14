@@ -12,11 +12,15 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import func
+
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user_optional
 from app.models.course import Course
 from app.models.course_bundle import CourseBundle
+from app.models.exercise import Exercise
+from app.models.lesson import Lesson
 from app.models.user import User
 from app.schemas.payments_v2 import (
     CatalogBundleResponse,
@@ -57,6 +61,39 @@ async def get_catalog(
         )
     )
 
+    course_ids_list = [c.id for c in course_rows]
+    lesson_counts: dict[str, int] = {}
+    lab_counts: dict[str, int] = {}
+    if course_ids_list:
+        lesson_rows = (
+            await db.execute(
+                select(Lesson.course_id, func.count(Lesson.id))
+                .where(
+                    Lesson.course_id.in_(course_ids_list),
+                    Lesson.is_deleted.is_(False),
+                    Lesson.is_published.is_(True),
+                )
+                .group_by(Lesson.course_id)
+            )
+        ).all()
+        for cid, n in lesson_rows:
+            lesson_counts[str(cid)] = int(n or 0)
+
+        lab_rows = (
+            await db.execute(
+                select(Lesson.course_id, func.count(Exercise.id))
+                .join(Lesson, Lesson.id == Exercise.lesson_id)
+                .where(
+                    Lesson.course_id.in_(course_ids_list),
+                    Lesson.is_deleted.is_(False),
+                    Exercise.is_deleted.is_(False),
+                )
+                .group_by(Lesson.course_id)
+            )
+        ).all()
+        for cid, n in lab_rows:
+            lab_counts[str(cid)] = int(n or 0)
+
     courses_out: list[CatalogCourseResponse] = []
     for course in course_rows:
         unlocked = False
@@ -64,6 +101,9 @@ async def get_catalog(
             unlocked = await entitlement_service.is_entitled(
                 db, user_id=current_user.id, course_id=course.id
             )
+        meta = dict(course.metadata_ or {})
+        meta["lesson_count"] = lesson_counts.get(str(course.id), 0)
+        meta["lab_count"] = lab_counts.get(str(course.id), 0)
         courses_out.append(
             CatalogCourseResponse(
                 id=course.id,
@@ -75,7 +115,7 @@ async def get_catalog(
                 is_published=course.is_published,
                 difficulty=course.difficulty,
                 bullets=list(course.bullets or []),
-                metadata=dict(course.metadata_ or {}),
+                metadata=meta,
                 is_unlocked=unlocked,
             )
         )

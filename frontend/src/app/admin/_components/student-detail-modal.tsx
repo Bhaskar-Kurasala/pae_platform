@@ -33,6 +33,7 @@ import { X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useAdminStudents } from "@/lib/hooks/use-admin";
 import { StudentDetailPanel } from "./student-detail-panel";
+import { ResourceAuditPanel } from "./resource-audit-panel";
 
 interface StudentDetailModalProps {
   studentId: string | null;
@@ -63,23 +64,15 @@ export function StudentDetailModal({
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  // Mirror the admin page theme — modal matches whatever the cockpit is set to.
   const isDark = pageTheme === "dark";
 
-  // While the modal is open in dark mode, mirror the page-island
-  // theme onto <html class="dark"> so portal-rendered popovers
-  // (shadcn Select content, tooltips) inherit dark tokens too.
-  // Without this, the Select's ChevronDown popup renders with
-  // light-mode bg-popover even though the modal around it is dark.
-  // We restore the prior value on close so the rest of the app
-  // (which uses media-query-based dark mode) is unaffected.
   useEffect(() => {
     if (!open) return;
     const html = document.documentElement;
     const body = document.body;
     const had = html.classList.contains("dark");
     if (isDark) html.classList.add("dark");
-    // Mark body so portal-rendered popups (Select content lives outside
-    // the modal DOM) can pick up the cockpit chrome regardless of theme.
     body.setAttribute("data-cf-modal-theme", pageTheme);
     return () => {
       if (!had) html.classList.remove("dark");
@@ -101,60 +94,55 @@ export function StudentDetailModal({
   // hex with the same blur. This gives cards the "frosted glass over a
   // warm gradient" feel that makes /path read premium instead of like
   // a generic shadcn surface.
+  // Surface tokens match the admin cockpit palette exactly — dark uses
+  // the actionBand forest gradient, light uses the console parchment.
   const surface = isDark
     ? {
-        // Page bg — radial gradient like v8 dark hero, not flat.
-        bgGradient:
-          "radial-gradient(circle at top left, #1a2520, #0e1411 42%)",
-        bg: "#0e1411",
-        // Glass card: panel hex with subtle alpha + blur. Border picks
-        // up forest-tinted line color so it doesn't fight the card.
-        cardBg: "rgba(26, 34, 28, 0.82)",
-        cardBorder: "rgba(143, 214, 177, 0.12)",
-        cardShadow:
-          "0 18px 60px rgba(0, 0, 0, 0.40), 0 1px 0 rgba(143, 214, 177, 0.04) inset",
-        cardShadowHover:
-          "0 28px 90px rgba(0, 0, 0, 0.55), 0 1px 0 rgba(143, 214, 177, 0.06) inset",
-        ink: "#f0ece1", // --ink
-        ink2: "#d6d2c6", // --ink-2
-        muted: "#9a9588", // --muted
-        muted2: "#7a7568", // --muted-2
-        eyebrow: "#8fd6b1", // --forest-3
-        eyebrowDot: "#73c79c", // --forest-2
-        accent: "#73c79c",
-        accentSoft: "rgba(143, 214, 177, 0.14)",
+        bgGradient: "linear-gradient(135deg, #19241e 0%, #243128 55%, #2d3d31 100%)",
+        bg: "#19241e",
+        cardBg: "rgba(255,255,255,0.05)",
+        cardBorder: "rgba(255,255,255,0.09)",
+        cardShadow: "0 4px 16px rgba(0,0,0,0.28), 0 1px 0 rgba(255,255,255,0.03) inset",
+        cardShadowHover: "0 8px 32px rgba(0,0,0,0.40)",
+        ink: "#f7f2e8",
+        ink2: "#d6cebf",
+        muted: "#c4baa6",
+        muted2: "#9a9382",
+        eyebrow: "#c8b88d",
+        eyebrowDot: "#d96252",
+        accent: "#5fa37f",
+        accentSoft: "rgba(95,163,127,0.18)",
         gold: "#e8be72",
-        line: "#2c3830",
-        borderTop: "rgba(255, 255, 255, 0.04)",
-        ring: "rgba(208, 212, 207, 0.04)",
-        backdrop: "rgba(0, 0, 0, 0.62)",
-        ctaShadow: "0 12px 32px rgba(143, 214, 177, 0.20)",
-        goldShadow: "0 16px 40px rgba(232, 190, 114, 0.28)",
+        line: "rgba(255,255,255,0.09)",
+        borderTop: "rgba(255,255,255,0.06)",
+        ring: "rgba(255,255,255,0.04)",
+        backdrop: "rgba(0,0,0,0.65)",
+        ctaShadow: "0 8px 24px rgba(95,163,127,0.28)",
+        goldShadow: "0 12px 32px rgba(232,190,114,0.28)",
       }
     : {
-        // Page bg — same warm radial gradient v8 light uses.
-        bgGradient:
-          "radial-gradient(circle at top left, #fbf7f0, #f6f1e8 42%)",
-        bg: "#f6f1e8",
-        cardBg: "rgba(255, 255, 255, 0.82)",
-        cardBorder: "rgba(219, 209, 191, 0.92)",
-        cardShadow: "0 10px 30px rgba(21, 19, 13, 0.05)",
-        cardShadowHover: "0 18px 60px rgba(21, 19, 13, 0.09)",
-        ink: "#10120e", // --ink
-        ink2: "#232720", // --ink-2
-        muted: "#686559", // --muted
-        muted2: "#8f897d", // --muted-2
-        eyebrow: "#356d50", // --forest-2
-        eyebrowDot: "#4e9470", // --forest-3
-        accent: "#244f39",
-        accentSoft: "#e5efe8",
-        gold: "#b8862d",
-        line: "#dbd1bf",
-        borderTop: "rgba(255, 255, 255, 0.7)",
-        ring: "rgba(26, 38, 32, 0.04)",
-        backdrop: "rgba(8, 12, 10, 0.32)",
-        ctaShadow: "0 12px 32px rgba(78, 148, 112, 0.22)",
-        goldShadow: "0 16px 40px rgba(214, 165, 77, 0.25)",
+        // Matches console.module.css light tokens exactly
+        bgGradient: "radial-gradient(ellipse 120% 80% at 20% 0%, #fdfaf3, #f7f3ea 55%, #efe9d9 100%)",
+        bg: "#f7f3ea",
+        cardBg: "rgba(255,255,255,0.92)",
+        cardBorder: "#e7decd",
+        cardShadow: "0 1px 2px rgba(20,20,15,0.05), 0 4px 12px rgba(20,20,15,0.06)",
+        cardShadowHover: "0 4px 8px rgba(20,20,15,0.06), 0 12px 28px rgba(20,20,15,0.08)",
+        ink: "#1a2620",
+        ink2: "#3a3a3a",
+        muted: "#7a7565",
+        muted2: "#a39d8d",
+        eyebrow: "#356d50",
+        eyebrowDot: "#4e9470",
+        accent: "#1f4f37",
+        accentSoft: "rgba(95,163,127,0.14)",
+        gold: "#d6a54d",
+        line: "#e7decd",
+        borderTop: "rgba(255,255,255,0.8)",
+        ring: "rgba(26,38,32,0.06)",
+        backdrop: "rgba(8,12,10,0.28)",
+        ctaShadow: "0 8px 24px rgba(31,79,55,0.20)",
+        goldShadow: "0 12px 32px rgba(214,165,77,0.22)",
       };
 
   return (
@@ -171,7 +159,7 @@ export function StudentDetailModal({
             against the cockpit backdrop. */}
         <DialogPrimitive.Popup
           data-theme={pageTheme}
-          className="fixed top-1/2 left-1/2 z-50 flex w-[calc(100vw-2rem)] max-w-[920px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden outline-none transition duration-200 data-ending-style:scale-[0.96] data-ending-style:opacity-0 data-starting-style:scale-[0.96] data-starting-style:opacity-0"
+          className="fixed top-1/2 left-1/2 z-50 flex w-[calc(100vw-3rem)] max-w-[1160px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden outline-none transition duration-200 data-ending-style:scale-[0.96] data-ending-style:opacity-0 data-starting-style:scale-[0.96] data-starting-style:opacity-0"
           style={{
             // Warm radial gradient — same primitive v8.css uses on
             // .hero / .path-hero. The blur/glass cards inside this
@@ -180,7 +168,7 @@ export function StudentDetailModal({
             background: surface.bgGradient,
             color: surface.ink,
             borderRadius: 22,
-            maxHeight: "calc(100vh - 4rem)",
+            maxHeight: "calc(100vh - 2rem)",
             boxShadow: isDark
               ? `0 40px 100px rgba(0,0,0,0.75), 0 0 0 1px ${surface.ring}, inset 0 1px 0 ${surface.borderTop}`
               : `0 40px 100px rgba(20,30,25,0.18), 0 0 0 1px ${surface.ring}, inset 0 1px 0 ${surface.borderTop}`,
@@ -209,8 +197,6 @@ export function StudentDetailModal({
                 className="cf-modal-eyebrow"
                 style={{
                   color: surface.eyebrow,
-                  fontFamily:
-                    "var(--font-jetbrains-mono), ui-monospace, monospace",
                   ["--cf-eyebrow-dot" as string]: surface.eyebrowDot,
                   ["--cf-eyebrow-halo" as string]: isDark
                     ? "rgba(143, 214, 177, 0.18)"
@@ -219,17 +205,16 @@ export function StudentDetailModal({
               >
                 Student profile
               </div>
-              {/* Title — Fraunces 32px with -0.03em tracking, matching
-                  v8 hero/section-title typography. Tighter tracking is
-                  the difference between "default serif" and "premium
-                  editorial." */}
+              {/* Title — Fraunces 36px/-0.04em matching console .abTitle */}
               <DialogPrimitive.Title
-                className="truncate font-medium leading-[1.05]"
+                className="truncate leading-[1.05]"
                 style={{
-                  color: surface.ink,
+                  color: isDark ? surface.gold : surface.ink,
                   fontFamily: "var(--font-fraunces), Georgia, serif",
-                  fontSize: "32px",
-                  letterSpacing: "-0.03em",
+                  fontSize: "36px",
+                  fontWeight: 600,
+                  letterSpacing: "-0.04em",
+                  fontStyle: isDark ? "italic" : "normal",
                 }}
               >
                 {student?.full_name ?? "Student"}
@@ -357,201 +342,271 @@ export function StudentDetailModal({
                   the panel cards' eyebrow. Lives outside .careerforge-
                   modal-body so we declare it globally on the popup. */}
               <style>{`
+                /* Modal header eyebrow — v8 .eyebrow: Inter 10px/700/0.2em/uppercase */
                 [data-theme="${pageTheme}"] .cf-modal-eyebrow {
                   display: inline-flex;
                   align-items: center;
                   gap: 8px;
+                  font-family: var(--font-inter), 'Inter', system-ui, sans-serif;
                   font-size: 10px;
                   letter-spacing: 0.2em;
                   text-transform: uppercase;
                   font-weight: 700;
                   margin-bottom: 12px;
-                  color: var(--cf-eyebrow-color, ${surface.eyebrow});
+                  color: ${surface.eyebrow};
                 }
                 [data-theme="${pageTheme}"] .cf-modal-eyebrow::before {
                   content: "";
-                  width: 6px;
-                  height: 6px;
+                  width: 6px; height: 6px;
                   border-radius: 50%;
-                  background: var(--cf-eyebrow-dot, ${surface.eyebrowDot});
-                  box-shadow: 0 0 0 4px var(--cf-eyebrow-halo, ${
-                    isDark ? "rgba(143,214,177,0.18)" : "rgba(78,148,112,0.18)"
-                  });
+                  background: ${surface.eyebrowDot};
+                  box-shadow: 0 0 0 4px ${isDark ? "rgba(143,214,177,0.18)" : "rgba(78,148,112,0.18)"};
                 }
               `}</style>
               <style>{`
-                /* === Shared chrome — v8 primitives === */
-                .careerforge-modal-body {
-                  --admin-eyebrow: ${surface.eyebrow};
-                  --admin-eyebrow-dot: ${surface.eyebrowDot};
-                  --admin-eyebrow-halo: ${
-                    isDark ? "rgba(143,214,177,0.18)" : "rgba(78,148,112,0.18)"
-                  };
-                  --admin-ink: ${surface.ink};
-                  --admin-ink-2: ${surface.ink2};
-                  --admin-muted: ${surface.muted};
+                /* ============================================================
+                   STUDENT PROFILE MODAL — typography locked to today screen
+                   Source of truth: v8.css .eyebrow / .step-state / .step-card
+                   h5 / .step-card p / .mini-chip / .step-num / .section-title
+
+                   IMPORTANT: The modal popup is a dialog portal — it does NOT
+                   inherit body font-family. We must set Inter explicitly on the
+                   root container so all children inherit it, exactly like v8.css
+                   sets --sans on <body>. Without this, browser falls back to
+                   Times New Roman for any element without an explicit font-family.
+                   ============================================================ */
+
+                /* Root font reset — Inter as base, matching v8.css body/--sans */
+                .careerforge-modal-body,
+                .careerforge-modal-body * {
+                  font-family: var(--font-inter), 'Inter', system-ui, sans-serif;
+                  box-sizing: border-box;
                 }
 
-                /* Eyebrow above each card — the v8 .card-face-eyebrow
-                   primitive: 10px, 0.2em tracking, weight 700, mint
-                   dot ::before with halo glow. */
+                /* Card eyebrow — exact v8 .step-state values:
+                   Inter, 11px, 800, 0.12em, uppercase, var(--muted) */
                 .careerforge-modal-body .cf-card-eyebrow {
                   display: inline-flex;
                   align-items: center;
                   gap: 8px;
-                  font-size: 10px;
-                  letter-spacing: 0.2em;
+                  font-size: 11px;
+                  font-weight: 800;
+                  letter-spacing: 0.12em;
                   text-transform: uppercase;
-                  font-weight: 700;
-                  color: ${surface.eyebrow};
-                  margin-bottom: 10px;
+                  color: ${surface.muted};
+                  margin-bottom: 12px;
                 }
                 .careerforge-modal-body .cf-card-eyebrow::before {
                   content: "";
-                  width: 6px;
-                  height: 6px;
+                  width: 6px; height: 6px;
                   border-radius: 50%;
+                  flex-shrink: 0;
                   background: ${surface.eyebrowDot};
-                  box-shadow: 0 0 0 4px ${
-                    isDark ? "rgba(143,214,177,0.18)" : "rgba(78,148,112,0.18)"
-                  };
+                  box-shadow: 0 0 0 4px ${isDark ? "rgba(143,214,177,0.18)" : "rgba(78,148,112,0.18)"};
                 }
 
-                /* Card title — Fraunces 22px, weight 500, -0.03em. The
-                   /path screen uses 22-24px serifs at this tracking
-                   for every card and section title. */
+                /* Card title — exact v8 .step-card h5 values:
+                   Fraunces serif, 18px, 500, -0.02em */
                 .careerforge-modal-body .cf-card-title {
                   margin: 0;
-                  font-size: 22px;
+                  font-family: var(--font-fraunces), 'Fraunces', Georgia, serif;
+                  font-size: 18px;
                   font-weight: 500;
-                  letter-spacing: -0.03em;
-                  line-height: 1.15;
+                  letter-spacing: -0.02em;
+                  line-height: 1.2;
                   color: ${surface.ink};
                 }
-                /* Card title icon — sits in a soft 32px circle pad with
-                   a tinted bg, like the v8 .lesson-icon primitive.
-                   Reads as an "instrument" rather than a stray glyph. */
+
+                /* Card title icon — exact v8 .step-num values:
+                   34px circle, Fraunces, weight 600, var(--panel-2) bg */
                 .careerforge-modal-body .cf-card-title-icon {
                   display: inline-grid;
                   place-items: center;
-                  width: 32px;
-                  height: 32px;
-                  border-radius: 10px;
-                  background: ${
-                    isDark ? "rgba(143,214,177,0.10)" : "rgba(78,148,112,0.08)"
-                  };
-                  border: 1px solid ${surface.line};
+                  width: 34px; height: 34px;
+                  border-radius: 50%;
                   flex-shrink: 0;
+                  background: ${isDark ? "rgba(143,214,177,0.12)" : "rgba(53,109,80,0.10)"};
+                  border: 1px solid ${isDark ? "rgba(143,214,177,0.20)" : "rgba(53,109,80,0.16)"};
+                  color: ${surface.accent};
                 }
-                .careerforge-modal-body .cf-card-title-icon svg {
-                  width: 16px;
-                  height: 16px;
+                .careerforge-modal-body .cf-card-title-icon svg { width: 15px; height: 15px; }
+
+                /* Gold icon tint — 2nd and 5th cards */
+                .careerforge-modal-body > div > [data-slot="card"]:nth-child(2) .cf-card-title-icon,
+                .careerforge-modal-body > div > [data-slot="card"]:nth-child(5) .cf-card-title-icon {
+                  background: ${isDark ? "rgba(232,190,114,0.12)" : "rgba(214,165,77,0.10)"} !important;
+                  border-color: ${isDark ? "rgba(232,190,114,0.22)" : "rgba(214,165,77,0.20)"} !important;
+                  color: ${surface.gold} !important;
+                }
+                /* Rose icon tint — 3rd card */
+                .careerforge-modal-body > div > [data-slot="card"]:nth-child(3) .cf-card-title-icon {
+                  background: ${isDark ? "rgba(217,98,82,0.12)" : "rgba(192,97,79,0.09)"} !important;
+                  border-color: ${isDark ? "rgba(217,98,82,0.22)" : "rgba(192,97,79,0.18)"} !important;
+                  color: ${isDark ? "#d96252" : "#c0614f"} !important;
                 }
 
-                /* Card body prose — sits tight under the title, muted.
-                   Sized small enough that it reads as helper, not as a
-                   competing line of body copy. */
+                /* Card body prose — exact v8 .step-card p values:
+                   Inter (no explicit family), 13px, line-height 1.58, var(--muted) */
                 .careerforge-modal-body .cf-card-prose {
-                  margin: 6px 0 0;
+                  margin: 8px 0 0;
+                  font-size: 13px;
+                  line-height: 1.58;
                   color: ${surface.muted};
-                  font-size: 13.5px;
-                  line-height: 1.55;
                 }
 
-                /* Agent trigger — single-font Inter pill. */
+                /* Tag pills — exact v8 .mini-chip values:
+                   Inter, 11px, 700, 5px 9px pad, 999px radius, var(--panel-2) bg, var(--ink-2) color */
+                .careerforge-modal-body .inline-flex.rounded-full,
+                .careerforge-modal-body [class*="rounded-full"]:not(button):not([role="radio"]) {
+                  background: ${isDark ? "rgba(255,255,255,0.08)" : "rgba(26,38,32,0.08)"} !important;
+                  color: ${surface.ink2} !important;
+                  border: none !important;
+                  font-size: 11px !important;
+                  font-weight: 700 !important;
+                  letter-spacing: 0 !important;
+                  text-transform: none !important;
+                  padding: 5px 9px !important;
+                  border-radius: 999px !important;
+                }
+
+                /* Agent trigger dropdown */
                 .careerforge-modal-body .cf-agent-trigger {
                   height: 40px !important;
                   padding: 8px 14px !important;
                   border-radius: 12px !important;
-                  font-family: var(--font-inter), 'Inter', system-ui, sans-serif;
                   font-size: 14px;
                   font-weight: 500;
-                  letter-spacing: -0.005em;
                   color: ${surface.ink};
                 }
 
-                /* Card frame — frosted glass, 22px radius, warm shadow.
-                   Mirrors v8.css .card line 744-753 exactly. */
+                /* Card frame — left accent rail + per-card tinted background */
                 .careerforge-modal-body [data-slot="card"] {
                   background: ${surface.cardBg} !important;
                   backdrop-filter: blur(10px);
                   -webkit-backdrop-filter: blur(10px);
                   border: 1px solid ${surface.cardBorder} !important;
-                  border-radius: 22px !important;
+                  border-left: 3px solid ${surface.accent} !important;
+                  border-radius: 18px !important;
                   box-shadow: ${surface.cardShadow} !important;
-                  transition:
-                    transform .28s cubic-bezier(.2,.8,.2,1),
-                    box-shadow .28s cubic-bezier(.2,.8,.2,1),
-                    border-color .28s cubic-bezier(.2,.8,.2,1);
                   position: relative;
                   overflow: hidden;
+                  transition: transform .28s cubic-bezier(.2,.8,.2,1), box-shadow .28s cubic-bezier(.2,.8,.2,1);
+                }
+                /* Subtle top-glow strip (mirrors v8 .step-card::before) */
+                .careerforge-modal-body [data-slot="card"]::before {
+                  content: "";
+                  position: absolute; left: 0; right: 0; top: 0;
+                  height: 48px;
+                  background: ${isDark
+                    ? "linear-gradient(180deg, rgba(143,214,177,0.06) 0%, transparent 100%)"
+                    : "linear-gradient(180deg, rgba(78,148,112,0.05) 0%, transparent 100%)"};
+                  pointer-events: none; z-index: 0;
                 }
                 .careerforge-modal-body [data-slot="card"]:hover {
+                  transform: translateY(-1px);
                   box-shadow: ${surface.cardShadowHover} !important;
                 }
-                /* Card header: 18px top so the eyebrow has breathing
-                   room, 10px bottom so the prose helper sits tight to
-                   the action row below it (was 14px → felt stretched). */
+                /* Per-card tint: forest → gold → rose → forest → neutral */
+                .careerforge-modal-body > div > [data-slot="card"]:nth-child(1) {
+                  background: ${isDark ? "rgba(30,40,34,0.88)" : "rgba(244,249,246,0.94)"} !important;
+                }
+                .careerforge-modal-body > div > [data-slot="card"]:nth-child(2) {
+                  background: ${isDark ? "rgba(34,38,26,0.88)" : "rgba(252,249,242,0.94)"} !important;
+                  border-left-color: ${surface.gold} !important;
+                }
+                .careerforge-modal-body > div > [data-slot="card"]:nth-child(3) {
+                  background: ${isDark ? "rgba(36,28,28,0.88)" : "rgba(253,247,246,0.94)"} !important;
+                  border-left-color: ${isDark ? "#d96252" : "#c0614f"} !important;
+                }
+                .careerforge-modal-body > div > [data-slot="card"]:nth-child(4) {
+                  background: ${isDark ? "rgba(28,38,34,0.88)" : "rgba(244,249,246,0.90)"} !important;
+                }
+                .careerforge-modal-body > div > [data-slot="card"]:nth-child(5) {
+                  background: ${isDark ? "rgba(30,34,40,0.88)" : "rgba(248,248,253,0.94)"} !important;
+                  border-left-color: ${surface.gold} !important;
+                }
                 .careerforge-modal-body [data-slot="card-header"] {
-                  padding: 18px 22px 10px !important;
+                  padding: 20px 22px 10px !important;
+                  position: relative; z-index: 1;
                 }
                 .careerforge-modal-body [data-slot="card-content"] {
-                  padding: 0 22px 18px !important;
+                  padding: 0 22px 20px !important;
+                  position: relative; z-index: 1;
                 }
 
-                /* Reveal animation — borrowed from v8.css .reveal. Each
-                   card focuses into existence with a soft blur + lift,
-                   staggered so the eye reads them sequentially. */
+                /* Reveal animation — staggered like v8 .reveal */
                 @keyframes cfReveal {
                   from { opacity: 0; filter: blur(6px); transform: translateY(14px) scale(.985); }
                   to   { opacity: 1; filter: blur(0); transform: translateY(0) scale(1); }
                 }
-                .careerforge-modal-body > div > [data-slot="card"] {
-                  animation: cfReveal .55s cubic-bezier(.2,.8,.2,1) both;
-                }
+                .careerforge-modal-body > div > [data-slot="card"] { animation: cfReveal .55s cubic-bezier(.2,.8,.2,1) both; }
                 .careerforge-modal-body > div > [data-slot="card"]:nth-child(2) { animation-delay: .06s; }
                 .careerforge-modal-body > div > [data-slot="card"]:nth-child(3) { animation-delay: .12s; }
                 .careerforge-modal-body > div > [data-slot="card"]:nth-child(4) { animation-delay: .18s; }
                 .careerforge-modal-body > div > [data-slot="card"]:nth-child(5) { animation-delay: .24s; }
-                .careerforge-modal-body > div > [data-slot="card"]:nth-child(6) { animation-delay: .30s; }
 
-                /* Numerics + identifiers in the panel — JetBrains Mono
-                   with tnum. Matches the v8 .cp-label primitive. */
-                .careerforge-modal-body .tabular-nums,
-                .careerforge-modal-body .font-mono,
-                .careerforge-modal-body time,
-                .careerforge-modal-body [data-slot="card-content"] p.text-\\[10px\\],
-                .careerforge-modal-body [data-slot="card-content"] p.text-xs.text-muted-foreground {
-                  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
-                  font-feature-settings: "tnum";
-                  letter-spacing: 0.01em;
+                /* Activity timeline — v8 .step-card p for summary, v8 .eyebrow for timestamp */
+                .careerforge-modal-body .cf-activity-summary {
+                  font-size: 13px;
+                  line-height: 1.58;
+                  color: ${surface.ink};
+                  margin: 0;
+                }
+                .careerforge-modal-body .cf-activity-time {
+                  font-size: 10px;
+                  font-weight: 700;
+                  letter-spacing: 0.2em;
+                  text-transform: uppercase;
+                  color: ${surface.muted2 ?? surface.muted};
+                  margin-top: 3px;
                 }
 
-                /* Body copy & muted text in cockpit ink (cream in dark,
-                   ink in light) instead of shadcn defaults. */
+                /* Body copy — ink color, no font override (inherits Inter) */
                 .careerforge-modal-body p,
                 .careerforge-modal-body span,
                 .careerforge-modal-body div,
                 .careerforge-modal-body li,
-                .careerforge-modal-body label {
-                  color: ${surface.ink};
-                }
-                .careerforge-modal-body .text-muted-foreground {
-                  color: ${surface.muted} !important;
+                .careerforge-modal-body label { color: ${surface.ink}; }
+                .careerforge-modal-body .text-muted-foreground { color: ${surface.muted} !important; }
+
+                /* Note / DM pre bodies — Inter prose, not mono */
+                .careerforge-modal-body pre {
+                  font-family: var(--font-inter), 'Inter', system-ui, sans-serif;
+                  font-size: 13px;
+                  line-height: 1.58;
+                  color: ${surface.ink} !important;
+                  white-space: pre-wrap;
                 }
 
-                /* Inputs — translucent over the warm gradient, focus
-                   ring matches the cockpit accent. */
+                /* Note/DM list rows */
+                .careerforge-modal-body li.rounded-lg {
+                  background: ${isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.55)"} !important;
+                  border-color: ${surface.line} !important;
+                  border-radius: 14px !important;
+                }
+                .careerforge-modal-body li.border-primary\\/30 {
+                  background: ${surface.accentSoft} !important;
+                  border-color: ${surface.accent} !important;
+                }
+
+                /* Timestamps / counters only — mono tnum (the ONE place today screen uses it) */
+                .careerforge-modal-body .tabular-nums {
+                  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+                  font-feature-settings: "tnum";
+                }
+
+                /* Inputs */
                 .careerforge-modal-body textarea,
                 .careerforge-modal-body input[type="text"],
                 .careerforge-modal-body input[type="email"],
                 .careerforge-modal-body input[type="search"] {
-                  background: ${
-                    isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.6)"
-                  } !important;
+                  background: ${isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.6)"} !important;
                   color: ${surface.ink} !important;
                   border-color: ${surface.line} !important;
                   border-radius: 12px !important;
+                  font-size: 13px;
+                  line-height: 1.58;
+                  padding: 10px 14px !important;
                 }
                 .careerforge-modal-body textarea:focus,
                 .careerforge-modal-body input:focus {
@@ -560,13 +615,9 @@ export function StudentDetailModal({
                   outline: none !important;
                 }
                 .careerforge-modal-body textarea::placeholder,
-                .careerforge-modal-body input::placeholder {
-                  color: ${surface.muted} !important;
-                }
+                .careerforge-modal-body input::placeholder { color: ${surface.muted} !important; }
 
-                /* Primary action buttons — gradient + colored shadow,
-                   the same "jewelry" treatment v8.css uses on
-                   .star.goal and .btn.gold. */
+                /* Primary buttons */
                 .careerforge-modal-body button.bg-primary {
                   background: linear-gradient(135deg, ${surface.accent}, ${surface.eyebrow}) !important;
                   border: none !important;
@@ -577,93 +628,41 @@ export function StudentDetailModal({
                 }
                 .careerforge-modal-body button.bg-primary:hover:not(:disabled) {
                   transform: translateY(-1px);
-                  box-shadow: 0 16px 40px ${
-                    isDark ? "rgba(143,214,177,0.30)" : "rgba(78,148,112,0.30)"
-                  } !important;
+                  box-shadow: 0 16px 40px ${isDark ? "rgba(143,214,177,0.30)" : "rgba(78,148,112,0.30)"} !important;
                 }
 
-                /* Ghost / outline buttons (Schedule call, Load older). */
+                /* Ghost / outline buttons */
                 .careerforge-modal-body a[href^="mailto:"],
                 .careerforge-modal-body button.border,
                 .careerforge-modal-body a.border {
-                  background: ${
-                    isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.5)"
-                  } !important;
+                  background: ${isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.5)"} !important;
                   border-color: ${surface.line} !important;
                   color: ${surface.ink} !important;
                   border-radius: 12px !important;
-                  backdrop-filter: blur(6px);
                 }
                 .careerforge-modal-body a[href^="mailto:"]:hover,
                 .careerforge-modal-body button.border:hover {
-                  background: ${
-                    isDark ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.8)"
-                  } !important;
+                  background: ${isDark ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.8)"} !important;
                   border-color: ${surface.accent} !important;
                 }
 
-                /* Saved-message bodies + saved-note rows. */
-                .careerforge-modal-body pre {
-                  color: ${surface.ink} !important;
-                  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
-                  font-size: 13px;
-                  line-height: 1.6;
-                }
-                .careerforge-modal-body li.rounded-lg {
-                  background: ${
-                    isDark ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.55)"
-                  } !important;
-                  border-color: ${surface.line} !important;
-                  border-radius: 14px !important;
-                  backdrop-filter: blur(6px);
-                }
-                .careerforge-modal-body li.border-primary\\/30 {
-                  background: ${surface.accentSoft} !important;
-                  border-color: ${surface.accent} !important;
-                }
-
-                /* Select trigger + portal popup — match the cockpit
-                   pill aesthetic instead of the default shadcn input. */
+                /* Select trigger */
                 .careerforge-modal-body [data-slot="select-trigger"] {
-                  background: ${
-                    isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.7)"
-                  } !important;
+                  background: ${isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.7)"} !important;
                   border-color: ${surface.line} !important;
                   color: ${surface.ink} !important;
                   border-radius: 12px !important;
-                  backdrop-filter: blur(6px);
                 }
                 .careerforge-modal-body [data-slot="select-trigger"]:hover {
-                  background: ${
-                    isDark ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.9)"
-                  } !important;
+                  background: ${isDark ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.9)"} !important;
                   border-color: ${surface.accent} !important;
                 }
-
-                /* Select trigger value — the resolved label like "Re-engage
-                   (disrupt_prevention)". Same prose font as body, but a
-                   touch tighter so it reads as a controlled selection. */
                 .careerforge-modal-body [data-slot="select-value"] {
-                  font-family: var(--font-inter), 'Inter', system-ui, sans-serif;
                   font-size: 14px;
-                  letter-spacing: -0.005em;
                   font-weight: 500;
                   color: ${surface.ink};
                 }
 
-                /* Textareas + their placeholder ghost text — Inter 14px
-                   with generous leading. Was 13px and felt cramped vs.
-                   the new 22px Fraunces card titles. */
-                .careerforge-modal-body textarea,
-                .careerforge-modal-body input[type="text"],
-                .careerforge-modal-body input[type="email"],
-                .careerforge-modal-body input[type="search"] {
-                  font-family: var(--font-inter), 'Inter', system-ui, sans-serif;
-                  font-size: 14px;
-                  line-height: 1.6;
-                  letter-spacing: -0.005em;
-                  padding: 12px 14px !important;
-                }
                 .careerforge-modal-body textarea::placeholder,
                 .careerforge-modal-body input::placeholder {
                   color: ${surface.muted2} !important;
@@ -877,6 +876,14 @@ export function StudentDetailModal({
                   hideHeader
                   compact
                 />
+                {studentId && (
+                  <ResourceAuditPanel
+                    resourceType="user"
+                    resourceId={studentId}
+                    pageTheme={pageTheme}
+                    title="Admin actions on this student"
+                  />
+                )}
               </div>
             </div>
           ) : (

@@ -1,6 +1,6 @@
 import { StubPage } from "../_components/stub-page";
 
-export const metadata = { title: "Changelog · PAE Platform" };
+export const metadata = { title: "Changelog · AI Career OS" };
 
 export default function ChangelogPage() {
   return (

@@ -5,6 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { buildCallInviteMailto } from "@/lib/calendar-mailto";
 import { AdminTopbar } from "./_components/admin-topbar";
+import { HealthStrip } from "./_components/health-strip";
+import { HealthDetailModal } from "./_components/health-detail-modal";
 import { RetentionPanels } from "./_components/retention-panels";
 import { StudentDetailModal } from "./_components/student-detail-modal";
 import { useRiskPanels } from "@/lib/hooks/use-admin";
@@ -202,6 +204,7 @@ export default function AdminConsoleV1Page() {
   // Pulse-strip window selector. Drives the "Platform pulse" section's
   // tab pills and round-trips to /console/v1?window=...
   const [pulseWindow, setPulseWindow] = useState<"24h" | "7d" | "30d">("24h");
+  const [healthMetricKey, setHealthMetricKey] = useState<string | null>(null);
 
   // Side-drawer triage state. Replaces the previous full-page navigate
   // — clicking a student card / roster row now opens a slide-in panel
@@ -350,6 +353,7 @@ export default function AdminConsoleV1Page() {
   return (
     <div className={styles.root} data-theme={theme}>
       <AdminTopbar liveLabel={liveLabel} onSearchChange={setSearch} />
+      <HealthStrip pageTheme={theme} onTileClick={(k) => setHealthMetricKey(k)} />
 
       {isLoading ? (
         <div className={styles.skeleton}>Loading admin console…</div>
@@ -704,9 +708,16 @@ export default function AdminConsoleV1Page() {
                     />
                   </div>
                 </div>
-                <div style={{ overflowX: "auto" }}>
+                <div
+                  className="cf-roster-scroll"
+                  style={{
+                    overflowX: "auto",
+                    overflowY: "auto",
+                    maxHeight: "60vh",
+                  }}
+                >
                   <table className={styles.studentsTable}>
-                    <thead>
+                    <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
                       <tr>
                         {(
                           [
@@ -821,6 +832,21 @@ export default function AdminConsoleV1Page() {
                       )}
                     </tbody>
                   </table>
+                </div>
+                <div
+                  style={{
+                    padding: "10px 16px",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: "0.18em",
+                    textTransform: "uppercase",
+                    color: "var(--muted)",
+                    borderTop: "1px solid var(--line)",
+                    background: "var(--panel-2)",
+                  }}
+                >
+                  Showing {filtered.length} of {students.length} learners
+                  {filtered.length > 20 ? " · scroll for more" : ""}
                 </div>
               </div>
             </section>
@@ -946,6 +972,12 @@ export default function AdminConsoleV1Page() {
         onOpenChange={(o) => {
           if (!o) closeStudentDrawer();
         }}
+        pageTheme={theme}
+      />
+      <HealthDetailModal
+        open={healthMetricKey !== null}
+        metricKey={healthMetricKey}
+        onClose={() => setHealthMetricKey(null)}
         pageTheme={theme}
       />
     </div>

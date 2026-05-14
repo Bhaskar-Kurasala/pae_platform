@@ -8,6 +8,8 @@ from app.models.admin_console import (  # noqa: F401
     AdminConsolePulseMetric,
     AdminConsoleRiskReason,
 )
+from app.models.admin_audit_log import AdminAuditLog  # noqa: F401
+from app.models.anomaly_dismissal import AnomalyDismissal  # noqa: F401
 from app.models.agent_action import AgentAction
 from app.models.agent_call_chain import AgentCallChain  # noqa: F401
 from app.models.agent_escalation import AgentEscalation  # noqa: F401
@@ -15,6 +17,8 @@ from app.models.agent_evaluation import AgentEvaluation  # noqa: F401
 from app.models.agent_invocation_log import AgentInvocationLog  # noqa: F401
 from app.models.agent_memory import AgentMemory  # noqa: F401
 from app.models.agent_proactive_run import AgentProactiveRun  # noqa: F401
+from app.models.agent_runtime_config import AgentRuntimeConfig  # noqa: F401
+from app.models.agent_task_template import AgentTaskTemplate  # noqa: F401
 from app.models.agent_tool_call import AgentToolCall  # noqa: F401
 from app.models.ai_review import AIReview  # noqa: F401
 from app.models.application_kit import ApplicationKit  # noqa: F401
@@ -28,6 +32,7 @@ from app.models.conversation_memory import ConversationMemory
 from app.models.course import Course
 from app.models.course_bundle import CourseBundle  # noqa: F401
 from app.models.course_entitlement import CourseEntitlement  # noqa: F401
+from app.models.coupon import Coupon  # noqa: F401
 from app.models.daily_intention import DailyIntention
 from app.models.enrollment import Enrollment
 from app.models.exercise import Exercise
@@ -114,6 +119,8 @@ __all__ = [
     "AgentEvaluation",
     "AgentMemory",
     "AgentProactiveRun",
+    "AgentRuntimeConfig",
+    "AgentTaskTemplate",
     "AgentToolCall",
     "StudentInbox",
     "ChatAttachment",
@@ -189,4 +196,6 @@ __all__ = [
     "Role",
     "RoleTransition",
     "StudentRoleState",
+    "AdminAuditLog",
+    "AnomalyDismissal",
 ]

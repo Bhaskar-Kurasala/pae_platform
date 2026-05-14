@@ -88,8 +88,8 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
       <div className="flex items-center justify-between h-16 px-5">
         <Link href="/dashboard" className="flex items-center gap-2" onClick={onClose}>
           <span className="font-bold text-lg">
-            <span className="text-primary">PAE</span>
-            <span className="text-foreground"> Platform</span>
+            <span className="text-primary">AI Career</span>
+            <span className="text-foreground"> OS</span>
           </span>
         </Link>
         {onClose && (
@@ -310,7 +310,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
             <Menu className="h-5 w-5" />
           </button>
           <span className="font-bold">
-            <span className="text-primary">PAE</span> Platform
+            <span className="text-primary">AI Career</span> OS
           </span>
         </header>
 

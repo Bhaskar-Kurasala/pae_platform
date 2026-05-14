@@ -13,8 +13,8 @@ import { GradientMesh } from "@/components/ui/gradient-mesh";
 import { MotionFade } from "@/components/ui/motion-fade";
 
 export const metadata: Metadata = {
-  title: "About — PAE Platform",
-  description: "Built by AI engineers, for AI engineers. Learn why we built PAE Platform and what powers it.",
+  title: "About — AI Career OS",
+  description: "Built by AI engineers, for AI engineers. Learn why we built AI Career OS and what powers it.",
 };
 
 // ---------------------------------------------------------------------------
@@ -101,7 +101,7 @@ export default function AboutPage() {
             </h1>
             <p className="text-lg text-muted-foreground leading-relaxed max-w-2xl mx-auto">
               When we started learning GenAI engineering, the resources were either shallow
-              tutorials or academic papers with no bridge to production. We built PAE Platform
+              tutorials or academic papers with no bridge to production. We built AI Career OS
               to close that gap — a place where you learn by doing, coached by AI agents
               that actually understand what you are building.
             </p>
@@ -186,7 +186,7 @@ export default function AboutPage() {
         <MotionFade>
           <h2 className="text-2xl font-bold mb-4">The team</h2>
           <p className="text-muted-foreground leading-relaxed mb-8">
-            PAE Platform is built by a small team of AI engineers who have shipped production
+            AI Career OS is built by a small team of AI engineers who have shipped production
             GenAI systems at scale. We are not academics — we are practitioners who have made
             every mistake in the book and want to help you avoid them.
           </p>

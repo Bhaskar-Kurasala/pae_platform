@@ -175,7 +175,7 @@ export function useRazorpayCheckout(): UseRazorpayCheckoutResult {
           key: keyId,
           amount: order.amount_cents,
           currency: order.currency,
-          name: "CareerForge",
+          name: "AI Career OS",
           description: order.target_title,
           order_id: order.provider_order_id,
           prefill: { email: order.user_email, name: order.user_name },

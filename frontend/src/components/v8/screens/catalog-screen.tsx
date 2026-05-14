@@ -306,7 +306,7 @@ export function CatalogScreen() {
               <span className="amt">4 min</span>
             </div>
             <Link
-              href="/placement-quiz"
+              href="/quiz"
               className="btn primary"
               style={{ padding: "12px 20px" }}
             >

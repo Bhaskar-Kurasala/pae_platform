@@ -10,7 +10,7 @@ import { useAuthStore } from "@/stores/auth-store";
 
 type StudioTab = "code" | "trace" | "labs" | "tests";
 
-const SAMPLE_CODE = `# CareerForge capstone · CLI AI Tool
+const SAMPLE_CODE = `# AI Career OS capstone · CLI AI Tool
 import os, asyncio
 from anthropic import Anthropic, APIError
 
@@ -144,7 +144,7 @@ export function StudioScreen() {
       return;
     }
     seniorReview.mutate(
-      { code: SAMPLE_CODE, problemContext: "CareerForge capstone CLI" },
+      { code: SAMPLE_CODE, problemContext: "AI Career OS capstone CLI" },
       {
         onSuccess: () => {
           revealReviewSequence();
@@ -245,7 +245,7 @@ export function StudioScreen() {
             >
               <div className="line">
                 <span className="ln">1</span>
-                <span className="cm"># CareerForge capstone · CLI AI Tool</span>
+                <span className="cm"># AI Career OS capstone · CLI AI Tool</span>
               </div>
               <div className="line">
                 <span className="ln">2</span>

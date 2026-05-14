@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Request, Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -6,6 +7,7 @@ from app.core.database import get_db
 from app.core.rate_limit import limiter
 from app.core.security import get_current_user
 from app.models.user import User
+from app.services.admin_audit_service import AdminAuditService
 from app.schemas.auth import (
     LoginRequest,
     PasswordResetConfirmPayload,
@@ -145,6 +147,7 @@ async def login(
     response: Response,
     payload: LoginRequest,
     service: AuthService = Depends(get_auth_service),
+    db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     tokens = await service.login(payload.email, payload.password)
     # PR3/D3.2 — also stamp the refresh token as a hardened cookie.
@@ -152,6 +155,19 @@ async def login(
     # current frontend localStorage flow; once the frontend migrates to
     # cookie-only refresh, we drop the body field in a follow-up.
     _set_refresh_cookie(response, tokens["refresh_token"])
+    user_row = (
+        await db.execute(select(User).where(User.email == payload.email))
+    ).scalar_one_or_none()
+    if user_row is not None and user_row.role == "admin":
+        await AdminAuditService.log(
+            db=db,
+            admin=user_row,
+            action_type="auth.admin_login",
+            resource_type="user",
+            resource_id=str(user_row.id),
+            request=request,
+        )
+        await db.commit()
     return tokens
 
 

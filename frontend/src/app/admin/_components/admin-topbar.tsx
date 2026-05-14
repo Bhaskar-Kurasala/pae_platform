@@ -24,7 +24,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { Moon, Search, Sun } from "lucide-react";
+import { Eye, Moon, Search, Sun } from "lucide-react";
 import { useAdminTheme } from "@/lib/hooks/use-admin-theme";
 import { AdminAvatarMenu } from "./admin-avatar-menu";
 import {
@@ -70,7 +70,7 @@ export function AdminTopbar({
     <header className="cf-topbar" data-theme={theme}>
       <Link href="/admin" className="cf-topbar-brand" aria-label="Admin home">
         <span className="cf-topbar-brand-text">
-          Career<i>Forge</i>
+          AI Career <i>OS</i>
         </span>
         <span className="cf-topbar-brand-tag">Admin</span>
       </Link>
@@ -93,6 +93,17 @@ export function AdminTopbar({
           {liveLabel}
         </div>
       ) : null}
+      <a
+        href="/today"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="cf-topbar-preview"
+        aria-label="Preview portal as a student (opens in new tab)"
+        title="Opens the student portal in a new tab"
+      >
+        <Eye className="cf-topbar-preview-icon" />
+        <span className="cf-topbar-preview-label">Student view</span>
+      </a>
       <button
         type="button"
         className="cf-topbar-theme"
@@ -282,6 +293,37 @@ function AdminTopbarStyles({
         width: 14px;
         height: 14px;
       }
+      .cf-topbar-preview {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 32px;
+        padding: 0 12px 0 10px;
+        background: ${themeBg};
+        border: 1px solid ${line};
+        border-radius: 999px;
+        color: ${ink};
+        font-family: inherit;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: -0.005em;
+        white-space: nowrap;
+        cursor: pointer;
+        text-decoration: none;
+        transition: background .18s cubic-bezier(.2,.8,.2,1), border-color .18s cubic-bezier(.2,.8,.2,1);
+      }
+      .cf-topbar-preview:hover {
+        background: ${themeHover};
+        border-color: ${eyebrow};
+      }
+      .cf-topbar-preview-icon {
+        width: 14px;
+        height: 14px;
+        color: ${eyebrow};
+      }
+      .cf-topbar-preview-label {
+        line-height: 1;
+      }
       /* Hide some noisy elements on small screens to keep the bar
          scannable. Search shrinks first; live indicator + theme stay. */
       @media (max-width: 880px) {
@@ -291,6 +333,7 @@ function AdminTopbarStyles({
       @media (max-width: 720px) {
         .cf-topbar-search { display: none; }
         .cf-topbar-divider { display: none; }
+        .cf-topbar-preview { display: none; }
       }
     `}</style>
   );

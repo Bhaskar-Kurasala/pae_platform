@@ -194,9 +194,18 @@ class BaseAgent(ABC):
                 # Default actor to the student when the caller didn't name one —
                 # preserves pre-DISC-57 behavior for chat traffic while still
                 # populating the new columns.
-                actor_id = _as_uuid(actor_id_raw) or _as_uuid(state.student_id)
+                actor_id = _as_uuid(actor_id_raw)
                 if actor_role is None and actor_id_raw is None and state.student_id:
+                    # Student-initiated chat: default actor to the student
                     actor_role = "student"
+                    actor_id = _as_uuid(state.student_id)
+                elif actor_role == "system":
+                    # System-initiated: never auto-bind actor_id to a student
+                    actor_id = None
+                elif actor_role == "admin" and on_behalf_raw and not actor_id_raw:
+                    # Defensive: an admin call without actor_id is malformed,
+                    # but don't silently relabel as student.
+                    pass
 
                 action = AgentAction(
                     agent_name=self.name,
@@ -251,6 +260,38 @@ class BaseAgent(ABC):
         with tracer.start_as_current_span(f"agent.{self.name}") as span:
             set_safe_span_attribute(span, "agent_id", self.name)
             set_safe_span_attribute(span, "agent.model", self.model)
+            # Kill-switch check — short-circuit before execute() if admin
+            # disabled this agent via agent_runtime_config. Never raise from
+            # the config-read path; a DB blip must not break agent execution.
+            try:
+                from sqlalchemy import select as _select
+
+                from app.core.database import AsyncSessionLocal as _AsyncSessionLocal
+                from app.models.agent_runtime_config import (
+                    AgentRuntimeConfig as _AgentRuntimeConfig,
+                )
+
+                async with _AsyncSessionLocal() as _session:
+                    _cfg = (
+                        await _session.execute(
+                            _select(_AgentRuntimeConfig).where(
+                                _AgentRuntimeConfig.name == self.name
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if _cfg is not None and not _cfg.is_enabled:
+                        self._log.info("agent.run.disabled_by_admin")
+                        set_safe_span_attribute(span, "agent.outcome", "disabled")
+                        structlog.contextvars.unbind_contextvars("agent_id")
+                        return state.model_copy(
+                            update={
+                                "error": f"Agent {self.name} is currently disabled by admin",
+                                "response": None,
+                                "agent_name": self.name,
+                            }
+                        )
+            except Exception:
+                pass
             try:
                 self._log.info("agent.run.start", task_length=len(state.task))
                 state = await self.execute(state)

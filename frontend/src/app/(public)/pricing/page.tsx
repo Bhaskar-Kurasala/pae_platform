@@ -6,7 +6,7 @@ import { MotionFade } from "@/components/ui/motion-fade";
 import { PricingToggle } from "./_pricing-toggle";
 
 export const metadata: Metadata = {
-  title: "Pricing — PAE Platform",
+  title: "Pricing — AI Career OS",
   description: "Simple, transparent pricing. Start free. Upgrade when you're ready.",
 };
 

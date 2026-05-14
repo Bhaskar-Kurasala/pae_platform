@@ -164,12 +164,7 @@ function CardEyebrowHeader({
 }) {
   return (
     <>
-      <div
-        className="cf-card-eyebrow"
-        style={{
-          fontFamily: "var(--font-jetbrains-mono), ui-monospace, monospace",
-        }}
-      >
+      <div className="cf-card-eyebrow">
         {eyebrow}
       </div>
       <h2
@@ -390,71 +385,44 @@ export function StudentDetailPanel({
     <div className={spacing}>
       {!hideHeader && (
         <div>
-          <div
-            className="text-[11px] font-medium tracking-[0.22em] uppercase mb-2 text-primary"
-            style={{
-              fontFamily: "var(--font-jetbrains-mono), ui-monospace, monospace",
-            }}
-          >
+          {/* Eyebrow — v8 .eyebrow: Inter 10px/700/0.2em/uppercase */}
+          <div className="text-[10px] font-bold tracking-[0.2em] uppercase mb-2 text-primary">
             Student profile
           </div>
+          {/* Name — v8 .section-title h4: Fraunces 24px/500/-0.04em */}
           <h1
             className="font-medium leading-[1.1]"
             style={{
-              fontFamily: "var(--font-fraunces), Georgia, serif",
-              fontSize: "30px",
-              letterSpacing: "-0.015em",
+              fontFamily: "var(--font-fraunces), 'Fraunces', Georgia, serif",
+              fontSize: "24px",
+              letterSpacing: "-0.04em",
             }}
           >
             {student?.full_name ?? "Student"}
           </h1>
-          <p
-            className="text-muted-foreground mt-1.5"
-            style={{
-              fontFamily: "var(--font-jetbrains-mono), ui-monospace, monospace",
-              fontSize: "13px",
-              letterSpacing: "0.005em",
-            }}
-          >
+          {/* Email — v8 .step-card p: Inter 13px/1.58/muted */}
+          <p className="text-muted-foreground mt-1 text-[13px] leading-[1.58]">
             {student?.email ?? studentId}
           </p>
           {student && (
-            <div
-              className="flex flex-wrap items-center gap-2.5 mt-3 text-xs text-muted-foreground"
-              style={{
-                fontFamily: "var(--font-jetbrains-mono), ui-monospace, monospace",
-                fontFeatureSettings: '"tnum"',
-                letterSpacing: "0.01em",
-              }}
-            >
-              <Badge
-                className={
+            /* Stats row — v8 .step-meta + .mini-chip: Inter 11px/700/999px */
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              <span
+                className={`inline-flex items-center px-[9px] py-[5px] rounded-full text-[11px] font-bold leading-none ${
                   student.is_active
-                    ? "bg-green-100 text-green-700 hover:bg-green-100 uppercase tracking-[0.12em] text-[10px] font-medium"
-                    : "bg-muted uppercase tracking-[0.12em] text-[10px] font-medium"
-                }
-                style={{
-                  fontFamily:
-                    "var(--font-jetbrains-mono), ui-monospace, monospace",
-                }}
+                    ? "bg-emerald-100 text-emerald-700"
+                    : "bg-muted text-muted-foreground"
+                }`}
               >
                 {student.is_active ? "Active" : "Inactive"}
-              </Badge>
-              <span>
-                <span className="font-semibold text-foreground">
-                  {student.lessons_completed}
-                </span>{" "}
-                lessons completed
               </span>
-              <span>·</span>
-              <span>
-                <span className="font-semibold text-foreground">
-                  {student.agent_interactions}
-                </span>{" "}
-                agent interactions
+              <span className="inline-flex items-center px-[9px] py-[5px] rounded-full text-[11px] font-bold leading-none bg-muted/60 text-foreground">
+                {student.lessons_completed} lessons
               </span>
-              <span>·</span>
-              <span>
+              <span className="inline-flex items-center px-[9px] py-[5px] rounded-full text-[11px] font-bold leading-none bg-muted/60 text-foreground">
+                {student.agent_interactions} chats
+              </span>
+              <span className="inline-flex items-center px-[9px] py-[5px] rounded-full text-[11px] font-bold leading-none bg-muted/60 text-muted-foreground">
                 Joined {new Date(student.created_at).toLocaleDateString()}
               </span>
             </div>
@@ -752,10 +720,12 @@ export function StudentDetailPanel({
                   key={n.id}
                   className="rounded-lg border border-border bg-background/50 px-3 py-2"
                 >
-                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
+                  {/* v8 .step-card p: Inter 13px/1.58 */}
+                  <p className="whitespace-pre-wrap text-[13px] leading-[1.58]">
                     {n.body_md}
-                  </pre>
-                  <p className="mt-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                  </p>
+                  {/* v8 .eyebrow: 10px/700/0.2em/uppercase/Inter */}
+                  <p className="mt-1.5 text-[10px] font-bold tracking-[0.2em] uppercase text-muted-foreground">
                     {new Date(n.created_at).toLocaleString()}
                   </p>
                 </li>
@@ -827,16 +797,19 @@ export function StudentDetailPanel({
                   }
                 >
                   <div className="flex items-center justify-between gap-2 mb-1">
-                    <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                    {/* v8 .step-state: 11px/800/0.12em/uppercase/Inter */}
+                    <span className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-foreground">
                       {m.sender_role === "admin" ? "You" : "Student"}
                     </span>
-                    <span className="text-[10px] text-muted-foreground">
+                    {/* v8 .eyebrow: 10px/700/0.2em/uppercase/Inter */}
+                    <span className="text-[10px] font-bold tracking-[0.2em] uppercase text-muted-foreground">
                       {new Date(m.created_at).toLocaleString()}
                     </span>
                   </div>
-                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
+                  {/* v8 .step-card p: Inter 13px/1.58 */}
+                  <p className="whitespace-pre-wrap text-[13px] leading-[1.58]">
                     {m.body}
-                  </pre>
+                  </p>
                 </li>
               ))}
             </ol>

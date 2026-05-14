@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import JSON, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -17,6 +17,9 @@ class Course(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     thumbnail_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     price_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_published: Mapped[bool] = mapped_column(default=False, nullable=False)
+    is_featured: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
     difficulty: Mapped[str] = mapped_column(String(50), default="beginner", nullable=False)
     estimated_hours: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     github_repo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)

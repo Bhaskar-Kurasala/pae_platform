@@ -6,7 +6,7 @@ import { MotionFade } from "@/components/ui/motion-fade";
 import { AgentsGrid } from "./_agents-grid";
 
 export const metadata: Metadata = {
-  title: "AI Agents — PAE Platform",
+  title: "AI Agents — AI Career OS",
   description:
     "Meet your 20 AI coaches. Every agent is specialized for a different aspect of your learning journey — from content ingestion to career support.",
 };

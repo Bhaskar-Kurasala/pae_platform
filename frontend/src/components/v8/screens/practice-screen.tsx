@@ -4,7 +4,7 @@
  * P-Practice1 (2026-04-28) — unified `/practice` workspace.
  *
  * Merges the previously fragmented Exercises + Studio + Practice trio into
- * a single v8 surface that matches the `CareerForge v10 — Capstone bundle`
+ * a single v8 surface that matches the `AI Career OS v10 — Capstone bundle`
  * mock. The screen carries a real Monaco-backed editor, real Run+Review
  * round-trips against the backend sandbox, and Save-to-Notebook with a free-
  * form student note (mirroring the Tutor save flow).
@@ -70,7 +70,7 @@ const Monaco = dynamic(() => import("@monaco-editor/react"), {
 type PracticeMode = "capstone" | "exercises";
 
 const STORAGE_KEY = "practice.code.v1";
-const STARTER_CAPSTONE = `# CareerForge capstone · CLI AI Tool
+const STARTER_CAPSTONE = `# AI Career OS capstone · CLI AI Tool
 import os
 import asyncio
 from anthropic import Anthropic, APIError

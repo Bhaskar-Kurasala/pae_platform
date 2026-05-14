@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { PracticeScreen } from "@/components/v8/screens/practice-screen";
 
 export const metadata = {
-  title: "Practice · CareerForge",
+  title: "Practice · AI Career OS",
 };
 
 /**

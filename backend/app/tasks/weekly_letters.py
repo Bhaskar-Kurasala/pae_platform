@@ -88,6 +88,9 @@ async def _compose_letter(
         conversation_history=[],
         task=f"Weekly letter for week ending {snap.week_ending.isoformat()}",
         context={
+            "actor_role": "system",
+            "actor_id": None,
+            "on_behalf_of": str(user.id),
             "lessons_completed": snap.lessons_completed,
             "skills_touched": snap.skills_touched,
             "streak_days": snap.streak_days,

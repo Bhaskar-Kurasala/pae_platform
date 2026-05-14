@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/stores/auth-store";
 import { V8Shell } from "@/components/v8/v8-shell";
+import { FeedbackWidget } from "@/components/features/feedback-widget";
 
 export default function PortalRootLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, _hasHydrated } = useAuthStore();
@@ -23,5 +24,10 @@ export default function PortalRootLayout({ children }: { children: React.ReactNo
     );
   }
 
-  return <V8Shell>{children}</V8Shell>;
+  return (
+    <>
+      <V8Shell>{children}</V8Shell>
+      <FeedbackWidget />
+    </>
+  );
 }

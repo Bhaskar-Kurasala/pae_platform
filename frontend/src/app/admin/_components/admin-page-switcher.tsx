@@ -25,11 +25,8 @@ import {
   BookOpen,
   ChevronDown,
   ClipboardList,
-  Flame,
   GraduationCap,
   LayoutDashboard,
-  MessageSquare,
-  Users,
   Zap,
 } from "lucide-react";
 
@@ -50,9 +47,6 @@ const GROUPS: SwitcherGroup[] = [
     label: "Operate",
     items: [
       { href: "/admin", label: "Cockpit", icon: LayoutDashboard },
-      { href: "/admin/students", label: "Students", icon: Users },
-      { href: "/admin/content", label: "Content", icon: Flame },
-      { href: "/admin/feedback", label: "Feedback", icon: MessageSquare },
       { href: "/admin/courses", label: "Courses", icon: GraduationCap },
     ],
   },
