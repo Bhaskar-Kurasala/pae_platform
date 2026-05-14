@@ -1,6 +1,6 @@
 # Migration verification discipline — patterns from D10, D11, MiniMax activation, D12
 
-**Status:** Open. Canonical patterns for D13+ migrations.
+**Status:** Ratified (2026-05-14, Batch 3 CP3). Pattern 35 promoted from Open to Ratified — N=12 across 3 independent arcs.
 **Created:** 2026-05-07 (D12 closure, rewritten from git history).
 **Cross-references:**
 - `agent-tool-call-discipline.md` (D12-derived sibling patterns; extends Pattern 4)
@@ -1100,9 +1100,58 @@ input validation at API boundary (already there via Pydantic),
 DB-write validation at repository layer, agent permission gates
 at the dispatcher.
 
-**Provenance:** D19.1 CP1-CP4. N=4 in the same arc; the
-within-arc reproducibility is itself signal that this is a
-canonical pattern, not a one-off.
+**Batch 3 evidence (N=4 additional → N=8 total):**
+
+  * **D1 — `validate_upload_mime` at route boundary.** MIME
+    sniffing is enforced at the single call site in `chat.py`
+    (`POST /chat/attachments`), not documented per service method.
+    Adding `await validate_upload_mime(file, ...)` before
+    `service.upload()` means every future attachment route that
+    imports the same pattern gets byte-level validation without
+    discipline at each service call. The `ALLOWED_CHAT_ATTACHMENT_MIMES`
+    frozenset is the convention-definition site; expanding it once
+    propagates to all callers. Tested via `test_upload_mime.py` (7 tests).
+  * **D1 / D-F — `ALLOWED_RESUME_MIMES` separate frozenset.**
+    Resume upload uses a narrower set (PDF + DOCX only). The
+    enforcement is at the `validate_upload_mime` call with the
+    `allowed_mimes=ALLOWED_RESUME_MIMES` argument — callers cannot
+    bypass without explicitly passing a different set. Pattern 35
+    applied at the service boundary.
+  * **B1 / D-A — Webhook signature verification in `_handle_webhook`.** 
+    HMAC-SHA256 verification is enforced in the shared `_handle_webhook`
+    helper called by both `razorpay_webhook` and `stripe_webhook`
+    routes. A new provider route calling `_handle_webhook` gets
+    signature verification for free; no per-provider discipline
+    required. `get_provider(provider_name)` is the convention-definition
+    site. Tested via `test_payment_webhook_api.py` (5 tests).
+  * **B2 / D-B — Idempotency in `record_webhook_event`.** The
+    UNIQUE(provider, provider_event_id) constraint + IntegrityError
+    dedup lives entirely in `record_webhook_event` — callers get
+    idempotency for free. The dedup is infrastructure-layer; no
+    consumer can accidentally double-dispatch without the service
+    first flagging `is_duplicate=True`.
+
+**CP2 Auth Hardening evidence (N=4 additional → combined N=12 total):**
+
+  * **E9 — `SecurityHeadersMiddleware`.** All security headers
+    (CSP, HSTS, X-Frame-Options, etc.) enforced at the FastAPI
+    middleware layer. Every route in the application gets headers
+    for free; no per-endpoint discipline.
+  * **A1/A2 — `get_current_user` dependency gate.** Auth token
+    validation at the `Depends(get_current_user)` injection site;
+    any route declaring the dependency gets locked down without
+    additional discipline.
+  * **D-B CP2 — `minimum_password_strength` validator.** Enforced
+    in the Pydantic schema at the definition site; all consumers
+    of `UserCreate` get the policy applied automatically.
+  * **R1 — email verify token in `generate_email_token`.** Token
+    generation and expiry enforced at the helper boundary; callers
+    get secure token semantics without specifying TTL at each site.
+
+**Provenance:** D19.1 CP1-CP4 (N=4), Batch 3 CP1+D1 (N=4), CP2 Auth Hardening (N=4).
+N=12 across 3 independent arcs — cross-arc reproducibility is the
+ratification signal. Pattern 35 is now **ratified**: it generalizes
+beyond observability to any enforcement-at-boundary problem.
 
 ### Closure-time test verification discipline (canonical sub-rule under "Application guide", 2026-05-09)
 

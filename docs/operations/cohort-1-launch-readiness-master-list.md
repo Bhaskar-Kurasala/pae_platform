@@ -93,14 +93,16 @@ Status:
 
 | # | Item | Sev | Status | Notes |
 |---|------|-----|--------|-------|
-| F1 | **Backup job verified working + one restore drill** | 🔴 | ❌ | Already top of memory `project_production_migration_plan.md`. |
-| F2 | Migration rollback (downgrade) coverage | 🟡 | ⚠️ | 0067 has downgrade(); not all migrations audited. |
+| F1 | **Backup job verified working + one restore drill** | 🔴 | ✅ | Batch 3 CP3 (2026-05-14). Empirical restore drill: 2MB dump → 102 tables restored in 5.5s. See `docs/operations/runbooks/disaster-recovery.md`. Nightly cron + off-host storage still needed pre-launch. |
+| F2 | Migration rollback (downgrade) coverage | 🟡 | ⚠️ | 0069 has downgrade(); not all migrations audited. |
 | F3 | Celery worker / beat healthcheck | 🟡 | ⚠️ | Containers up; no health probe wired. |
 | F4 | Graceful shutdown on SIGTERM | 🟡 | ⚠️ | Long chat streams may be cut on deploys. |
 | F5 | Sentry receives events in prod (dry-run) | 🔴 | ⚠️ | Verify post-deploy with a forced exception. |
 | F6 | Honeycomb spans flowing in prod | 🟡 | ⚠️ | Verify post-deploy. |
 | F7 | Sentry events tagged with `trace_id` + `request_id` | 🟡 | ❌ | structlog has them; not forwarded to Sentry scope. Add `sentry_sdk.set_tag` in the request-id middleware. |
 | F8 | /metrics endpoint reachable + scraped | — | ✅ | D19.1 |
+| F14 | **Deployment rollback procedure documented + tested** | 🔴 | ✅ | Batch 3 CP3 (2026-05-14). Runbook at `docs/operations/runbooks/deployment-rollback.md`. Docker Compose rollback via git checkout + rebuild tested. Staging drill deferred (no staging env yet). |
+| F16 | **Disaster recovery RTO/RPO documented + tested** | 🔴 | ✅ | Batch 3 CP3 (2026-05-14). RTO empirically measured: ~40s (data restore only). RPO: daily backup target. Runbook at `docs/operations/runbooks/disaster-recovery.md`. Off-host backup storage pre-launch gap registered. |
 
 ## G. Communication / email
 
