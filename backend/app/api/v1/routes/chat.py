@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api._deprecated import deprecated
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.core.uploads import ALLOWED_CHAT_ATTACHMENT_MIMES, validate_upload_mime
 from app.models.user import User
 from app.schemas.chat import (
     ChatAttachmentRead,
@@ -584,6 +585,7 @@ async def upload_attachment(
     `attachment_ids`. The attachment is created with `message_id = NULL`
     until the stream endpoint binds it.
     """
+    await validate_upload_mime(file, allowed_mimes=ALLOWED_CHAT_ATTACHMENT_MIMES)
     data = await file.read()
     declared_mime = file.content_type or ""
     filename = file.filename or "attachment.bin"

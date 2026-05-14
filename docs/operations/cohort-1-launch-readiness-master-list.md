@@ -1,6 +1,6 @@
 # Cohort-1 launch readiness — master list
 
-Last updated: 2026-05-13. Living document. This is the single
+Last updated: 2026-05-14. Living document. This is the single
 consolidated list of everything we know is missing, broken, or
 needs verification before cohort-1 launch.
 
@@ -44,14 +44,15 @@ Status:
 
 | # | Item | Sev | Status | Notes |
 |---|------|-----|--------|-------|
-| B1 | **Razorpay webhook signature verification** | 🔴 | ⚠️ | Spot-check — webhook handlers that accept any payload are a common bug. |
-| B2 | **Webhook idempotency on retries** | 🔴 | ⚠️ | Razorpay retries on 5xx; double-grant if not idempotent. |
-| B3 | **Razorpay test-mode end-to-end checkout walk** | 🔴 | ⚠️ | Skipped in audit — no Razorpay creds wired in dev. |
+| B1 | **Razorpay webhook signature verification** | 🔴 | ✅ | Webhook HMAC-SHA256 signature verification via provider adapter (`payment_webhook_event_service.py`). Invalid sigs: recorded + 200 (webhook etiquette). Batch 3 CP1 (2026-05-14). |
+| B2 | **Webhook idempotency on retries** | 🔴 | ✅ | Webhook idempotency via `payment_webhook_events` table, UNIQUE `(provider, provider_event_id)`, `IntegrityError` dedup. Batch 3 CP1 (2026-05-14). |
+| B3 | **Razorpay test-mode end-to-end checkout walk** | 🔴 | ⚠️ | Code paths ship; live verification pending Track 1 Razorpay test credentials. |
 | B4 | Refund flow (API + admin UI) | 🟡 | ⚠️ | Unverified. |
 | B5 | Failed-payment retry UX | 🟡 | ⚠️ | Unverified. |
 | B6 | GST invoice / capture | 🟡 | ⚠️ | Indian users will ask. |
 | B7 | Currency display (₹ vs $) | 🟡 | ⚠️ | Unverified. |
-| B8 | `payments_v2.py:143` leaks raw Razorpay provider exception in user-facing error | 🟡 | ❌ | `f"Payment provider unavailable: {exc}"` — replace with generic "Payment provider is temporarily unavailable. Please try again." |
+| B8 | `payments_v2.py:143` leaks raw Razorpay provider exception in user-facing error | 🟡 | ✅ | Fixed in Batch 2A CP1 (H1.1). All payment routes now use generic messages; `str(exc)` only appears in `log.warning(error=...)` context, never in `detail=`. |
+| B9 | **Server-side price computation (no client-supplied amount)** | 🔴 | ✅ | `CreateOrderRequest` schema has NO `amount_cents` field — price is server-computed exclusively from `course.price_cents`/`bundle.price_cents` in DB (Option A). Batch 3 CP1 (2026-05-14). |
 
 ## C. Content / learning core
 
@@ -69,7 +70,7 @@ Status:
 
 | # | Item | Sev | Status | Notes |
 |---|------|-----|--------|-------|
-| D1 | **Server-side MIME sniffing** | 🔴 | ❌ | Route accepts client-declared `content_type` — bypassable. Add python-magic check on `data` bytes. |
+| D1 | **Server-side MIME sniffing** | 🔴 | ✅ | Batch 3 CP2 (2026-05-14). `python-magic` + `libmagic1` added; `validate_upload_mime()` helper in `app/core/uploads.py` applied to chat attachment upload. EXE-disguised-as-PDF rejected with 422. See `docs/operations/file-upload-validation.md`. |
 | D2 | Path-traversal on filename | 🟡 | ⚠️ | Audit `AttachmentService.upload` for safe persistence. |
 | D3 | Storage backend (S3 vs local) | 🟡 | ⚠️ | If local disk, container restarts can lose data. |
 | D4 | Virus scan | ⚪ | ❌ | Acceptable for cohort-1 (files private to uploader). |
@@ -118,7 +119,7 @@ Every site below currently forwards `str(exc)` or `f"…{exc}"` to the user. Rep
 
 | # | File:line | Sev | Status |
 |---|-----------|-----|--------|
-| H1.1 | `payments_v2.py:143` (`f"Payment provider unavailable: {exc}"`) | 🔴 | ✅ Fixed |
+| H1.1 | `payments_v2.py:143` (`f"Payment provider unavailable: {exc}"`) | 🔴 | ✅ Re-verified: all payment routes log full exception in `error=str(exc)` context only; `detail=` fields are all generic messages. No raw exception leaks. Batch 3 CP1 (2026-05-14). |
 | H1.2 | `payments_v2.py:130, 152, 406` (ValueError / PaymentProviderError raw) | 🟡 | ✅ Fixed |
 | H1.3 | `readiness.py:146, 148, 184, 186, 232, 234, 277, 304` (8 sites) | 🟡 | ✅ Fixed |
 | H1.4 | `mock_interview.py:196, 241` (ValueError raw) | 🟡 | ✅ Fixed |

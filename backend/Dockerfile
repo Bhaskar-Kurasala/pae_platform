@@ -2,6 +2,11 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# D1 — libmagic1 is the C library backing python-magic (MIME sniffing).
+# Installed before uv so it's cached in an early layer; the package is
+# ~800KB and has no heavy transitive dependencies.
+RUN apt-get update && apt-get install -y --no-install-recommends libmagic1 && rm -rf /var/lib/apt/lists/*
+
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
