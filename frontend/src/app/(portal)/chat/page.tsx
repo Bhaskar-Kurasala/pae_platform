@@ -2197,7 +2197,7 @@ function InputBar({
         className={cn(
           "w-full mx-auto rounded-3xl border bg-card transition-shadow",
           "shadow-[0_2px_8px_rgba(0,0,0,0.05)]",
-          "focus-within:shadow-[0_4px_16px_rgba(0,0,0,0.08)] focus-within:border-primary/30",
+          "focus-within:shadow-[0_4px_16px_rgba(0,0,0,0.08)]",
           isStreaming ? "border-primary/30" : "border-border/60",
           isDragging && "ring-1 ring-primary/30",
         )}
