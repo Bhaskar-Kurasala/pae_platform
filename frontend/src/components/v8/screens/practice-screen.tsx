@@ -566,7 +566,7 @@ export function PracticeScreen() {
             {activeTab === "code" ? (
               <div className="practice-monaco-shell">
                 <Monaco
-                  height={railCollapsed ? "calc(100vh - 280px)" : "560px"}
+                  height="100%"
                   defaultLanguage="python"
                   language="python"
                   value={code}
@@ -574,7 +574,7 @@ export function PracticeScreen() {
                     codeChangedSinceMount.current = true;
                     setCode(v ?? "");
                   }}
-                  theme={resolvedTheme === "dark" ? "vs-dark" : "light"}
+                  theme="vs-dark"
                   options={{
                     minimap: { enabled: false },
                     fontSize: 13,

@@ -2717,6 +2717,14 @@ button{cursor:pointer;border:0}
    PracticeScreen component actually uses are pulled in here.
    ────────────────────────────────────────────────────────────────── */
 
+/* P-Practice3 — tighten the page padding on the practice screen so the
+   fit-to-viewport grid below has predictable room. The default .pad
+   bottom padding is 54px; we collapse it to 16px here. */
+#screen-practice .pad,
+section[id="screen-practice"] .pad {
+  padding-bottom: 16px;
+}
+
 .practice-bar {
   display: flex;
   align-items: center;
@@ -2818,12 +2826,18 @@ button{cursor:pointer;border:0}
   text-transform: uppercase;
 }
 
-/* ── Three-column workspace grid ── */
+/* ── Three-column workspace grid ──
+   P-Practice3 (2026-05-14): the workspace now fits the viewport (no outer
+   page scrollbar). align-items:stretch lets the three columns claim the
+   full grid height so the editor surface fills the screen; each column
+   handles its own internal scroll. */
 .practice-grid {
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr) 360px;
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
+  height: calc(100vh - 215px);
+  min-height: 480px;
   transition: grid-template-columns 0.28s var(--ease);
 }
 /* P-Practice2 (2026-05-14) — collapsed rail. Shrinks the left column to a
@@ -3032,9 +3046,25 @@ button{cursor:pointer;border:0}
 /* ── Center editor (extends existing .editor) ── */
 .practice-editor {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* allow inner Monaco shell to shrink + scroll */
 }
 .practice-editor .editor-bar {
   padding: 12px 16px;
+  flex: 0 0 auto;
+}
+.practice-editor .practice-monaco-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.practice-editor-footer {
+  flex: 0 0 auto;
+}
+.practice-editor .trace-shell,
+.practice-editor .tests-shell {
+  flex: 1 1 auto;
+  overflow: auto;
 }
 .editor-status {
   font-size: 11px;
@@ -3045,15 +3075,12 @@ button{cursor:pointer;border:0}
 .practice-monaco-shell {
   background: var(--panel);
   border-top: 1px solid var(--line);
-  min-height: 560px;
+  /* P-Practice3 — min-height removed; the flex parent
+     (.practice-editor) now drives the shell to fill remaining height. */
 }
-/* P-Practice2 — when the left rail is collapsed, let the Monaco surface
-   claim the recovered vertical space too. The runtime height passed to
-   Monaco is computed in JS (so the editor's internal layout reflows),
-   this rule just ensures the shell box doesn't cap us. */
-.practice-grid.rail-collapsed .practice-monaco-shell {
-  min-height: calc(100vh - 280px);
-}
+/* P-Practice3 — the Monaco shell is now driven by flex (see
+   .practice-editor .practice-monaco-shell above), so no explicit height
+   cap is needed when the rail collapses. */
 
 /* P-Practice2 — bottom-anchored editor footer. Matches the v10 mock:
    left side carries Reset + lightweight meta ("python 3.11 · 23 lines"),
