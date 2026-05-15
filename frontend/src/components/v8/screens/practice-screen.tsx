@@ -395,6 +395,32 @@ export function PracticeScreen() {
     ? classifyReviewError(seniorReview.error)
     : null;
 
+  const handleBotClick = useCallback(() => {
+    if (botState === "idle") {
+      if (!hasRunOnce) {
+        v8Toast("Run your code first — the bot reviews what happens.");
+        return;
+      }
+    }
+    if (panelOpen) {
+      setPanelOpen(false);
+      return;
+    }
+    // Opening with no review yet? Auto-request one.
+    if (!currentReview && !seniorReview.isPending) {
+      handleRequestReview();
+    } else {
+      setPanelOpen(true);
+    }
+  }, [
+    botState,
+    currentReview,
+    handleRequestReview,
+    hasRunOnce,
+    panelOpen,
+    seniorReview.isPending,
+  ]);
+
   // ── save to notebook ───────────────────────────────────────────────
   const openSaveDialog = useCallback(() => {
     if (!isAuthed) {
@@ -631,12 +657,16 @@ export function PracticeScreen() {
                   Tests
                 </button>
               </div>
-              <div className="editor-actions">
-                <span className="editor-status">
-                  {qualityScore !== null
-                    ? `Quality ${qualityScore}/100`
-                    : "Ready to run"}
-                </span>
+              <div className="editor-actions flex items-center gap-3">
+                {qualityScore !== null ? (
+                  <span className="editor-status">{`Quality ${qualityScore}/100`}</span>
+                ) : null}
+                <ReviewBot
+                  state={botState}
+                  findingsCount={findingsCount}
+                  hasRunCode={hasRunOnce || hasPriorHistory}
+                  onClick={handleBotClick}
+                />
               </div>
             </div>
 
@@ -731,34 +761,10 @@ export function PracticeScreen() {
         </div>
       </div>
 
-      {/* Floating senior-review bot — dim until the student has run
-          code at least once, lit afterwards. Click opens the slide-over
-          panel; if there's no review yet for the current code, clicking
-          fires the request automatically. */}
-      <ReviewBot
-        state={botState}
-        findingsCount={findingsCount}
-        hasRunCode={hasRunOnce || hasPriorHistory}
-        onClick={() => {
-          if (botState === "idle") {
-            if (!hasRunOnce) {
-              v8Toast("Run your code first — the bot reviews what happens.");
-              return;
-            }
-          }
-          if (panelOpen) {
-            setPanelOpen(false);
-            return;
-          }
-          // Opening with no review yet? Auto-request one.
-          if (!currentReview && !seniorReview.isPending) {
-            handleRequestReview();
-          } else {
-            setPanelOpen(true);
-          }
-        }}
-      />
-
+      {/* Senior-review bot lives inside the editor toolbar (top-right
+          of the editor card). The slide-over panel only mounts when
+          opened — keeping it out of the DOM when closed avoids the
+          horizontal-scroll bug an off-screen fixed element triggers. */}
       <SeniorReviewPanel
         open={panelOpen}
         loading={seniorReview.isPending}

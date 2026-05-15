@@ -562,6 +562,35 @@ class SeniorEngineerAgent(AgenticBaseAgent[SeniorEngineerInput]):
             payload["answer"] = self._compose_answer_text(output)
             return payload
         except Exception as exc:  # noqa: BLE001
+            # Re-raise quota/availability errors so the calling route's
+            # typed exception handlers can return 503/502 with specific
+            # error copy. Without this we silently degrade every rate
+            # limit into a generic "I had trouble structuring..." chat
+            # response, which is dishonest *and* unhelpful — the student
+            # can't act on advice that's actually "the provider is full."
+            import anthropic as _anth
+
+            if isinstance(exc, (_anth.RateLimitError, _anth.APITimeoutError)):
+                log.warning(
+                    "senior_engineer.llm_rate_limited",
+                    error_type=type(exc).__name__,
+                    resolved_mode=resolved_mode,
+                    user_id=str(ctx.user_id) if ctx.user_id else None,
+                )
+                raise
+            if isinstance(exc, _anth.APIError):
+                log.warning(
+                    "senior_engineer.llm_api_error",
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                    user_id=str(ctx.user_id) if ctx.user_id else None,
+                )
+                raise
+
+            # True parse / validation / other-runtime failures fall
+            # through to the safe fallback. These are bugs on our side
+            # (the LLM returned malformed JSON, the schema rejected it,
+            # etc.), not provider quota — different copy is warranted.
             log.warning(
                 "senior_engineer.llm_or_parse_failed",
                 error=str(exc),
@@ -572,10 +601,9 @@ class SeniorEngineerAgent(AgenticBaseAgent[SeniorEngineerInput]):
             fallback = SeniorEngineerOutput(
                 mode="chat_help",
                 explanation=(
-                    "I had trouble structuring this review. Please "
-                    "share the code again, and if the issue persists "
-                    "email support@aicareeros.com so we can take a "
-                    "look."
+                    "I had trouble structuring this review. Please try "
+                    "again — and if it keeps happening, email "
+                    "support@aicareeros.com so we can take a look."
                 ),
                 patterns_observed=[],
             )

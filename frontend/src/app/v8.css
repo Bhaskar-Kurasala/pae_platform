@@ -3378,8 +3378,23 @@ section[id="screen-practice"] .pad {
   0%, 100% { opacity: 0.4; transform: scale(1); }
   50%      { opacity: 0.7; transform: scale(1.06); }
 }
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
 .animate-bot-ready { animation: botReady 480ms var(--ease) 1; }
 .animate-pulse-slow { animation: pulseSlow 2.4s var(--ease) infinite; }
+.animate-slide-in-right { animation: slideInRight 280ms var(--ease) 1; }
+.animate-fade-in { animation: fadeIn 200ms var(--ease) 1; }
+
+/* The senior-review panel renders over the editor via position: fixed.
+   Belt-and-suspenders against any stray off-screen child triggering
+   horizontal scroll on the page. */
+html, body { overflow-x: hidden; }
 
 /* Monaco gutter dots driven by review comments. */
 .review-gutter-blocking,

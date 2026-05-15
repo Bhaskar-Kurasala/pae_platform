@@ -130,11 +130,15 @@ async def request_senior_review(
 
     try:
         result = await agent.execute(agent_input, ctx)
-    except anthropic.OverloadedError as exc:
-        log.warning("senior_review.api_overloaded", user_id=str(current_user.id))
+    except (anthropic.RateLimitError, anthropic.APITimeoutError) as exc:
+        log.warning(
+            "senior_review.rate_limited",
+            user_id=str(current_user.id),
+            error_type=type(exc).__name__,
+        )
         raise HTTPException(
             status_code=503,
-            detail="Claude API is temporarily overloaded — please try again in a few seconds.",
+            detail="Reviewer is at capacity — try again in 30–60s.",
         ) from exc
     except anthropic.APIError as exc:
         log.error("senior_review.api_error", err=str(exc))

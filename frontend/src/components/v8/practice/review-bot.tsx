@@ -99,6 +99,10 @@ export interface ReviewBotProps {
   findingsCount?: number;
   /** Whether the student has run their code at least once this session. */
   hasRunCode: boolean;
+  /** Compact inline placement (e.g. inside the editor toolbar) vs.
+   * the legacy floating-bottom-right position. Inline is the default
+   * now; floating is kept for migration safety but no longer used. */
+  variant?: "inline" | "floating";
   onClick: () => void;
 }
 
@@ -106,19 +110,23 @@ export function ReviewBot({
   state,
   findingsCount = 0,
   hasRunCode,
+  variant = "inline",
   onClick,
 }: ReviewBotProps) {
   const disabled = state === "idle" && !hasRunCode;
   const tooltip =
     state === "idle"
       ? hasRunCode
-        ? "Review your latest run"
+        ? "Open senior review"
         : "Run your code first — I'll review what happens"
       : state === "loading"
         ? "Reading your code…"
         : state === "open"
           ? "Close review"
           : "Open senior review";
+
+  const isFloating = variant === "floating";
+  const size = isFloating ? "h-14 w-14" : "h-9 w-9";
 
   return (
     <button
@@ -128,14 +136,16 @@ export function ReviewBot({
       onClick={onClick}
       data-testid="review-bot"
       data-state={state}
+      data-variant={variant}
       className={cn(
-        "group fixed bottom-6 right-6 z-40",
-        "flex h-14 w-14 items-center justify-center rounded-full",
+        "group relative flex items-center justify-center rounded-full",
         "transition-all duration-300 ease-out",
-        "shadow-[0_18px_60px_rgba(21,19,13,.18)]",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--forest-3)] focus-visible:ring-offset-2",
+        size,
+        isFloating && "fixed bottom-6 right-6 z-40 shadow-[0_18px_60px_rgba(21,19,13,.18)]",
+        !isFloating && "shadow-[0_4px_18px_rgba(21,19,13,.10)]",
         state === "idle" &&
-          "bg-gradient-to-br from-[var(--panel-2)] to-[var(--panel)] opacity-40 hover:opacity-70 hover:scale-105",
+          "bg-gradient-to-br from-[var(--panel-2)] to-[var(--panel)] opacity-50 hover:opacity-85 hover:scale-105",
         state === "ready" &&
           "bg-gradient-to-br from-[var(--forest)] to-[var(--forest-2)] opacity-100 hover:scale-110 animate-bot-ready",
         state === "loading" &&
@@ -144,13 +154,16 @@ export function ReviewBot({
           "bg-gradient-to-br from-[var(--forest-2)] to-[var(--forest-3)] opacity-100",
       )}
     >
-      <Glyph state={state} />
+      <Glyph state={state} compact={!isFloating} />
       {state === "ready" && findingsCount > 0 ? (
         <span
           aria-hidden="true"
           className={cn(
-            "absolute -top-1 -right-1 grid h-5 w-5 place-items-center rounded-full",
-            "bg-[var(--rose)] text-[10px] font-bold text-white shadow-sm",
+            "absolute grid place-items-center rounded-full font-bold text-white shadow-sm",
+            isFloating
+              ? "-top-1 -right-1 h-5 w-5 text-[10px]"
+              : "-top-1 -right-1 h-4 w-4 text-[9px]",
+            "bg-[var(--rose)]",
           )}
           data-testid="review-bot-badge"
         >
@@ -159,12 +172,16 @@ export function ReviewBot({
       ) : state === "ready" ? (
         <span
           aria-hidden="true"
-          className="absolute -top-0.5 -right-0.5 h-3 w-3 rounded-full bg-[var(--forest-3)] ring-2 ring-[var(--bg)] animate-pulse"
+          className={cn(
+            "absolute rounded-full bg-[var(--forest-3)] ring-2 ring-[var(--bg)] animate-pulse",
+            isFloating ? "-top-0.5 -right-0.5 h-3 w-3" : "-top-0.5 -right-0.5 h-2.5 w-2.5",
+          )}
         />
       ) : null}
 
-      {/* Idle nudge — pulse halo */}
-      {state === "idle" && !disabled ? (
+      {/* Idle nudge — pulse halo (floating variant only; inline gets a
+          subtler hover-only treatment) */}
+      {isFloating && state === "idle" && !disabled ? (
         <span
           aria-hidden="true"
           className="absolute inset-0 rounded-full ring-1 ring-[var(--line)] animate-pulse-slow"
@@ -174,19 +191,17 @@ export function ReviewBot({
   );
 }
 
-function Glyph({ state }: { state: BotState }) {
+function Glyph({ state, compact }: { state: BotState; compact: boolean }) {
+  const cls = compact ? "h-4 w-4" : "h-6 w-6";
   if (state === "loading") {
-    return <Loader2 className="h-6 w-6 animate-spin text-white" aria-hidden="true" />;
+    return <Loader2 className={cn(cls, "animate-spin text-white")} aria-hidden="true" />;
   }
   if (state === "open") {
-    return <X className="h-5 w-5 text-white" aria-hidden="true" />;
+    return <X className={cn(cls, "text-white")} aria-hidden="true" />;
   }
   return (
     <Sparkles
-      className={cn(
-        "h-6 w-6",
-        state === "ready" ? "text-white" : "text-[var(--ink-2)]",
-      )}
+      className={cn(cls, state === "ready" ? "text-white" : "text-[var(--ink-2)]")}
       aria-hidden="true"
     />
   );
@@ -230,16 +245,20 @@ export function SeniorReviewPanel({
     return () => window.removeEventListener("keydown", handler);
   }, [open, onClose]);
 
+  // Hard-unmount when closed. We used to keep the panel in the DOM and
+  // slide it with `translate-x-full`, but with `position: fixed` Chrome
+  // and Safari still budget the element into the layout in a way that
+  // makes the page horizontally scrollable. Unmounting kills the issue
+  // entirely; the 300ms transition is good enough as an open animation.
+  if (!open) return null;
+
   return (
     <>
       {/* Scrim */}
       <div
         aria-hidden="true"
         onClick={onClose}
-        className={cn(
-          "fixed inset-0 z-30 bg-[rgba(16,18,14,0.32)] backdrop-blur-[2px] transition-opacity duration-300",
-          open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
-        )}
+        className="fixed inset-0 z-30 bg-[rgba(16,18,14,0.32)] backdrop-blur-[2px] animate-fade-in"
       />
       {/* Panel */}
       <aside
@@ -251,13 +270,11 @@ export function SeniorReviewPanel({
           "fixed top-0 right-0 z-40 h-screen w-full max-w-[440px]",
           "bg-[var(--panel)] border-l border-[var(--line)]",
           "shadow-[0_28px_90px_rgba(21,19,13,.18)]",
-          "transition-transform duration-300 ease-out",
-          "flex flex-col",
-          open ? "translate-x-0" : "translate-x-full",
+          "flex flex-col animate-slide-in-right",
         )}
       >
         <PanelHeader onClose={onClose} />
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-5 py-4">
           {loading ? (
             <PanelLoading />
           ) : error ? (
@@ -341,11 +358,11 @@ function PanelError({
     <div className="mt-4 rounded-2xl border border-[var(--rose)]/30 bg-[var(--rose)]/5 p-4">
       <div className="flex items-start gap-3">
         <AlertOctagon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--rose)]" />
-        <div className="space-y-1">
-          <div className="text-sm font-semibold text-[var(--ink)]">
+        <div className="min-w-0 space-y-1">
+          <div className="text-sm font-semibold text-[var(--ink)] break-words">
             {error.title}
           </div>
-          <p className="text-[13px] leading-relaxed text-[var(--muted)]">
+          <p className="text-[13px] leading-relaxed text-[var(--muted)] [overflow-wrap:anywhere]">
             {error.body}
           </p>
         </div>
@@ -391,7 +408,7 @@ function PanelReview({
   return (
     <div className="space-y-5 pb-6">
       <VerdictPill verdict={review.verdict} />
-      <h2 className="font-[family-name:var(--serif)] text-[19px] leading-[1.35] tracking-[-0.01em] text-[var(--ink)]">
+      <h2 className="font-[family-name:var(--serif)] text-[19px] leading-[1.35] tracking-[-0.01em] text-[var(--ink)] [overflow-wrap:anywhere]">
         {review.headline}
       </h2>
 
@@ -405,7 +422,7 @@ function PanelReview({
             {review.strengths.map((s, i) => (
               <li key={i} className="flex gap-2 text-[13.5px] leading-relaxed text-[var(--ink-2)]">
                 <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-[var(--forest)]" />
-                <span>{s}</span>
+                <span className="[overflow-wrap:anywhere]">{s}</span>
               </li>
             ))}
           </ul>
@@ -428,7 +445,7 @@ function PanelReview({
           title="Next step"
           icon={<AlertTriangle className="h-3.5 w-3.5 text-[var(--gold)]" />}
         >
-          <p className="rounded-xl bg-[var(--gold-soft)] px-3 py-2.5 text-[13.5px] leading-relaxed text-[var(--ink-2)]">
+          <p className="rounded-xl bg-[var(--gold-soft)] px-3 py-2.5 text-[13.5px] leading-relaxed text-[var(--ink-2)] [overflow-wrap:anywhere]">
             {review.next_step}
           </p>
         </Section>
@@ -561,7 +578,7 @@ function SeverityGroup({
                 </span>
               )}
             </div>
-            <p className="mt-2 text-[13.5px] leading-relaxed text-[var(--ink)]">
+            <p className="mt-2 text-[13.5px] leading-relaxed text-[var(--ink)] [overflow-wrap:anywhere]">
               {c.message}
             </p>
             {c.suggested_change ? (

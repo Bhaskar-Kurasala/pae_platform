@@ -145,11 +145,15 @@ async def request_practice_review(
 
     try:
         result = await agent.execute(agent_input, ctx)
-    except anthropic.OverloadedError as exc:
-        log.warning("practice.review.api_overloaded", user_id=str(current_user.id))
+    except (anthropic.RateLimitError, anthropic.APITimeoutError) as exc:
+        log.warning(
+            "practice.review.rate_limited",
+            user_id=str(current_user.id),
+            error_type=type(exc).__name__,
+        )
         raise HTTPException(
             status_code=503,
-            detail="Reviewer is temporarily busy — try again in a few seconds.",
+            detail="Reviewer is at capacity — try again in 30–60s.",
         ) from exc
     except anthropic.APIError as exc:
         log.error("practice.review.api_error", err=str(exc))
