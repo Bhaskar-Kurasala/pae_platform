@@ -32,14 +32,27 @@ class Lesson(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         nullable=True,
         index=True,
     )
+    # Per-lesson rule for "is this lesson done?". When NULL, the
+    # LessonAccessService default applies. Shape:
+    #   {"video_min_watch_pct": 0.9,
+    #    "require_all_practice_runs": true,
+    #    "require_capstone_submitted": false}
+    completion_policy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     course: Mapped["Course"] = relationship(back_populates="lessons")
     exercises: Mapped[list["Exercise"]] = relationship(back_populates="lesson", lazy="select")
     progress_records: Mapped[list["StudentProgress"]] = relationship(
         back_populates="lesson", lazy="select"
     )
+    assets: Mapped[list["LessonAsset"]] = relationship(
+        back_populates="lesson",
+        lazy="select",
+        order_by="LessonAsset.order",
+        cascade="all, delete-orphan",
+    )
 
 
 from app.models.course import Course  # noqa: E402
 from app.models.exercise import Exercise  # noqa: E402
+from app.models.lesson_asset import LessonAsset  # noqa: E402
 from app.models.student_progress import StudentProgress  # noqa: E402

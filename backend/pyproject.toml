@@ -59,6 +59,11 @@ dependencies = [
     "opentelemetry-instrumentation-requests>=0.51b0",
     "opentelemetry-instrumentation-celery>=0.51b0",
     "sentry-sdk[fastapi]>=2.0.0",
+    # Lesson player (D-Learn) — Cloudflare R2 is S3-compatible; boto3
+    # is the simplest way to mint presigned GETs. Used only in
+    # AssetStorageService.signed_notebook_url; the sync API is fine
+    # because presigning is pure CPU (no network call).
+    "boto3>=1.35.0",
     # D9 / Pass 3g — safety primitive. Presidio detects PII (input + output);
     # spaCy provides the en_core_web_lg NER model Presidio's analyzer uses.
     # The model itself is downloaded at container build time (see Dockerfile),

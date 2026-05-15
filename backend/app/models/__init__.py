@@ -47,9 +47,13 @@ from app.models.jd_decoder import JdAnalysis, JdMatchScore  # noqa: F401
 from app.models.jd_library import JdLibrary  # noqa: F401
 from app.models.learning_session import LearningSession  # noqa: F401
 from app.models.lesson import Lesson
+from app.models.lesson_asset import LessonAsset  # noqa: F401
+from app.models.lesson_prerequisite import LessonPrerequisite  # noqa: F401
 from app.models.lesson_resource import LessonResource
 from app.models.mcq_bank import MCQBank
 from app.models.migration_gate import MigrationGate  # noqa: F401
+from app.models.mux_webhook_event import MuxWebhookEvent  # noqa: F401
+from app.models.student_asset_progress import StudentAssetProgress  # noqa: F401
 from app.models.mock_interview import (  # noqa: F401
     MockAnswer,
     MockCostLog,

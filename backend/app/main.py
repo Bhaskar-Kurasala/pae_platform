@@ -257,6 +257,7 @@ def create_app() -> FastAPI:
     from app.api.v1.routes.format import router as format_router
     from app.api.v1.routes.goals import router as goals_router
     from app.api.v1.routes.interview import router as interview_router
+    from app.api.v1.routes.learn import router as learn_router
     from app.api.v1.routes.lessons import router as lessons_router
     from app.api.v1.routes.misconceptions import router as misconceptions_router
     from app.api.v1.routes.notifications import router as notifications_router
@@ -311,6 +312,7 @@ def create_app() -> FastAPI:
         auth_router,
         admin_router,
         courses_router,
+        learn_router,
         lessons_router,
         exercises_router,
         students_router,

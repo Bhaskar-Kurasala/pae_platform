@@ -24,6 +24,7 @@ const NAV_GROUPS: ReadonlyArray<{
     items: [
       { href: "/today", label: "Today" },
       { href: "/path", label: "My path" },
+      { href: "/learn", label: "Learn" },
       { href: "/practice", label: "Practice" },
       { href: "/promotion", label: "Promotion" },
     ],

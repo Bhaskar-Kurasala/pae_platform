@@ -200,6 +200,51 @@ class Settings(BaseSettings):
     github_content_repo: str = ""  # e.g. "your-username/pae-course-content"
     github_content_branch: str = "main"
 
+    # ---- Lesson player: Mux video + R2 notebook hosting ---------------
+    # Mux is the video host. The token id/secret pair is the API
+    # credential (used for upload / metadata reads). The signing key id
+    # + private key are the JWT signing material used to mint short-
+    # lived playback tokens — every <MuxPlayer> playback URL is signed
+    # with this key, so revoking entitlement instantly cuts off video
+    # access at the next token refresh. Defaults are empty so the app
+    # boots without secrets in dev; mint_playback_token() degrades to
+    # an unsigned URL when the keys are missing (dev only — production
+    # validator below refuses to boot without them).
+    mux_token_id: str = ""
+    mux_token_secret: str = ""
+    mux_signing_key_id: str = ""
+    # PEM-encoded RSA private key. In prod, set via Fly secrets (escape
+    # newlines as \n in the env var; we re-expand below).
+    mux_signing_key_private: str = ""
+    mux_webhook_secret: str = ""
+    # Token TTL for the signed playback JWT. 4h is generous enough for
+    # one sit-down lesson without forcing a re-mint mid-watch, short
+    # enough that a refund-revoke takes effect within the same session.
+    mux_playback_token_ttl_seconds: int = 4 * 60 * 60
+
+    # R2 (Cloudflare) holds the .ipynb files for runnable notebooks.
+    # We never serve notebook content directly — every fetch goes
+    # through a 5-minute presigned GET minted server-side after the
+    # entitlement + prerequisite check. Endpoint is the S3-compatible
+    # R2 URL (https://<account>.r2.cloudflarestorage.com); region is
+    # always "auto" for R2.
+    r2_account_id: str = ""
+    r2_access_key: str = ""
+    r2_secret_key: str = ""
+    r2_bucket: str = "pae-course-assets"
+    r2_endpoint: str = ""
+    r2_region: str = "auto"
+    # Presigned GET TTL — 5 min is enough for the browser to fetch the
+    # notebook into JupyterLite; short enough that a leaked URL stops
+    # working before it can be redistributed.
+    r2_signed_url_ttl_seconds: int = 5 * 60
+
+    # JupyterLite kernel — embedded via iframe. URL points at our
+    # statically-hosted JupyterLite build. Path-only assets work in
+    # both dev (next dev) and prod (CDN-hosted). Override per-env if
+    # you host JupyterLite elsewhere.
+    jupyterlite_base_url: str = "/jupyterlite"
+
     # Agentic OS — embeddings for the memory primitive.
     # Voyage-3 is the default provider (1024 native dims, padded to
     # 1536 in app.agents.primitives.embeddings to fit the migration's
