@@ -37,6 +37,7 @@ import {
   FolderClosed,
   Lock,
   Play,
+  Sparkles,
   TerminalSquare,
 } from "lucide-react";
 
@@ -372,11 +373,6 @@ export function PracticeScreen() {
     workspace.capstone,
   ]);
 
-  const handleRunAndReview = useCallback(async () => {
-    await handleRun();
-    handleRequestReview();
-  }, [handleRequestReview, handleRun]);
-
   // Bot state derives from the mutation + run state. "ready" lights up
   // once the student has run at least once OR there's prior review
   // history for this problem (lit-on-resume).
@@ -396,28 +392,69 @@ export function PracticeScreen() {
     : null;
 
   const handleBotClick = useCallback(() => {
-    if (botState === "idle") {
-      if (!hasRunOnce) {
-        v8Toast("Run your code first — the bot reviews what happens.");
-        return;
-      }
-    }
     if (panelOpen) {
       setPanelOpen(false);
       return;
     }
-    // Opening with no review yet? Auto-request one.
+    // After splitting Run / Ask-for-review into separate footer buttons,
+    // the bot is no longer the trigger — it's just the re-entry handle
+    // for an existing review. Without a review yet, nudge the student
+    // at the explicit button rather than silently spending an LLM call.
     if (!currentReview && !seniorReview.isPending) {
-      handleRequestReview();
-    } else {
-      setPanelOpen(true);
+      if (!(hasRunOnce || hasPriorHistory)) {
+        v8Toast("Run your code first — then click Ask for review.");
+      } else {
+        v8Toast("Click Ask for review below to get a senior read.");
+      }
+      return;
     }
+    setPanelOpen(true);
   }, [
-    botState,
     currentReview,
-    handleRequestReview,
+    hasPriorHistory,
     hasRunOnce,
     panelOpen,
+    seniorReview.isPending,
+  ]);
+
+  // ── keyboard shortcuts ─────────────────────────────────────────────
+  //
+  // Ctrl/Cmd+Enter        → Run (industry standard for "execute code")
+  // Ctrl/Cmd+Shift+R      → Ask for review
+  //
+  // We listen on the document so the shortcut works whether focus is
+  // in the Monaco editor or anywhere else on the page. Skipped while
+  // a run / review is already in flight to match the buttons' disabled
+  // state. Modifier check uses metaKey || ctrlKey so Mac and Win/Linux
+  // students both get the muscle-memory binding.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+      if (e.shiftKey && (e.key === "R" || e.key === "r")) {
+        e.preventDefault();
+        if (
+          !running &&
+          !seniorReview.isPending &&
+          (hasRunOnce || hasPriorHistory)
+        ) {
+          handleRequestReview();
+        }
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        if (!running) handleRun();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    handleRequestReview,
+    handleRun,
+    hasPriorHistory,
+    hasRunOnce,
+    running,
     seniorReview.isPending,
   ]);
 
@@ -739,20 +776,51 @@ export function PracticeScreen() {
                   <BookmarkPlus className="inline-block h-3 w-3 mr-1" />
                   Save to Notebook
                 </button>
+                {/* Run is the cheap, repeatable primary action. Review
+                    is a deliberate, costlier secondary action gated on
+                    "you've actually run something." Splitting them
+                    matches how students iterate (run-run-run-think-
+                    review) instead of forcing an LLM round-trip on
+                    every debug print. */}
+                <button
+                  type="button"
+                  className="editor-btn"
+                  onClick={handleRequestReview}
+                  disabled={
+                    !(hasRunOnce || hasPriorHistory) ||
+                    seniorReview.isPending ||
+                    running
+                  }
+                  data-testid="ask-for-review"
+                  aria-label="Ask for senior review"
+                  title={
+                    !(hasRunOnce || hasPriorHistory)
+                      ? "Run your code first — I'll review what happens"
+                      : seniorReview.isPending
+                        ? "Reviewing…"
+                        : currentReview
+                          ? "Ask for a new review (Ctrl+Shift+R)"
+                          : "Ask for senior review (Ctrl+Shift+R)"
+                  }
+                >
+                  <Sparkles className="inline-block h-3 w-3 mr-1" />
+                  {seniorReview.isPending
+                    ? "Reviewing…"
+                    : currentReview
+                      ? "Ask for new review"
+                      : "Ask for review"}
+                </button>
                 <button
                   type="button"
                   className={cn("editor-btn run", running && "running")}
-                  onClick={handleRunAndReview}
-                  disabled={running || seniorReview.isPending}
-                  data-testid="run-and-review"
-                  aria-label="Run and review"
+                  onClick={handleRun}
+                  disabled={running}
+                  data-testid="run-code"
+                  aria-label="Run code"
+                  title="Run your code (Ctrl+Enter)"
                 >
                   <Play className="inline-block h-3 w-3 mr-1" />
-                  {running
-                    ? "Running…"
-                    : seniorReview.isPending
-                      ? "Reviewing…"
-                      : "Run & request review"}
+                  {running ? "Running…" : "Run"}
                 </button>
               </div>
             </div>

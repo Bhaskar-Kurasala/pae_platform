@@ -247,7 +247,7 @@ describe("PracticeScreen", () => {
     });
   });
 
-  it("Run & review calls execute then senior review with capstone problem context", async () => {
+  it("Run button executes code without firing the senior review", async () => {
     mockExecuteRun.mockResolvedValue({
       stdout: "ok",
       stderr: "",
@@ -258,10 +258,39 @@ describe("PracticeScreen", () => {
       quality: { issues: [], score: 90, summary: "clean" },
     });
     render(<PracticeScreen />);
-    fireEvent.click(screen.getByTestId("run-and-review"));
+    fireEvent.click(screen.getByTestId("run-code"));
     await waitFor(() => {
       expect(mockExecuteRun).toHaveBeenCalled();
     });
+    // Splitting Run from Review means clicking Run alone must NEVER
+    // trigger an LLM round-trip — that was the whole point of the
+    // split. Guard the contract here so a future refactor doesn't
+    // accidentally re-bundle them.
+    expect(mockSeniorReviewMutate).not.toHaveBeenCalled();
+  });
+
+  it("Ask for review is disabled until the student runs code", () => {
+    render(<PracticeScreen />);
+    const askBtn = screen.getByTestId("ask-for-review") as HTMLButtonElement;
+    expect(askBtn.disabled).toBe(true);
+  });
+
+  it("Ask for review fires senior review with capstone problem context after a run", async () => {
+    mockExecuteRun.mockResolvedValue({
+      stdout: "ok",
+      stderr: "",
+      exit_code: 0,
+      timed_out: false,
+      error: null,
+      events: [],
+      quality: { issues: [], score: 90, summary: "clean" },
+    });
+    render(<PracticeScreen />);
+    fireEvent.click(screen.getByTestId("run-code"));
+    await waitFor(() => {
+      expect(mockExecuteRun).toHaveBeenCalled();
+    });
+    fireEvent.click(screen.getByTestId("ask-for-review"));
     await waitFor(() => {
       expect(mockSeniorReviewMutate).toHaveBeenCalledWith(
         expect.objectContaining({
