@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-query";
 import {
   learnApi,
+  type ActiveCourseResponse,
   type AssetProgressOut,
   type AssetProgressUpdate,
   type LearnTimelineResponse,
@@ -66,7 +67,25 @@ export function usePatchAssetProgress(courseId: string | undefined) {
       if (courseId) {
         qc.invalidateQueries({ queryKey: ["learn", "timeline", courseId] });
       }
+      qc.invalidateQueries({ queryKey: ["learn", "active-course"] });
     },
+  });
+}
+
+/**
+ * The student's most-recently-touched course (the spine for /path) plus
+ * the full set of enrolled courses (for the "switch course" chip row).
+ *
+ * Returns `active_course_id: null` when the student hasn't started any
+ * course yet — caller should render the "Browse the catalog" upsell.
+ */
+export function useActiveCourse() {
+  const isAuthed = useAuthStore((s) => s.isAuthenticated);
+  return useQuery<ActiveCourseResponse>({
+    queryKey: ["learn", "active-course"],
+    queryFn: () => learnApi.activeCourse(),
+    enabled: isAuthed,
+    staleTime: 30_000,
   });
 }
 
@@ -83,6 +102,7 @@ export function useMarkLessonComplete(courseId: string | undefined) {
       if (courseId) {
         qc.invalidateQueries({ queryKey: ["learn", "timeline", courseId] });
       }
+      qc.invalidateQueries({ queryKey: ["learn", "active-course"] });
     },
   });
 }

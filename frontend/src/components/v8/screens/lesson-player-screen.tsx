@@ -21,6 +21,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   useLearnTimeline,
   useMarkLessonComplete,
@@ -41,16 +42,25 @@ interface Props {
 
 export function LessonPlayerScreen({ courseId }: Props) {
   const { data: timeline, isLoading, error } = useLearnTimeline(courseId);
+  const searchParams = useSearchParams();
+  const requestedLessonId = searchParams.get("lesson");
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
 
-  // First unlocked lesson is the default selection.
+  // Default selection: ?lesson= param if it points at an unlocked lesson,
+  // else the first unlocked lesson, else the first lesson at all.
   useEffect(() => {
     if (!timeline || activeLessonId) return;
+    const requested = requestedLessonId
+      ? timeline.lessons.find(
+          (l) => l.id === requestedLessonId && l.lock_state !== "locked",
+        )
+      : undefined;
     const firstOpen =
+      requested ??
       timeline.lessons.find((l) => l.lock_state !== "locked") ??
       timeline.lessons[0];
     if (firstOpen) setActiveLessonId(firstOpen.id);
-  }, [timeline, activeLessonId]);
+  }, [timeline, activeLessonId, requestedLessonId]);
 
   useSetV8Topbar({
     eyebrow: "Course path",
@@ -113,25 +123,43 @@ export function LessonPlayerScreen({ courseId }: Props) {
 
   return (
     <section className="screen active" id="screen-lesson-player">
-      <div
-        className="pad"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(260px, 320px) 1fr",
-          gap: 24,
-          alignItems: "start",
-        }}
-      >
-        <Timeline
-          lessons={timeline.lessons}
-          activeLessonId={activeLesson?.id}
-          onSelect={setActiveLessonId}
-        />
-        {activeLesson ? (
-          <LessonDetail lesson={activeLesson} courseId={courseId} />
-        ) : (
-          <div>No lessons in this course yet.</div>
-        )}
+      <div className="pad">
+        <Link
+          href="/path"
+          aria-label="Back to your path"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            marginBottom: 16,
+            fontSize: 13,
+            fontWeight: 600,
+            color: "var(--forest)",
+            textDecoration: "none",
+            opacity: 0.85,
+          }}
+        >
+          ← Back to your path
+        </Link>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(260px, 320px) 1fr",
+            gap: 24,
+            alignItems: "start",
+          }}
+        >
+          <Timeline
+            lessons={timeline.lessons}
+            activeLessonId={activeLesson?.id}
+            onSelect={setActiveLessonId}
+          />
+          {activeLesson ? (
+            <LessonDetail lesson={activeLesson} courseId={courseId} />
+          ) : (
+            <div>No lessons in this course yet.</div>
+          )}
+        </div>
       </div>
     </section>
   );

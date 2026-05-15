@@ -98,6 +98,21 @@ export interface LessonCompletionResponse {
   blocking_reasons: string[];
 }
 
+export interface EnrolledCourseSummary {
+  course_id: string;
+  course_slug: string;
+  course_title: string;
+  progress_pct: number;
+  total_lessons: number;
+  completed_lessons: number;
+  last_touched_at: string | null;
+}
+
+export interface ActiveCourseResponse {
+  active_course_id: string | null;
+  enrolled_courses: EnrolledCourseSummary[];
+}
+
 // ── Calls ──────────────────────────────────────────────────────────
 
 export const learnApi = {
@@ -126,4 +141,7 @@ export const learnApi = {
       `/api/v1/learn/lessons/${lessonId}/complete`,
       { note: note ?? null },
     ),
+
+  activeCourse: () =>
+    api.get<ActiveCourseResponse>(`/api/v1/learn/me/active-course`),
 };

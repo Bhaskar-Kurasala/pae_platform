@@ -147,3 +147,37 @@ class LessonCompletionResponse(BaseModel):
     newly_unlocked_lesson_ids: list[uuid.UUID] = Field(default_factory=list)
     # When `completed` is False, this names the missing requirement(s).
     blocking_reasons: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Active-course / enrolled-courses summary — drives the merged Path screen.
+# ---------------------------------------------------------------------------
+
+
+class EnrolledCourseSummary(BaseModel):
+    """One row per course the student has actually started studying.
+
+    "Started" = at least one student_asset_progress row exists. Free
+    catalog browse access alone does NOT enroll a student here.
+    """
+
+    course_id: uuid.UUID
+    course_slug: str
+    course_title: str
+    progress_pct: float = 0.0
+    total_lessons: int = 0
+    completed_lessons: int = 0
+    last_touched_at: datetime | None = None
+
+
+class ActiveCourseResponse(BaseModel):
+    """The single course the student should resume on the Path screen.
+
+    Resolution order (Path-merge §A):
+      1. Most-recently-touched (max student_asset_progress.updated_at).
+      2. None if the student hasn't started any course yet — frontend
+         then renders the catalog upsell card.
+    """
+
+    active_course_id: uuid.UUID | None = None
+    enrolled_courses: list[EnrolledCourseSummary] = Field(default_factory=list)

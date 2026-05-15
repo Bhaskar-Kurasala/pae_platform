@@ -55,8 +55,10 @@ from app.models.lesson_asset import (
 from app.models.mux_webhook_event import MuxWebhookEvent
 from app.models.user import User
 from app.schemas.learn import (
+    ActiveCourseResponse,
     AssetProgressOut,
     AssetProgressUpdate,
+    EnrolledCourseSummary,
     LearnTimelineResponse,
     LessonAssetOut,
     LessonCompletionResponse,
@@ -67,6 +69,7 @@ from app.schemas.learn import (
 )
 from app.services import (
     asset_storage_service,
+    enrolled_course_service,
     lesson_access_service,
     lesson_progress_service,
     mux_service,
@@ -521,6 +524,43 @@ async def _apply_view_event(
         playback_id=playback_id,
         watched_seconds=watched_seconds,
         watch_pct=watch_pct,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Active-course summary — drives the merged Path screen.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/me/active-course", response_model=ActiveCourseResponse)
+async def get_active_course(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ActiveCourseResponse:
+    """Return the student's most-recently-touched course + the full enrolled set.
+
+    "Enrolled" here means "has at least one student_asset_progress row";
+    free catalog browse access alone is excluded by design. The Path
+    screen uses `active_course_id` as the spine and renders
+    `enrolled_courses` as a "switch course" chip row.
+    """
+    rows = await enrolled_course_service.list_enrolled_courses(
+        db, student_id=current_user.id
+    )
+    return ActiveCourseResponse(
+        active_course_id=rows[0].course_id if rows else None,
+        enrolled_courses=[
+            EnrolledCourseSummary(
+                course_id=r.course_id,
+                course_slug=r.course_slug,
+                course_title=r.course_title,
+                progress_pct=r.progress_pct,
+                total_lessons=r.total_lessons,
+                completed_lessons=r.completed_lessons,
+                last_touched_at=r.last_touched_at,
+            )
+            for r in rows
+        ],
     )
 
 

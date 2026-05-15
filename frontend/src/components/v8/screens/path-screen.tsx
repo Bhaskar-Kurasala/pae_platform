@@ -17,16 +17,25 @@
  */
 
 import { useMemo, useState, type MouseEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { useSetV8Topbar } from "@/components/v8/v8-topbar-context";
 import { usePathSummary } from "@/lib/hooks/use-path-summary";
+import {
+  useActiveCourse,
+  useLearnTimeline,
+} from "@/lib/hooks/use-learn";
 import type {
   PathLab,
   PathLevel,
   PathLesson,
   PathStar,
 } from "@/lib/api-client";
+import type {
+  EnrolledCourseSummary,
+  LessonNodeOut,
+} from "@/lib/learn-api";
 
 interface StarProps {
   star: PathStar;
@@ -316,9 +325,253 @@ function GoalCard({ level }: { level: PathLevel }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Active course band — replaces the standalone /learn screen.
+// ─────────────────────────────────────────────────────────────────
+
+function lessonStateGlyph(state: LessonNodeOut["lock_state"]): string {
+  if (state === "completed") return "✓";
+  if (state === "unlocked") return "▶";
+  return "🔒";
+}
+
+function ActiveCourseBand({
+  activeCourseId,
+  enrolledCourses,
+  onSwitchCourse,
+}: {
+  activeCourseId: string;
+  enrolledCourses: EnrolledCourseSummary[];
+  onSwitchCourse: (courseId: string) => void;
+}) {
+  const { data: timeline, isLoading } = useLearnTimeline(activeCourseId);
+
+  const nextLesson = useMemo(
+    () => timeline?.lessons.find((l) => l.lock_state === "unlocked"),
+    [timeline],
+  );
+  const previewLessons = useMemo(
+    () => timeline?.lessons.slice(0, 4) ?? [],
+    [timeline],
+  );
+
+  if (isLoading || !timeline) {
+    return (
+      <section
+        className="card pad reveal"
+        aria-busy="true"
+        style={{ minHeight: 180 }}
+      >
+        <div className="eyebrow">Continue your course</div>
+        <p className="small" style={{ opacity: 0.6 }}>
+          Loading your active course…
+        </p>
+      </section>
+    );
+  }
+
+  const continueHref = nextLesson
+    ? `/path/${timeline.course_id}?lesson=${nextLesson.id}`
+    : `/path/${timeline.course_id}`;
+  const continueLabel = nextLesson
+    ? `Continue lesson ${nextLesson.order + 1} →`
+    : timeline.capstone_unlocked
+    ? "Open capstone →"
+    : "Open course →";
+
+  return (
+    <section className="card pad reveal" aria-label="Active course">
+      <div className="section-title">
+        <div>
+          <div className="eyebrow">Continue your course</div>
+          <h4 style={{ margin: "4px 0 0" }}>
+            <i>{timeline.course_title}</i>
+          </h4>
+        </div>
+        <div className="chip forest">
+          {Math.round(timeline.progress_pct * 100)}% complete
+        </div>
+      </div>
+
+      <ol
+        style={{
+          listStyle: "none",
+          margin: "16px 0 0",
+          padding: 0,
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+        }}
+      >
+        {previewLessons.map((lesson, idx) => {
+          const isLocked = lesson.lock_state === "locked";
+          return (
+            <li key={lesson.id}>
+              <Link
+                href={
+                  isLocked ? "#" : `/path/${timeline.course_id}?lesson=${lesson.id}`
+                }
+                aria-disabled={isLocked}
+                onClick={(e) => {
+                  if (isLocked) e.preventDefault();
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid var(--line)",
+                  background: "var(--surface)",
+                  textDecoration: "none",
+                  color: "inherit",
+                  opacity: isLocked ? 0.55 : 1,
+                  cursor: isLocked ? "not-allowed" : "pointer",
+                }}
+              >
+                <span
+                  aria-hidden
+                  style={{
+                    width: 26,
+                    height: 26,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    borderRadius: "50%",
+                    background:
+                      lesson.lock_state === "completed"
+                        ? "var(--forest)"
+                        : "var(--ink-7)",
+                    color:
+                      lesson.lock_state === "completed" ? "white" : "inherit",
+                    fontWeight: 600,
+                    fontSize: 13,
+                    flexShrink: 0,
+                  }}
+                >
+                  {lesson.lock_state === "completed"
+                    ? "✓"
+                    : lesson.lock_state === "locked"
+                    ? "🔒"
+                    : idx + 1}
+                </span>
+                <span style={{ flex: 1, fontWeight: 600 }}>{lesson.title}</span>
+                <span className="small" style={{ opacity: 0.65 }}>
+                  {lesson.lock_state === "completed"
+                    ? "Done"
+                    : lesson.lock_state === "locked"
+                    ? "Locked"
+                    : `${Math.round(lesson.completion_pct * 100)}%`}
+                </span>
+              </Link>
+            </li>
+          );
+        })}
+        {timeline.lessons.length > previewLessons.length && (
+          <li
+            className="small"
+            style={{ opacity: 0.6, paddingLeft: 12 }}
+          >
+            … +{timeline.lessons.length - previewLessons.length} more lessons
+          </li>
+        )}
+      </ol>
+
+      <div
+        style={{
+          marginTop: 18,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <Link href={continueHref} className="btn primary">
+          {continueLabel}
+        </Link>
+        {enrolledCourses.length > 1 && (
+          <CourseSwitcher
+            courses={enrolledCourses}
+            activeCourseId={activeCourseId}
+            onSwitch={onSwitchCourse}
+          />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function CourseSwitcher({
+  courses,
+  activeCourseId,
+  onSwitch,
+}: {
+  courses: EnrolledCourseSummary[];
+  activeCourseId: string;
+  onSwitch: (courseId: string) => void;
+}) {
+  const others = courses.filter((c) => c.course_id !== activeCourseId);
+  if (others.length === 0) return null;
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        flexWrap: "wrap",
+      }}
+    >
+      <span className="small" style={{ opacity: 0.6 }}>
+        Also studying:
+      </span>
+      {others.map((c) => (
+        <button
+          key={c.course_id}
+          type="button"
+          onClick={() => onSwitch(c.course_id)}
+          className="chip"
+          style={{
+            cursor: "pointer",
+            padding: "4px 10px",
+            borderRadius: 999,
+            border: "1px solid var(--line)",
+            background: "transparent",
+            font: "inherit",
+            color: "inherit",
+          }}
+          aria-label={`Switch active course to ${c.course_title}`}
+        >
+          {c.course_title}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function CatalogUpsellCard() {
+  return (
+    <section className="card pad reveal" aria-label="No active course">
+      <div className="eyebrow">Continue your course</div>
+      <h4 style={{ margin: "4px 0 8px" }}>
+        Pick a starting course to begin
+      </h4>
+      <p className="small" style={{ opacity: 0.78, marginBottom: 14 }}>
+        Enroll in any track from the catalog. Lessons unlock one by one —
+        watch the explainer, run the notebooks, mark the lesson complete,
+        and the next lesson opens.
+      </p>
+      <Link href="/catalog" className="btn primary">
+        Browse the catalog →
+      </Link>
+    </section>
+  );
+}
+
 export function PathScreen() {
   const router = useRouter();
   const { data, isLoading } = usePathSummary();
+  const { data: activeCourseData } = useActiveCourse();
 
   useSetV8Topbar({
     eyebrow: "Your path",
@@ -329,6 +582,14 @@ export function PathScreen() {
   });
 
   const [expandedLessonId, setExpandedLessonId] = useState<string | null>(null);
+
+  // Local override for the "Switch active course" chip click. The default
+  // is whatever the backend reports as last-touched; the override sticks
+  // for the current screen visit only (tab close = back to default).
+  const [overrideCourseId, setOverrideCourseId] = useState<string | null>(null);
+  const activeCourseId =
+    overrideCourseId ?? activeCourseData?.active_course_id ?? null;
+  const enrolledCourses = activeCourseData?.enrolled_courses ?? [];
 
   const handleOpenLab = (labId: string) => {
     router.push(`/studio?lab=${labId}`);
@@ -388,6 +649,16 @@ export function PathScreen() {
                 </div>
               )}
             </section>
+
+            {activeCourseId ? (
+              <ActiveCourseBand
+                activeCourseId={activeCourseId}
+                enrolledCourses={enrolledCourses}
+                onSwitchCourse={setOverrideCourseId}
+              />
+            ) : (
+              <CatalogUpsellCard />
+            )}
 
             <section className="card pad reveal">
               <div className="section-title">

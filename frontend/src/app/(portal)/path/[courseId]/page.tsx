@@ -7,7 +7,7 @@ interface Params {
   courseId: string;
 }
 
-export default function LearnCoursePage({
+export default function PathCoursePage({
   params,
 }: {
   params: Promise<Params>;
