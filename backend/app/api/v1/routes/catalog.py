@@ -95,10 +95,20 @@ async def get_catalog(
         for cid, n in lab_rows:
             lab_counts[str(cid)] = int(n or 0)
 
+    # Admin convention (Pattern: admin sees everything) — admins are the
+    # support + content authoring surface; gating their own catalog view
+    # behind entitlements would force them to enroll in every course just
+    # to verify it renders. Mirrors the existing bypass in
+    # routes/learn.py and routes/lessons.py. Impersonation is the
+    # separate layer for "show me what the *student* sees" — see
+    # get_view_target_user.
+    is_admin = current_user is not None and current_user.role == "admin"
     courses_out: list[CatalogCourseResponse] = []
     for course in course_rows:
         unlocked = False
-        if current_user is not None:
+        if is_admin:
+            unlocked = True
+        elif current_user is not None:
             unlocked = await entitlement_service.is_entitled(
                 db, user_id=current_user.id, course_id=course.id
             )

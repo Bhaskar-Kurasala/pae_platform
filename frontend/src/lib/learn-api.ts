@@ -111,6 +111,8 @@ export interface EnrolledCourseSummary {
 export interface ActiveCourseResponse {
   active_course_id: string | null;
   enrolled_courses: EnrolledCourseSummary[];
+  /** "student" | "admin" | "instructor" — drives empty-state copy. */
+  viewer_role: string | null;
 }
 
 // ── Calls ──────────────────────────────────────────────────────────

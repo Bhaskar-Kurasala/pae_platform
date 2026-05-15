@@ -549,7 +549,28 @@ function CourseSwitcher({
   );
 }
 
-function CatalogUpsellCard() {
+function CatalogUpsellCard({ viewerRole }: { viewerRole?: string | null }) {
+  // Admins land here when viewing /path as themselves (they don't have
+  // student progress rows). Tell them to use the admin console instead
+  // of nudging them to "enroll in a course."
+  if (viewerRole === "admin") {
+    return (
+      <section className="card pad reveal" aria-label="Admin path empty state">
+        <div className="eyebrow">Admin view</div>
+        <h4 style={{ margin: "4px 0 8px" }}>
+          Pick a student to view their path
+        </h4>
+        <p className="small" style={{ opacity: 0.78, marginBottom: 14 }}>
+          /path renders the active course of the user it's viewed as. As
+          an admin, open a student from the admin console and click
+          "View as student" to land here under their identity.
+        </p>
+        <Link href="/admin" className="btn primary">
+          Open admin console →
+        </Link>
+      </section>
+    );
+  }
   return (
     <section className="card pad reveal" aria-label="No active course">
       <div className="eyebrow">Continue your course</div>
@@ -657,7 +678,7 @@ export function PathScreen() {
                 onSwitchCourse={setOverrideCourseId}
               />
             ) : (
-              <CatalogUpsellCard />
+              <CatalogUpsellCard viewerRole={activeCourseData?.viewer_role} />
             )}
 
             <section className="card pad reveal">

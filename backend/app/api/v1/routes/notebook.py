@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.rate_limit import limiter
+from app.core.impersonation import get_view_target_user
 from app.core.security import get_current_user
 from app.models.notebook_entry import NotebookEntry
 from app.models.user import User
@@ -274,11 +275,11 @@ async def list_notebook(
     tag: str | None = Query(default=None, max_length=64),
     limit: int = Query(default=200, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    view_target: User = Depends(get_view_target_user),
 ) -> list[NotebookEntryOut]:
     rows = await list_for_user(
         db,
-        user_id=current_user.id,
+        user_id=view_target.id,
         source=source,
         graduated=graduated,
         tag=tag,
@@ -290,14 +291,14 @@ async def list_notebook(
 @router.get("/summary", response_model=NotebookSummaryResponse)
 async def notebook_summary(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    view_target: User = Depends(get_view_target_user),
 ) -> NotebookSummaryResponse:
     """Aggregate counts for the Notebook ghost card + topbar progress."""
-    summary = await summary_for_user(db, user=current_user)
+    summary = await summary_for_user(db, user=view_target)
     # Cheap: tags are derived from the entries we already loaded for the
     # graduation summary path. We do a separate small query just for tags
     # because summary_for_user doesn't fetch entry rows.
-    rows_q = select(NotebookEntry).where(NotebookEntry.user_id == current_user.id)
+    rows_q = select(NotebookEntry).where(NotebookEntry.user_id == view_target.id)
     rows = list((await db.execute(rows_q)).scalars().all())
     return NotebookSummaryResponse(
         total=summary.total,

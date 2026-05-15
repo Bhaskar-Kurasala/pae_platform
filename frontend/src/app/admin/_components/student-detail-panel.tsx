@@ -21,7 +21,9 @@
  */
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
+import { useImpersonationStore } from "@/stores/impersonation-store";
 import {
   AlertTriangle,
   Bot,
@@ -222,6 +224,24 @@ export function StudentDetailPanel({
   const createNote = useCreateStudentNote(studentId);
   const trigger = useTriggerAgent();
 
+  // View-as-student: sets the impersonation store + navigates to /path
+  // so the admin lands on the same first screen the student would see.
+  // Cache reset prevents the admin's own data from flashing during the
+  // route transition. The banner mounts automatically in the portal
+  // layout once the store has a target.
+  const router = useRouter();
+  const startImpersonation = useImpersonationStore((s) => s.start);
+  const handleViewAsStudent = () => {
+    if (!student) return;
+    queryClient.clear();
+    startImpersonation({
+      studentId: student.id,
+      studentEmail: student.email,
+      studentName: student.full_name || student.email,
+    });
+    router.push("/path");
+  };
+
   // F11 — Refund offer card surfaces only when the student is in
   // the paid_silent risk panel (Slip 4). useRiskPanels hits the same
   // endpoint as /admin so it'll usually be cached by the time we
@@ -405,8 +425,8 @@ export function StudentDetailPanel({
             {student?.email ?? studentId}
           </p>
           {student && (
-            /* Stats row — v8 .step-meta + .mini-chip: Inter 11px/700/999px */
             <div className="flex flex-wrap items-center gap-2 mt-3">
+              {/* Stats row — v8 .step-meta + .mini-chip: Inter 11px/700/999px */}
               <span
                 className={`inline-flex items-center px-[9px] py-[5px] rounded-full text-[11px] font-bold leading-none ${
                   student.is_active
@@ -425,6 +445,18 @@ export function StudentDetailPanel({
               <span className="inline-flex items-center px-[9px] py-[5px] rounded-full text-[11px] font-bold leading-none bg-muted/60 text-muted-foreground">
                 Joined {new Date(student.created_at).toLocaleDateString()}
               </span>
+              {/* View-as-student CTA — opens the portal as this student
+                  in read-only impersonation mode. The banner in the
+                  portal layout makes the mode visually unambiguous. */}
+              <button
+                type="button"
+                onClick={handleViewAsStudent}
+                className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-semibold leading-none border border-primary text-primary hover:bg-primary hover:text-primary-foreground transition-colors"
+                title={`Open the portal as ${student.full_name || student.email}`}
+              >
+                <span aria-hidden>👁</span>
+                View as student
+              </button>
             </div>
           )}
         </div>

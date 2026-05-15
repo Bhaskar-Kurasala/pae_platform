@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.impersonation import get_view_target_user
 from app.core.security import get_current_user
 from app.models.student_progress import StudentProgress
 from app.models.user import User
@@ -31,9 +32,9 @@ def get_service(db: AsyncSession = Depends(get_db)) -> ProgressService:
 @router.get("/me/progress", response_model=ProgressResponse)
 async def get_my_progress(
     service: ProgressService = Depends(get_service),
-    current_user: User = Depends(get_current_user),
+    view_target: User = Depends(get_view_target_user),
 ) -> ProgressResponse:
-    return await service.get_student_progress(current_user)
+    return await service.get_student_progress(view_target)
 
 
 @router.post("/me/lessons/{lesson_id}/complete", response_model=LessonProgressRecord)

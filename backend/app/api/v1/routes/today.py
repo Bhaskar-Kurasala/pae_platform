@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._deprecated import deprecated
 from app.core.database import get_db
+from app.core.impersonation import get_view_target_user
 from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.consistency import ConsistencyResponse
@@ -165,13 +166,17 @@ async def get_first_day_plan(
 @router.get("/summary", response_model=TodaySummaryResponse)
 async def get_today_summary(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    view_target: User = Depends(get_view_target_user),
 ) -> TodaySummaryResponse:
-    """Single round-trip aggregator for the Today screen."""
-    summary = await build_today_summary(db, user=current_user)
+    """Single round-trip aggregator for the Today screen.
+
+    Honors admin impersonation so support can land on /today and see
+    exactly what the student sees (session ordinal, due cards, etc.).
+    """
+    summary = await build_today_summary(db, user=view_target)
     log.info(
         "today.summary_shown",
-        user_id=str(current_user.id),
+        user_id=str(view_target.id),
         session_ordinal=summary.session.ordinal,
         due_cards=summary.due_card_count,
     )

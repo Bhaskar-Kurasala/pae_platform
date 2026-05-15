@@ -44,6 +44,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.impersonation import get_view_target_user
 from app.core.security import get_current_user
 from app.models.course import Course
 from app.models.lesson import Lesson
@@ -143,18 +144,25 @@ async def _resolve_asset_with_access(
 async def get_course_timeline(
     course_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    view_target: User = Depends(get_view_target_user),
 ) -> LearnTimelineResponse:
-    """Single-payload state for the Learn screen."""
+    """Single-payload state for the Learn screen.
+
+    When admin is impersonating a student, ``view_target`` IS the
+    student — we deliberately surface that student's exact lock states
+    and progress so admin can reproduce what the student sees. The
+    "admin sees everything" bypass below applies only when admin is
+    viewing the timeline as themselves.
+    """
     course = await db.get(Course, course_id)
     if course is None or not course.is_published:
         raise HTTPException(status_code=404, detail="Course not found")
 
     is_entitled = await lesson_access_service.has_course_access(
-        db, user_id=current_user.id, course_id=course_id
+        db, user_id=view_target.id, course_id=course_id
     )
 
-    if not is_entitled and current_user.role != "admin":
+    if not is_entitled and view_target.role != "admin":
         # Render a "preview" timeline: lesson titles only, all locked.
         # The frontend uses this to show the upsell card without making
         # a separate "list lessons" call.
@@ -185,7 +193,7 @@ async def get_course_timeline(
         )
 
     states = await lesson_access_service.build_course_state(
-        db, student_id=current_user.id, course_id=course_id
+        db, student_id=view_target.id, course_id=course_id
     )
 
     nodes: list[LessonNodeOut] = []
@@ -535,7 +543,7 @@ async def _apply_view_event(
 @router.get("/me/active-course", response_model=ActiveCourseResponse)
 async def get_active_course(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    view_target: User = Depends(get_view_target_user),
 ) -> ActiveCourseResponse:
     """Return the student's most-recently-touched course + the full enrolled set.
 
@@ -543,9 +551,13 @@ async def get_active_course(
     free catalog browse access alone is excluded by design. The Path
     screen uses `active_course_id` as the spine and renders
     `enrolled_courses` as a "switch course" chip row.
+
+    During admin impersonation, ``view_target`` is the student — so
+    /path renders the student's exact spine and chip row, which is the
+    whole point of the support flow.
     """
     rows = await enrolled_course_service.list_enrolled_courses(
-        db, student_id=current_user.id
+        db, student_id=view_target.id
     )
     return ActiveCourseResponse(
         active_course_id=rows[0].course_id if rows else None,
@@ -561,6 +573,7 @@ async def get_active_course(
             )
             for r in rows
         ],
+        viewer_role=view_target.role,
     )
 
 

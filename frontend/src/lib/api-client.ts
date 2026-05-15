@@ -192,6 +192,24 @@ async function request<T>(
     ...(init.headers as Record<string, string>),
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
+  // Admin "view as student" — backend ignores this for non-admin tokens
+  // (returns 403), so it is safe to attach unconditionally. Reading
+  // sessionStorage here keeps the api-client framework-free; the
+  // store hydration order doesn't matter.
+  if (typeof window !== "undefined") {
+    try {
+      const raw = window.sessionStorage.getItem("pae-impersonation");
+      if (raw) {
+        const parsed = JSON.parse(raw) as {
+          state?: { target?: { studentId?: string } | null };
+        };
+        const targetId = parsed.state?.target?.studentId;
+        if (targetId) headers["X-Impersonate-Student-Id"] = targetId;
+      }
+    } catch {
+      // sessionStorage parsing is best-effort; ignore failures.
+    }
+  }
 
   const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
   let res = await fetchWithTimeout(

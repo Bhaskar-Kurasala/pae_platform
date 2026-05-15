@@ -177,7 +177,13 @@ class ActiveCourseResponse(BaseModel):
       1. Most-recently-touched (max student_asset_progress.updated_at).
       2. None if the student hasn't started any course yet — frontend
          then renders the catalog upsell card.
+
+    `viewer_role` lets the frontend pick the right empty-state copy —
+    students see "Browse the catalog", admins see a hint to pick a
+    student to view-as. None means "anonymous" (shouldn't reach this
+    endpoint, but kept defensive).
     """
 
     active_course_id: uuid.UUID | None = None
     enrolled_courses: list[EnrolledCourseSummary] = Field(default_factory=list)
+    viewer_role: str | None = None
