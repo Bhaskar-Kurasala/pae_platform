@@ -35,6 +35,10 @@ import type {
   SeniorReviewComment,
   SeniorReviewVerdict,
 } from "@/lib/api-client";
+import {
+  SENIOR_REVIEWER,
+  formatReviewTimestamp,
+} from "@/lib/reviewer-identity";
 import { cn } from "@/lib/utils";
 
 // ── public types ──────────────────────────────────────────────────────
@@ -232,6 +236,13 @@ export interface SeniorReviewPanelProps {
   loading: boolean;
   error: FailureCopy | null;
   review: SeniorReview | null;
+  /** ISO timestamp on the review record; rendered in the chat-bubble
+   * header as "Today, 2:47 pm". Falls back to "just now" when absent. */
+  createdAt?: string | null;
+  /** True when the student has edited code since the current review was
+   * delivered. Surfaces a "Get a fresh review" affordance inside the
+   * bubble so they can re-trigger without leaving the panel. */
+  stale?: boolean;
   /** Per-pattern occurrence counts pulled from prior submissions for this
    * problem. Powers the "you've shown this pattern before" header. */
   recurringPatterns?: Array<{ slug: string; count: number }>;
@@ -240,6 +251,9 @@ export interface SeniorReviewPanelProps {
   onJumpToLine?: (line: number) => void;
   /** Called when a student clicks "Try again" on the error state. */
   onRetry?: () => void;
+  /** Called when a student clicks "Get a fresh review" on a stale
+   * review (same callback as onRetry — kept separate for semantics). */
+  onRefresh?: () => void;
 }
 
 export function SeniorReviewPanel({
@@ -247,10 +261,13 @@ export function SeniorReviewPanel({
   loading,
   error,
   review,
+  createdAt,
+  stale = false,
   recurringPatterns = [],
   onClose,
   onJumpToLine,
   onRetry,
+  onRefresh,
 }: SeniorReviewPanelProps) {
   // ESC to close. Lightweight — a full <dialog> focus trap would reset
   // the editor focus chain on every open.
@@ -293,19 +310,31 @@ export function SeniorReviewPanel({
       >
         <PanelHeader onClose={onClose} />
         <div className="flex-1 overflow-y-auto overflow-x-hidden px-5 py-4">
-          {loading ? (
-            <PanelLoading />
-          ) : error ? (
-            <PanelError error={error} onRetry={onRetry} />
-          ) : review ? (
-            <PanelReview
-              review={review}
-              recurringPatterns={recurringPatterns}
-              onJumpToLine={onJumpToLine}
-            />
-          ) : (
-            <PanelEmpty />
-          )}
+          {/* Every state is rendered as one chat message in a thread.
+              The avatar + name header is identical across loading /
+              error / review / empty so the surface reads like "Bhaskar
+              is typing…" → "Bhaskar replied" rather than four
+              unrelated screens. */}
+          <ChatBubbleHeader createdAt={loading ? null : createdAt} />
+          <ChatBubble>
+            {loading ? (
+              <BubbleLoading />
+            ) : error ? (
+              <BubbleError error={error} onRetry={onRetry} />
+            ) : review ? (
+              <BubbleReview
+                review={review}
+                stale={stale}
+                onJumpToLine={onJumpToLine}
+                onRefresh={onRefresh}
+              />
+            ) : (
+              <BubbleEmpty />
+            )}
+          </ChatBubble>
+          {!loading && !error && review && recurringPatterns.length > 0 ? (
+            <PatternStrip patterns={recurringPatterns} />
+          ) : null}
         </div>
       </aside>
     </>
@@ -313,23 +342,13 @@ export function SeniorReviewPanel({
 }
 
 function PanelHeader({ onClose }: { onClose: () => void }) {
+  // Thin "Senior review" rail at the top of the panel. The reviewer's
+  // identity (Bhaskar K / avatar) lives below in the chat-bubble header
+  // so it reads like a message rather than a corporate banner.
   return (
-    <header className="flex items-center justify-between border-b border-[var(--line)] px-5 py-4">
-      <div className="flex items-center gap-2">
-        <span
-          aria-hidden="true"
-          className="grid h-7 w-7 place-items-center rounded-full bg-[var(--forest-soft)]"
-        >
-          <Sparkles className="h-3.5 w-3.5 text-[var(--forest)]" />
-        </span>
-        <div>
-          <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--forest)]">
-            Senior review
-          </div>
-          <div className="text-[11px] text-[var(--muted)]">
-            Reasoning, not execution
-          </div>
-        </div>
+    <header className="flex items-center justify-between border-b border-[var(--line)] px-5 py-3">
+      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--forest)]">
+        Senior review
       </div>
       <button
         type="button"
@@ -343,29 +362,75 @@ function PanelHeader({ onClose }: { onClose: () => void }) {
   );
 }
 
-function PanelLoading() {
+function ChatBubbleHeader({ createdAt }: { createdAt: string | null | undefined }) {
+  const stamp = createdAt ? formatReviewTimestamp(createdAt) : "Just now";
+  return (
+    <div className="flex items-center gap-3 mb-3">
+      <span
+        aria-hidden="true"
+        className="grid h-10 w-10 shrink-0 place-items-center rounded-full font-semibold text-[13px] shadow-sm"
+        style={{
+          background: `linear-gradient(135deg, ${SENIOR_REVIEWER.avatarFrom}, ${SENIOR_REVIEWER.avatarTo})`,
+          color: SENIOR_REVIEWER.avatarInk,
+        }}
+        data-testid="reviewer-avatar"
+      >
+        {SENIOR_REVIEWER.initials}
+      </span>
+      <div className="min-w-0 leading-tight">
+        <div className="text-[13.5px] font-semibold text-[var(--ink)] truncate">
+          {SENIOR_REVIEWER.fullName}{" "}
+          <span className="text-[var(--muted)] font-normal">·</span>{" "}
+          <span className="text-[var(--muted)] font-normal">
+            {SENIOR_REVIEWER.role}
+          </span>
+        </div>
+        <div className="text-[11px] text-[var(--muted-2)]">{stamp}</div>
+      </div>
+    </div>
+  );
+}
+
+function ChatBubble({ children }: { children: React.ReactNode }) {
+  // The chat bubble: rounded panel with a small left-pointing tail
+  // anchored just under the avatar, so the message reads as a reply
+  // from the reviewer. The tail uses an absolutely-positioned square
+  // rotated 45deg — clean across browsers without an SVG dep.
+  return (
+    <div className="relative ml-1">
+      <span
+        aria-hidden="true"
+        className="absolute -left-1.5 top-3 h-3 w-3 rotate-45 rounded-sm bg-[var(--panel-2)] border-l border-t border-[var(--line)]"
+      />
+      <div className="relative rounded-2xl bg-[var(--panel-2)] border border-[var(--line)] px-4 py-3.5 shadow-sm">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function BubbleLoading() {
   // Three calibrated phase labels — feels more thoughtful than a spinner
   // alone. The labels rotate every ~3s. Not a streaming response — just
-  // intentional pacing.
+  // intentional pacing. Reads like "Bhaskar is composing..."
   const phases = [
-    "Reading your code…",
+    `${SENIOR_REVIEWER.fullName.split(" ")[0]} is reading your code…`,
     "Checking patterns from prior submissions…",
     "Drafting review…",
   ];
-  const [idx, setIdx] = useTimedRotation(phases.length, 2800);
-  useEffect(() => () => setIdx(0), [setIdx]);
+  const [idx] = useTimedRotation(phases.length, 2800);
 
   return (
-    <div className="flex flex-col items-center justify-center gap-4 py-20 text-center">
-      <Loader2 className="h-7 w-7 animate-spin text-[var(--forest)]" />
-      <p className="text-sm text-[var(--muted)]" data-testid="review-loading-phase">
+    <div className="flex items-center gap-3 py-2">
+      <Loader2 className="h-4 w-4 animate-spin text-[var(--forest)]" />
+      <p className="text-[13.5px] text-[var(--muted)]" data-testid="review-loading-phase">
         {phases[idx]}
       </p>
     </div>
   );
 }
 
-function PanelError({
+function BubbleError({
   error,
   onRetry,
 }: {
@@ -373,11 +438,11 @@ function PanelError({
   onRetry?: () => void;
 }) {
   return (
-    <div className="mt-4 rounded-2xl border border-[var(--rose)]/30 bg-[var(--rose)]/5 p-4">
-      <div className="flex items-start gap-3">
+    <div>
+      <div className="flex items-start gap-2.5">
         <AlertOctagon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--rose)]" />
         <div className="min-w-0 space-y-1">
-          <div className="text-sm font-semibold text-[var(--ink)] break-words">
+          <div className="text-[14px] font-semibold text-[var(--ink)] break-words">
             {error.title}
           </div>
           <p className="text-[13px] leading-relaxed text-[var(--muted)] [overflow-wrap:anywhere]">
@@ -398,41 +463,44 @@ function PanelError({
   );
 }
 
-function PanelEmpty() {
+function BubbleEmpty() {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
-      <Sparkles className="h-8 w-8 text-[var(--muted-2)] opacity-50" />
-      <p className="text-sm text-[var(--muted)]">
-        No review yet. Run your code, then click the bot.
-      </p>
-    </div>
+    <p className="text-[13.5px] leading-relaxed text-[var(--muted)]">
+      Hey — run your code first, then click me. I&apos;ll read what
+      happened and give you a PR-style review.
+    </p>
   );
 }
 
 // ── review body ───────────────────────────────────────────────────────
 
-function PanelReview({
+function BubbleReview({
   review,
-  recurringPatterns,
+  stale,
   onJumpToLine,
+  onRefresh,
 }: {
   review: SeniorReview;
-  recurringPatterns: Array<{ slug: string; count: number }>;
+  stale: boolean;
   onJumpToLine?: (line: number) => void;
+  onRefresh?: () => void;
 }) {
   const grouped = useMemo(() => groupCommentsBySeverity(review.comments), [
     review.comments,
   ]);
   return (
-    <div className="space-y-5 pb-6">
-      <VerdictPill verdict={review.verdict} />
-      <h2 className="font-[family-name:var(--serif)] text-[19px] leading-[1.35] tracking-[-0.01em] text-[var(--ink)] [overflow-wrap:anywhere]">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <VerdictPill verdict={review.verdict} />
+        {stale ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-[var(--gold-soft)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--gold)]">
+            stale · code changed
+          </span>
+        ) : null}
+      </div>
+      <h2 className="font-[family-name:var(--serif)] text-[18px] leading-[1.35] tracking-[-0.01em] text-[var(--ink)] [overflow-wrap:anywhere]">
         {review.headline}
       </h2>
-
-      {recurringPatterns.length > 0 ? (
-        <PatternStrip patterns={recurringPatterns} />
-      ) : null}
 
       {review.strengths.length > 0 ? (
         <Section title="What's working" icon={<CheckCircle2 className="h-3.5 w-3.5 text-[var(--forest)]" />}>
@@ -467,6 +535,23 @@ function PanelReview({
             {review.next_step}
           </p>
         </Section>
+      ) : null}
+
+      {stale && onRefresh ? (
+        <div className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-dashed border-[var(--gold)]/40 bg-[var(--gold-soft)]/60 px-3 py-2.5">
+          <p className="text-[12.5px] leading-snug text-[var(--ink-2)]">
+            You&apos;ve edited the code since this review. Want a fresh
+            one on the new version?
+          </p>
+          <button
+            type="button"
+            onClick={onRefresh}
+            data-testid="refresh-review"
+            className="shrink-0 rounded-full bg-[var(--ink)] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[var(--ink-2)]"
+          >
+            Get a fresh review
+          </button>
+        </div>
       ) : null}
     </div>
   );
@@ -506,7 +591,7 @@ function PatternStrip({
   patterns: Array<{ slug: string; count: number }>;
 }) {
   return (
-    <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-3 py-2.5">
+    <div className="mt-4 ml-1 rounded-xl border border-[var(--line)] bg-[var(--panel)] px-3 py-2.5">
       <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
         Patterns across your submissions
       </div>

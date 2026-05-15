@@ -269,13 +269,7 @@ describe("PracticeScreen", () => {
     expect(mockSeniorReviewMutate).not.toHaveBeenCalled();
   });
 
-  it("Ask for review is disabled until the student runs code", () => {
-    render(<PracticeScreen />);
-    const askBtn = screen.getByTestId("ask-for-review") as HTMLButtonElement;
-    expect(askBtn.disabled).toBe(true);
-  });
-
-  it("Ask for review fires senior review with capstone problem context after a run", async () => {
+  it("Bot is the sole review trigger after a run, with capstone problem context", async () => {
     mockExecuteRun.mockResolvedValue({
       stdout: "ok",
       stderr: "",
@@ -290,7 +284,7 @@ describe("PracticeScreen", () => {
     await waitFor(() => {
       expect(mockExecuteRun).toHaveBeenCalled();
     });
-    fireEvent.click(screen.getByTestId("ask-for-review"));
+    fireEvent.click(screen.getByTestId("review-bot"));
     await waitFor(() => {
       expect(mockSeniorReviewMutate).toHaveBeenCalledWith(
         expect.objectContaining({

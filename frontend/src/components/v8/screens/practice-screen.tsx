@@ -37,7 +37,6 @@ import {
   FolderClosed,
   Lock,
   Play,
-  Sparkles,
   TerminalSquare,
 } from "lucide-react";
 
@@ -386,31 +385,53 @@ export function PracticeScreen() {
         : "idle";
 
   const currentReview = seniorReview.data?.review ?? null;
+  const currentReviewCreatedAt = seniorReview.data?.created_at ?? null;
   const findingsCount = currentReview?.comments.length ?? 0;
   const reviewError = seniorReview.isError
     ? classifyReviewError(seniorReview.error)
     : null;
+
+  // Stale-review tracking: snapshot the code at the moment a review
+  // lands; the panel's "Get a fresh review" affordance lights up when
+  // the live editor content diverges. We watch `seniorReview.data` so
+  // a successful mutation re-snapshots automatically.
+  const codeAtReviewTime = useRef<string | null>(null);
+  useEffect(() => {
+    if (currentReview) codeAtReviewTime.current = code;
+    // Intentionally don't depend on `code` — we only re-snapshot when
+    // the review changes, not on every keystroke. eslint exhaustive-deps
+    // is fine to suppress on the next line.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentReview]);
+  const reviewIsStale =
+    currentReview != null &&
+    codeAtReviewTime.current != null &&
+    codeAtReviewTime.current !== code;
 
   const handleBotClick = useCallback(() => {
     if (panelOpen) {
       setPanelOpen(false);
       return;
     }
-    // After splitting Run / Ask-for-review into separate footer buttons,
-    // the bot is no longer the trigger — it's just the re-entry handle
-    // for an existing review. Without a review yet, nudge the student
-    // at the explicit button rather than silently spending an LLM call.
+    // The bot is now the single trigger for senior review. Three paths:
+    //   1. No run yet → toast nudge ("run first").
+    //   2. Ran, no review yet → fire review + open panel with loading state.
+    //   3. Review exists → open panel showing the existing review.
+    // The "code edited since this review" affordance lives inside the
+    // panel itself as a "Get a fresh review" button, so the bot's job
+    // here is just open-or-trigger.
+    if (!hasRunOnce && !hasPriorHistory) {
+      v8Toast("Run your code first — I'll review what happens.");
+      return;
+    }
     if (!currentReview && !seniorReview.isPending) {
-      if (!(hasRunOnce || hasPriorHistory)) {
-        v8Toast("Run your code first — then click Ask for review.");
-      } else {
-        v8Toast("Click Ask for review below to get a senior read.");
-      }
+      handleRequestReview();
       return;
     }
     setPanelOpen(true);
   }, [
     currentReview,
+    handleRequestReview,
     hasPriorHistory,
     hasRunOnce,
     panelOpen,
@@ -776,40 +797,12 @@ export function PracticeScreen() {
                   <BookmarkPlus className="inline-block h-3 w-3 mr-1" />
                   Save to Notebook
                 </button>
-                {/* Run is the cheap, repeatable primary action. Review
-                    is a deliberate, costlier secondary action gated on
-                    "you've actually run something." Splitting them
-                    matches how students iterate (run-run-run-think-
-                    review) instead of forcing an LLM round-trip on
-                    every debug print. */}
-                <button
-                  type="button"
-                  className="editor-btn"
-                  onClick={handleRequestReview}
-                  disabled={
-                    !(hasRunOnce || hasPriorHistory) ||
-                    seniorReview.isPending ||
-                    running
-                  }
-                  data-testid="ask-for-review"
-                  aria-label="Ask for senior review"
-                  title={
-                    !(hasRunOnce || hasPriorHistory)
-                      ? "Run your code first — I'll review what happens"
-                      : seniorReview.isPending
-                        ? "Reviewing…"
-                        : currentReview
-                          ? "Ask for a new review (Ctrl+Shift+R)"
-                          : "Ask for senior review (Ctrl+Shift+R)"
-                  }
-                >
-                  <Sparkles className="inline-block h-3 w-3 mr-1" />
-                  {seniorReview.isPending
-                    ? "Reviewing…"
-                    : currentReview
-                      ? "Ask for new review"
-                      : "Ask for review"}
-                </button>
+                {/* Run is the only footer action. The senior-review
+                    trigger lives on the floating bot in the editor
+                    toolbar (top-right). Splitting them keeps the
+                    common "run-run-run iterate" path one click away
+                    and the deliberate "ask for review" path a
+                    visible-but-separate affordance. */}
                 <button
                   type="button"
                   className={cn("editor-btn run", running && "running")}
@@ -838,10 +831,13 @@ export function PracticeScreen() {
         loading={seniorReview.isPending}
         error={reviewError}
         review={currentReview}
+        createdAt={currentReviewCreatedAt}
+        stale={reviewIsStale}
         recurringPatterns={recurringPatterns}
         onClose={() => setPanelOpen(false)}
         onJumpToLine={handleJumpToLine}
         onRetry={handleRequestReview}
+        onRefresh={handleRequestReview}
       />
 
       {saveDialog.open ? (
