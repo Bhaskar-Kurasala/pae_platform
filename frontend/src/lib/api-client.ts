@@ -172,7 +172,20 @@ async function fetchWithTimeout(
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+interface RequestOptions {
+  /** Override the default 30s wall-clock timeout for a specific call.
+   * Use for endpoints that intentionally take longer than a typical
+   * REST request — e.g. the senior-review path goes through an LLM
+   * with internal retries on 429, which can legitimately push past 30s.
+   * Streaming endpoints should NOT go through this helper at all. */
+  timeoutMs?: number;
+}
+
+async function request<T>(
+  path: string,
+  init: RequestInit = {},
+  options: RequestOptions = {},
+): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -180,10 +193,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
+  const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
   let res = await fetchWithTimeout(
     `${API_BASE}${path}`,
     { ...init, headers },
-    REQUEST_TIMEOUT_MS,
+    timeoutMs,
   );
 
   // On 401 with an existing token, attempt a single silent refresh + retry.
@@ -195,7 +209,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       res = await fetchWithTimeout(
         `${API_BASE}${path}`,
         { ...init, headers: retryHeaders },
-        REQUEST_TIMEOUT_MS,
+        timeoutMs,
       );
     }
   }
@@ -235,14 +249,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>(path),
-  post: <T>(path: string, body: unknown) =>
-    request<T>(path, { method: "POST", body: JSON.stringify(body) }),
-  put: <T>(path: string, body: unknown) =>
-    request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
-  patch: <T>(path: string, body: unknown) =>
-    request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
-  del: (path: string) => request<void>(path, { method: "DELETE" }),
+  get: <T>(path: string, options?: RequestOptions) => request<T>(path, {}, options),
+  post: <T>(path: string, body: unknown, options?: RequestOptions) =>
+    request<T>(path, { method: "POST", body: JSON.stringify(body) }, options),
+  put: <T>(path: string, body: unknown, options?: RequestOptions) =>
+    request<T>(path, { method: "PUT", body: JSON.stringify(body) }, options),
+  patch: <T>(path: string, body: unknown, options?: RequestOptions) =>
+    request<T>(path, { method: "PATCH", body: JSON.stringify(body) }, options),
+  del: (path: string, options?: RequestOptions) =>
+    request<void>(path, { method: "DELETE" }, options),
 };
 
 // ── Typed API calls ──────────────────────────────────────────────
@@ -1032,9 +1047,18 @@ export interface PracticeReviewPayload {
   run_output?: RunOutputSnapshot;
 }
 
+/** Senior-review fetch may legitimately take 60-90s when the upstream
+ * LLM provider rate-limits us and the Anthropic SDK retries internally.
+ * The default 30s timeout aborts mid-retry and surfaces a confusing
+ * "Request took too long" instead of the real "Reviewer is at capacity"
+ * message. 90s lines up with the agent's preemptive ceiling. */
+const SENIOR_REVIEW_TIMEOUT_MS = 90_000;
+
 export const practiceApi = {
   review: (payload: PracticeReviewPayload) =>
-    api.post<PracticeReviewRecord>("/api/v1/practice/review", payload),
+    api.post<PracticeReviewRecord>("/api/v1/practice/review", payload, {
+      timeoutMs: SENIOR_REVIEW_TIMEOUT_MS,
+    }),
   listReviews: (problemId?: string, limit = 20) => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (problemId) params.set("problem_id", problemId);

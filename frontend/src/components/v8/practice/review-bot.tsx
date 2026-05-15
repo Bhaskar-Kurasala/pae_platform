@@ -53,8 +53,26 @@ export interface FailureCopy {
 export function classifyReviewError(err: unknown): FailureCopy {
   const message =
     err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  const name = err instanceof Error ? err.name : "";
   const lower = message.toLowerCase();
 
+  // The api-client raises an ApiTimeoutError with name="ApiTimeoutError"
+  // and a generic message when the 90s wall-clock cap is hit. In
+  // practice on this endpoint, every timeout is caused by upstream
+  // rate-limit retries — so we map it to the same "at capacity" copy
+  // rather than the misleading "request took too long" generic.
+  if (
+    name === "ApiTimeoutError" ||
+    lower.includes("took too long") ||
+    lower.includes("aborterror")
+  ) {
+    return {
+      title: "Reviewer is at capacity",
+      body:
+        "The reviewer is taking longer than usual, likely because the model " +
+        "provider is throttling us. Your code is saved — try again in 30–60s.",
+    };
+  }
   if (lower.includes("429") || lower.includes("rate limit") || lower.includes("overloaded")) {
     return {
       title: "Reviewer is at capacity",

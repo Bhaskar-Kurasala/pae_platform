@@ -36,6 +36,12 @@ export function useSeniorReview() {
       if (runOutput) payload.run_output = runOutput;
       return practiceApi.review(payload);
     },
+    // The review panel renders its own typed error state via
+    // classifyReviewError. Without this opt-out, the global
+    // MutationCache.onError handler in providers.tsx also fires and
+    // students see the same error twice — once in the panel, once as
+    // a bottom-right sonner toast.
+    meta: { skipErrorToast: true },
   });
 }
 
