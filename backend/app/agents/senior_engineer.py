@@ -715,9 +715,7 @@ class SeniorEngineerAgent(AgenticBaseAgent[SeniorEngineerInput]):
         if input.rubric:
             parts.append(f"[Rubric]\n{input.rubric}")
         if input.test_results:
-            parts.append(
-                f"[Test results provided by caller]\n{input.test_results}"
-            )
+            parts.append(f"[Run results]\n{input.test_results}")
 
         if mode_was_inferred:
             parts.append(

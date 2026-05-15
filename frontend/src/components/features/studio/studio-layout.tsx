@@ -375,7 +375,7 @@ function StudioLayoutInner() {
     <RightRailTabs
       active={rightTab}
       onSelect={setRightTab}
-      hasReview={review.data !== null && review.data !== undefined}
+      hasReview={review.data?.review !== undefined}
     />
   );
 
@@ -387,7 +387,7 @@ function StudioLayoutInner() {
         <InlineReviewContent
           loading={review.isPending}
           error={review.error ? review.error.message : null}
-          review={review.data ?? null}
+          review={review.data?.review ?? null}
         />
       </div>
     ) : (

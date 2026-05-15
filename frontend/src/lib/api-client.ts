@@ -1016,12 +1016,25 @@ export interface PracticeReviewRecord {
   created_at: string;
 }
 
+export interface RunOutputSnapshot {
+  stdout: string;
+  stderr: string;
+  exit_code: number | null;
+  timed_out: boolean;
+  quality_score: number | null;
+  quality_summary: string | null;
+}
+
+export interface PracticeReviewPayload {
+  code: string;
+  problem_id?: string;
+  problem_context?: string;
+  run_output?: RunOutputSnapshot;
+}
+
 export const practiceApi = {
-  review: (payload: {
-    code: string;
-    problem_id?: string;
-    problem_context?: string;
-  }) => api.post<PracticeReviewRecord>("/api/v1/practice/review", payload),
+  review: (payload: PracticeReviewPayload) =>
+    api.post<PracticeReviewRecord>("/api/v1/practice/review", payload),
   listReviews: (problemId?: string, limit = 20) => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (problemId) params.set("problem_id", problemId);

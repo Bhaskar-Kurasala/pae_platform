@@ -66,10 +66,19 @@ const mockSeniorReviewMutate = vi.fn();
 vi.mock("@/lib/hooks/use-senior-review", () => ({
   useSeniorReview: () => ({
     mutate: mockSeniorReviewMutate,
+    reset: vi.fn(),
     data: undefined,
     isPending: false,
     isError: false,
+    error: null,
   }),
+  usePracticeReviews: () => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+  }),
+  reviewFromRecord: (r: unknown) =>
+    (r as { review?: unknown } | undefined)?.review,
 }));
 
 const mockUseWorkspace = vi.fn();
@@ -291,12 +300,15 @@ describe("PracticeScreen", () => {
     expect(screen.getByText(/No capstone yet/i)).toBeInTheDocument();
   });
 
-  it("Request review only fires senior review without running code", async () => {
+  it("Idle review bot shows a hint instead of mutating when no run yet", async () => {
     render(<PracticeScreen />);
-    fireEvent.click(screen.getByTestId("request-review"));
+    fireEvent.click(screen.getByTestId("review-bot"));
+    // The bot is dim until the student runs at least once. Clicking
+    // it in that state should not fire the review mutation; the
+    // student needs to run their code first.
     await waitFor(() => {
-      expect(mockSeniorReviewMutate).toHaveBeenCalled();
+      expect(mockToast).toHaveBeenCalled();
     });
-    expect(mockExecuteRun).not.toHaveBeenCalled();
+    expect(mockSeniorReviewMutate).not.toHaveBeenCalled();
   });
 });

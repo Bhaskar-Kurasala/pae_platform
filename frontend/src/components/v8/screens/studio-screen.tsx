@@ -85,19 +85,19 @@ export function StudioScreen() {
   }, []);
 
   const reviewItems = useMemo<ReviewItem[]>(() => {
-    const data = seniorReview.data;
-    if (!data) return DEFAULT_REVIEW;
+    const review = seniorReview.data?.review;
+    if (!review) return DEFAULT_REVIEW;
     const items: ReviewItem[] = [];
-    if (data.strengths.length > 0) {
+    if (review.strengths.length > 0) {
       items.push({
         variant: "good",
         heading: "What is working",
-        body: data.strengths[0],
+        body: review.strengths[0],
       });
     } else {
       items.push(DEFAULT_REVIEW[0]);
     }
-    const concern = data.comments.find(
+    const concern = review.comments.find(
       (c) => c.severity === "concern" || c.severity === "blocking",
     );
     items.push({
@@ -108,7 +108,7 @@ export function StudioScreen() {
     items.push({
       variant: "todo",
       heading: "Before submission",
-      body: data.next_step || DEFAULT_REVIEW[2].body,
+      body: review.next_step || DEFAULT_REVIEW[2].body,
     });
     return items;
   }, [seniorReview.data]);

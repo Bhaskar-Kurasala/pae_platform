@@ -27,7 +27,6 @@ import {
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
-import { useTheme } from "next-themes";
 import {
   BookmarkPlus,
   Check,
@@ -38,7 +37,6 @@ import {
   FolderClosed,
   Lock,
   Play,
-  Sparkles,
   TerminalSquare,
 } from "lucide-react";
 
@@ -49,14 +47,25 @@ import {
   exercisesApi,
   type ExecuteResponse,
   type ExerciseResponse,
+  type RunOutputSnapshot,
 } from "@/lib/api-client";
 import { chatApi } from "@/lib/chat-api";
-import { useSeniorReview } from "@/lib/hooks/use-senior-review";
+import {
+  useSeniorReview,
+  usePracticeReviews,
+} from "@/lib/hooks/use-senior-review";
 import { usePracticeWorkspace } from "@/lib/hooks/use-practice-workspace";
 import { trackPracticeRun } from "@/lib/analytics-events";
-import { stripMarkdownToText, truncateAtWord } from "@/lib/markdown-text";
 import { useAuthStore } from "@/stores/auth-store";
 import { cn } from "@/lib/utils";
+import {
+  ReviewBot,
+  SeniorReviewPanel,
+  buildReviewDecorations,
+  classifyReviewError,
+  severityGutterClass,
+  type BotState,
+} from "@/components/v8/practice/review-bot";
 
 const Monaco = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -103,67 +112,6 @@ function pluralLabs(n: number): string {
   return n === 1 ? "lab" : "labs";
 }
 
-// PR2/A5.2 — senior-review payloads come from the LLM and routinely
-// contain `**bold**`, backticks, and the occasional code fence. Renders
-// of `.body` land inside a small <span> with line-clamp styling, so raw
-// markdown leaks through as literal asterisks. Strip + truncate at the
-// boundary so the preview tile shows clean prose, full markdown only
-// renders on the message detail surfaces.
-const REVIEW_BODY_MAX = 200;
-export const cleanReviewBody = (raw: string): string =>
-  truncateAtWord(stripMarkdownToText(raw), REVIEW_BODY_MAX);
-
-function reviewItemsFrom(
-  data: ReturnType<typeof useSeniorReview>["data"],
-): Array<{ variant: "good" | "warn" | "todo"; heading: string; body: string }> {
-  if (!data) {
-    return [
-      {
-        variant: "good",
-        heading: "Awaiting senior review",
-        body: "Click Run & review to send your code for a PR-style read.",
-      },
-    ];
-  }
-  const items: Array<{
-    variant: "good" | "warn" | "todo";
-    heading: string;
-    body: string;
-  }> = [];
-  if (data.strengths.length > 0) {
-    items.push({
-      variant: "good",
-      heading: "What is working",
-      body: cleanReviewBody(data.strengths[0]),
-    });
-  }
-  const concern = data.comments.find(
-    (c) => c.severity === "concern" || c.severity === "blocking",
-  );
-  if (concern) {
-    items.push({
-      variant: "warn",
-      heading: `Close this gap (line ${concern.line})`,
-      body: cleanReviewBody(concern.message),
-    });
-  }
-  if (data.next_step) {
-    items.push({
-      variant: "todo",
-      heading: "Before submission",
-      body: cleanReviewBody(data.next_step),
-    });
-  }
-  if (items.length === 0) {
-    items.push({
-      variant: "good",
-      heading: data.headline || "Reviewed",
-      body: "Nothing flagged. Ship it.",
-    });
-  }
-  return items;
-}
-
 function readStoredCode(): string {
   if (typeof window === "undefined") return STARTER_CAPSTONE;
   try {
@@ -177,7 +125,6 @@ export function PracticeScreen() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isAuthed = useAuthStore((s) => s.isAuthenticated);
-  const { resolvedTheme } = useTheme();
 
   const initialMode: PracticeMode =
     searchParams.get("mode") === "exercises" ? "exercises" : "capstone";
@@ -317,6 +264,46 @@ export function PracticeScreen() {
 
   // ── run + review pipeline ──────────────────────────────────────────
   const [running, setRunning] = useState(false);
+  const [hasRunOnce, setHasRunOnce] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
+
+  // Load prior reviews for the active problem so the bot can light up
+  // on resume and surface recurring patterns at the top of the panel.
+  const problemId = mode === "exercises" ? selectedExerciseId ?? undefined : undefined;
+  const priorReviews = usePracticeReviews(problemId, 20);
+
+  const recurringPatterns = useMemo(() => {
+    const records = priorReviews.data ?? [];
+    if (records.length === 0) return [];
+    const counts = new Map<string, number>();
+    for (const rec of records) {
+      // SeniorReviewResponse doesn't carry patterns_observed today (the
+      // adapter strips it). Until the route projects patterns through,
+      // we mine signal from comments by re-counting blocking/concern
+      // themes — keyed by a normalized snippet of the message. That
+      // gives "the same gripe twice" surfacing even without server
+      // patterns, and the slug shape stays compatible when we wire
+      // patterns_observed through later.
+      for (const c of rec.review.comments) {
+        if (c.severity !== "blocking" && c.severity !== "concern") continue;
+        const key = c.message
+          .toLowerCase()
+          .replace(/[^a-z0-9 ]+/g, "")
+          .split(/\s+/)
+          .filter((w) => w.length > 4)
+          .slice(0, 3)
+          .join("-");
+        if (!key) continue;
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+    }
+    return Array.from(counts.entries())
+      .filter(([, n]) => n >= 2)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([slug, count]) => ({ slug, count }));
+  }, [priorReviews.data]);
+
   const handleRun = useCallback(async () => {
     if (!isAuthed) {
       v8Toast("Sign in to run code in the sandbox.");
@@ -334,12 +321,13 @@ export function PracticeScreen() {
     try {
       const result = await executeApi.run({ code });
       setRunResult(result);
+      setHasRunOnce(true);
     } catch {
       v8Toast("Run failed. Try again in a moment.");
     } finally {
       setRunning(false);
     }
-  }, [code, isAuthed]);
+  }, [code, isAuthed, mode, selectedExerciseId]);
 
   const handleRequestReview = useCallback(() => {
     if (!isAuthed) {
@@ -356,13 +344,56 @@ export function PracticeScreen() {
               1900,
             )
           : undefined;
-    seniorReview.mutate({ code, problemContext });
-  }, [code, isAuthed, mode, selectedExerciseDetail, seniorReview, workspace.capstone]);
+    const runOutput: RunOutputSnapshot | undefined = runResult
+      ? {
+          stdout: (runResult.stdout ?? "").slice(-4000),
+          stderr: (runResult.stderr ?? "").slice(-4000),
+          exit_code: runResult.exit_code,
+          timed_out: runResult.timed_out,
+          quality_score: runResult.quality?.score ?? null,
+          quality_summary: runResult.quality?.summary ?? null,
+        }
+      : undefined;
+    setPanelOpen(true);
+    seniorReview.mutate({
+      code,
+      problemId,
+      problemContext,
+      runOutput,
+    });
+  }, [
+    code,
+    isAuthed,
+    mode,
+    problemId,
+    runResult,
+    selectedExerciseDetail,
+    seniorReview,
+    workspace.capstone,
+  ]);
 
   const handleRunAndReview = useCallback(async () => {
     await handleRun();
     handleRequestReview();
   }, [handleRequestReview, handleRun]);
+
+  // Bot state derives from the mutation + run state. "ready" lights up
+  // once the student has run at least once OR there's prior review
+  // history for this problem (lit-on-resume).
+  const hasPriorHistory = (priorReviews.data?.length ?? 0) > 0;
+  const botState: BotState = panelOpen
+    ? "open"
+    : seniorReview.isPending
+      ? "loading"
+      : hasRunOnce || hasPriorHistory || seniorReview.data
+        ? "ready"
+        : "idle";
+
+  const currentReview = seniorReview.data?.review ?? null;
+  const findingsCount = currentReview?.comments.length ?? 0;
+  const reviewError = seniorReview.isError
+    ? classifyReviewError(seniorReview.error)
+    : null;
 
   // ── save to notebook ───────────────────────────────────────────────
   const openSaveDialog = useCallback(() => {
@@ -423,10 +454,56 @@ export function PracticeScreen() {
     workspace.capstone?.title,
   ]);
 
+  // ── Monaco wiring: decorations + scroll-to-line ────────────────────
+  //
+  // We don't depend on the `monaco-editor` package directly (only
+  // `@monaco-editor/react`), so we use a minimal structural type for
+  // the handful of editor APIs we touch. Monaco's runtime is exposed
+  // globally as `window.monaco` once the editor mounts; we read the
+  // `Range` constructor from there.
+  type MinimalMonacoEditor = {
+    deltaDecorations: (oldIds: string[], newDecorations: unknown[]) => string[];
+    revealLineInCenter: (line: number) => void;
+    setPosition: (pos: { lineNumber: number; column: number }) => void;
+    focus: () => void;
+  };
+  const editorRef = useRef<MinimalMonacoEditor | null>(null);
+  const decorationsRef = useRef<string[]>([]);
+
+  const applyReviewDecorations = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const w = window as typeof window & {
+      monaco?: { Range: new (sl: number, sc: number, el: number, ec: number) => unknown };
+    };
+    const monaco = w.monaco;
+    if (!monaco) return;
+    const decos = buildReviewDecorations(currentReview?.comments ?? []);
+    const next = decos.map((d) => ({
+      range: new monaco.Range(d.line, 1, d.line, 1),
+      options: {
+        isWholeLine: false,
+        linesDecorationsClassName: severityGutterClass(d.severity),
+        hoverMessage: { value: `**${d.severity}** — ${d.message}` },
+      },
+    }));
+    decorationsRef.current = editor.deltaDecorations(decorationsRef.current, next);
+  }, [currentReview]);
+
+  useEffect(() => {
+    applyReviewDecorations();
+  }, [applyReviewDecorations]);
+
+  const handleJumpToLine = useCallback((line: number) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    setActiveTab("code");
+    editor.revealLineInCenter(line);
+    editor.setPosition({ lineNumber: line, column: 1 });
+    editor.focus();
+  }, []);
+
   // ── derived view-data ──────────────────────────────────────────────
-  const reviewItems = useMemo(() => reviewItemsFrom(seniorReview.data), [
-    seniorReview.data,
-  ]);
   const qualityScore = runResult?.quality?.score ?? null;
   const showStdoutInTrace = activeTab === "trace";
   const showTestsTab = activeTab === "tests";
@@ -575,6 +652,10 @@ export function PracticeScreen() {
                     setCode(v ?? "");
                   }}
                   theme="vs-dark"
+                  onMount={(editor) => {
+                    editorRef.current = editor as unknown as MinimalMonacoEditor;
+                    applyReviewDecorations();
+                  }}
                   options={{
                     minimap: { enabled: false },
                     fontSize: 13,
@@ -583,6 +664,7 @@ export function PracticeScreen() {
                     automaticLayout: true,
                     wordWrap: "on",
                     padding: { top: 8, bottom: 8 },
+                    glyphMargin: true,
                   }}
                 />
               </div>
@@ -646,107 +728,47 @@ export function PracticeScreen() {
             </div>
           </section>
 
-          {/* ─── RIGHT RAIL: review panel ─── */}
-          <aside
-            className="review-panel practice-review reveal delay-1"
-            data-testid="practice-review"
-          >
-            <div className="mentor-pulse">Senior review</div>
-            <h4>
-              {seniorReview.data?.headline ?? "Responsive guidance, not noisy grading"}
-            </h4>
-            <p>
-              The reviewer reads your code with production eyes. Strengths,
-              gaps, and one concrete next step.
-            </p>
-
-            <div className="score-ring">
-              <div className="score-wheel">
-                <strong>{qualityScore ?? "—"}</strong>
-              </div>
-              <div>
-                <strong>Production readiness</strong>
-                <div className="small">
-                  {qualityScore !== null
-                    ? runResult?.quality?.summary || "Code analysed."
-                    : "Run the code to see a quality score."}
-                </div>
-              </div>
-            </div>
-
-            {/* P-Practice2 — 4-lens checklist. Static visual shell for now;
-                once the senior-review API returns lens scores, we can light
-                up each checkbox. Hidden after a real review lands (so the
-                live review-items below take over). */}
-            {qualityScore === null && (
-              <div
-                className="practice-lens-list"
-                data-testid="practice-lens-list"
-              >
-                {[
-                  {
-                    title: "Failure modes covered",
-                    hint: "Retries, timeouts, rate limits, auth.",
-                  },
-                  {
-                    title: "Cost & latency awareness",
-                    hint: "Token budgets, model choice, caching.",
-                  },
-                  {
-                    title: "Observability",
-                    hint: "Structured logs, request IDs, replay.",
-                  },
-                  {
-                    title: "Composability",
-                    hint: "Pure surface, no hidden state, testable.",
-                  },
-                ].map((lens) => (
-                  <div className="practice-lens-row" key={lens.title}>
-                    <span className="practice-lens-check" aria-hidden="true" />
-                    <div>
-                      <strong>{lens.title}</strong>
-                      <span>{lens.hint}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="review-stack">
-              {reviewItems.map((item, idx) => (
-                <div
-                  key={`${item.heading}-${idx}`}
-                  className={`review-item show ${item.variant}`}
-                >
-                  <strong>{item.heading}</strong>
-                  <span>{item.body}</span>
-                </div>
-              ))}
-              {seniorReview.isError ? (
-                <div className="review-item show warn">
-                  <strong>Review unavailable</strong>
-                  <span>
-                    Couldn&apos;t reach the reviewer. Run again in a moment.
-                  </span>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="ask-box">
-              <button
-                type="button"
-                className="btn ghost w-full"
-                onClick={handleRequestReview}
-                disabled={seniorReview.isPending}
-                data-testid="request-review"
-              >
-                <Sparkles className="inline-block h-3 w-3 mr-1" />
-                {seniorReview.isPending ? "Requesting…" : "Request review only"}
-              </button>
-            </div>
-          </aside>
         </div>
       </div>
+
+      {/* Floating senior-review bot — dim until the student has run
+          code at least once, lit afterwards. Click opens the slide-over
+          panel; if there's no review yet for the current code, clicking
+          fires the request automatically. */}
+      <ReviewBot
+        state={botState}
+        findingsCount={findingsCount}
+        hasRunCode={hasRunOnce || hasPriorHistory}
+        onClick={() => {
+          if (botState === "idle") {
+            if (!hasRunOnce) {
+              v8Toast("Run your code first — the bot reviews what happens.");
+              return;
+            }
+          }
+          if (panelOpen) {
+            setPanelOpen(false);
+            return;
+          }
+          // Opening with no review yet? Auto-request one.
+          if (!currentReview && !seniorReview.isPending) {
+            handleRequestReview();
+          } else {
+            setPanelOpen(true);
+          }
+        }}
+      />
+
+      <SeniorReviewPanel
+        open={panelOpen}
+        loading={seniorReview.isPending}
+        error={reviewError}
+        review={currentReview}
+        recurringPatterns={recurringPatterns}
+        onClose={() => setPanelOpen(false)}
+        onJumpToLine={handleJumpToLine}
+        onRetry={handleRequestReview}
+      />
 
       {saveDialog.open ? (
         <SaveDialog

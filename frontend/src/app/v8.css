@@ -2833,7 +2833,7 @@ section[id="screen-practice"] .pad {
    handles its own internal scroll. */
 .practice-grid {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr) 360px;
+  grid-template-columns: 240px minmax(0, 1fr);
   gap: 18px;
   align-items: stretch;
   height: calc(100vh - 215px);
@@ -2844,12 +2844,12 @@ section[id="screen-practice"] .pad {
    compact 56px strip showing badge codes (F1, C2, P1…). Editor + review
    take the recovered width. */
 .practice-grid.rail-collapsed {
-  grid-template-columns: 56px minmax(0, 1fr) 360px;
+  grid-template-columns: 56px minmax(0, 1fr);
   gap: 12px;
 }
 @media (max-width: 1280px) {
   .practice-grid.rail-collapsed {
-    grid-template-columns: 56px minmax(0, 1fr) 320px;
+    grid-template-columns: 56px minmax(0, 1fr);
   }
 }
 
@@ -3352,7 +3352,7 @@ section[id="screen-practice"] .pad {
 /* ── Tablet collapse ── */
 @media (max-width: 1280px) {
   .practice-grid {
-    grid-template-columns: 220px minmax(0, 1fr) 320px;
+    grid-template-columns: 220px minmax(0, 1fr);
   }
 }
 @media (max-width: 1100px) {
@@ -3364,5 +3364,54 @@ section[id="screen-practice"] .pad {
     position: static;
     max-height: none;
   }
+}
+
+/* ── Senior-review bot + Monaco gutter markers ─────────────────────── */
+
+@keyframes botReady {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.12); }
+  60% { transform: scale(0.98); }
+  100% { transform: scale(1); }
+}
+@keyframes pulseSlow {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50%      { opacity: 0.7; transform: scale(1.06); }
+}
+.animate-bot-ready { animation: botReady 480ms var(--ease) 1; }
+.animate-pulse-slow { animation: pulseSlow 2.4s var(--ease) infinite; }
+
+/* Monaco gutter dots driven by review comments. */
+.review-gutter-blocking,
+.review-gutter-concern,
+.review-gutter-suggestion,
+.review-gutter-nit {
+  position: relative;
+  cursor: pointer;
+}
+.review-gutter-blocking::before,
+.review-gutter-concern::before,
+.review-gutter-suggestion::before,
+.review-gutter-nit::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.65);
+}
+.review-gutter-blocking::before   { background: #9a4b3b; }
+.review-gutter-concern::before    { background: #b8862d; }
+.review-gutter-suggestion::before { background: #4e9470; }
+.review-gutter-nit::before        { background: #8f897d; }
+
+.dark .review-gutter-blocking::before,
+.dark .review-gutter-concern::before,
+.dark .review-gutter-suggestion::before,
+.dark .review-gutter-nit::before {
+  box-shadow: 0 0 0 2px rgba(26, 34, 28, 0.7);
 }
 
