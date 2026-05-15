@@ -2,6 +2,7 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import { useTheme } from "next-themes";
+import { Moon, Sun } from "lucide-react";
 
 function subscribe(): () => void {
   // No external store — useSyncExternalStore just gives us a deterministic
@@ -16,8 +17,10 @@ function getServerSnapshot() {
 }
 
 /**
- * iOS-style sliding pill that mirrors the v8 sidebar theme toggle.
- * next-themes drives the actual theme; this just controls the UI.
+ * Single-icon circular theme toggle — mirrors the admin top-bar's
+ * `.cf-topbar-theme` pattern. Shows Sun in light mode, Moon in dark,
+ * click flips. Replaces the older iOS-style sliding pill so the
+ * student sidebar and admin top bar speak the same visual language.
  */
 export function V8ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
@@ -26,12 +29,9 @@ export function V8ThemeToggle() {
   const isDark = mounted && resolvedTheme === "dark";
   const next: "light" | "dark" = isDark ? "light" : "dark";
 
-  function setMode(mode: "light" | "dark") {
-    setTheme(mode);
-    document.documentElement.setAttribute(
-      "data-theme",
-      mode === "dark" ? "dark" : "light",
-    );
+  function toggle() {
+    setTheme(next);
+    document.documentElement.setAttribute("data-theme", next);
   }
 
   // Keep `data-theme` in sync with next-themes so v8.css selectors apply.
@@ -44,64 +44,18 @@ export function V8ThemeToggle() {
   }, [isDark, mounted]);
 
   return (
-    <div
-      className="theme-toggle"
-      role="switch"
-      aria-checked={isDark}
-      aria-label={`Switch to ${next} mode`}
-      tabIndex={0}
-      onClick={() => setMode(next)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          setMode(next);
-        }
-      }}
+    <button
+      type="button"
+      className="v8-theme-btn"
+      aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+      title={isDark ? "Switch to light theme" : "Switch to dark theme"}
+      onClick={toggle}
     >
-      <button
-        type="button"
-        className={`theme-opt${!isDark ? " active" : ""}`}
-        aria-label="Light theme"
-        tabIndex={-1}
-        onClick={(e) => {
-          e.stopPropagation();
-          setMode("light");
-        }}
-      >
-        <svg
-          viewBox="0 0 14 14"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.6}
-          strokeLinecap="round"
-          aria-hidden
-        >
-          <circle cx={7} cy={7} r={2.4} />
-          <path d="M7 1v1.4M7 11.6V13M1 7h1.4M11.6 7H13M2.6 2.6l1 1M10.4 10.4l1 1M2.6 11.4l1-1M10.4 3.6l1-1" />
-        </svg>
-      </button>
-      <button
-        type="button"
-        className={`theme-opt${isDark ? " active" : ""}`}
-        aria-label="Dark theme"
-        tabIndex={-1}
-        onClick={(e) => {
-          e.stopPropagation();
-          setMode("dark");
-        }}
-      >
-        <svg
-          viewBox="0 0 14 14"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.6}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-        >
-          <path d="M11.5 8.5A4.5 4.5 0 015.5 2.5a5 5 0 106 6z" />
-        </svg>
-      </button>
-    </div>
+      {isDark ? (
+        <Moon className="v8-theme-btn-icon" aria-hidden />
+      ) : (
+        <Sun className="v8-theme-btn-icon" aria-hidden />
+      )}
+    </button>
   );
 }
