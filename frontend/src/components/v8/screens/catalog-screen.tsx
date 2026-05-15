@@ -344,10 +344,19 @@ function CourseCard({ course, index }: CourseCardProps) {
 
   let cta: React.ReactNode;
   if (course.is_unlocked) {
+    // Path-merge §B — once a course is unlocked (purchased, free-enrolled,
+    // or admin-bypass), the catalog card becomes the "open the lesson
+    // player" entry point. Without this students who completed checkout
+    // had no way to launch the player from /catalog and admins had no
+    // way to inspect course content at all.
     cta = (
-      <button type="button" className="course-cta enrolled" disabled>
-        ✓ Enrolled
-      </button>
+      <Link
+        href={`/path/${course.id}`}
+        className="course-cta enrolled"
+        aria-label={`Open ${course.title} in the lesson player`}
+      >
+        Open course →
+      </Link>
     );
   } else if (course.price_cents === 0) {
     cta = (

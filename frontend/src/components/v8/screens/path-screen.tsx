@@ -708,6 +708,48 @@ export function PathScreen() {
                     onToggleLesson={handleToggleLesson}
                     onOpenLab={handleOpenLab}
                   />
+                ) : activeCourseData?.viewer_role === "admin" ? (
+                  // Admin-aware empty state — same shape as the band's
+                  // CatalogUpsellCard but worded for the role ladder
+                  // context. Sends admin to the catalog (where every
+                  // course now has an "Open course →" CTA thanks to the
+                  // catalog-card unlock fix) so they can inspect any
+                  // course's lessons without enrolling.
+                  <article className="role-step">
+                    <div className="role-badge">1</div>
+                    <div>
+                      <h5>Inspect any course as admin</h5>
+                      <p>
+                        You have view access to every published course.
+                        Open the catalog to launch any course&apos;s lesson
+                        player, or pick a student in the admin console
+                        and click &ldquo;View as student&rdquo; to see
+                        their exact ladder.
+                      </p>
+                      <div
+                        className="hero-actions"
+                        style={{
+                          marginTop: 12,
+                          display: "flex",
+                          gap: 8,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <button
+                          className="btn primary"
+                          onClick={() => router.push("/catalog")}
+                        >
+                          Open the catalog
+                        </button>
+                        <button
+                          className="btn"
+                          onClick={() => router.push("/admin")}
+                        >
+                          Admin console
+                        </button>
+                      </div>
+                    </div>
+                  </article>
                 ) : (
                   <article className="role-step">
                     <div className="role-badge">1</div>
