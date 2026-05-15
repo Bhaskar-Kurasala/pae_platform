@@ -15,10 +15,17 @@ keep their nice JSON detail intact).
 
 We deliberately do NOT swallow `RateLimitExceeded` here — slowapi has its
 own handler registered before us.
+
+Also handles the upstream-LLM-rate-limit case below. Anthropic /
+MiniMax 429s used to bubble out as opaque 500 errors with the generic
+"something went wrong" message; the dedicated llm_rate_limit_handler
+turns them into a structured 503 so frontend code can render typed
+"Reviewer at capacity" copy instead of a panic toast.
 """
 
 from __future__ import annotations
 
+import anthropic
 import structlog
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -136,4 +143,54 @@ async def unhandled_exception_handler(
         status_code=500,
         content={"error": error_payload},
         headers={REQUEST_ID_HEADER: request_id},
+    )
+
+
+async def llm_rate_limit_handler(
+    request: Request, exc: Exception
+) -> JSONResponse:
+    """Dedicated handler for upstream LLM rate-limit / timeout errors.
+
+    Registered against ``anthropic.RateLimitError`` and
+    ``anthropic.APITimeoutError`` in main.py. Any route that calls
+    Claude / MiniMax without its own try/except still surfaces a
+    truthful 503 instead of a generic 500.
+
+    Response shape mirrors the global handler so the frontend can
+    consume one envelope. ``type: "rate_limited"`` lets typed error
+    UI (see classifyReviewError on the frontend) render the right
+    "Reviewer at capacity — try again in 30-60s" copy instead of
+    the catch-all "something went wrong" toast.
+    """
+    request_id = (
+        getattr(request.state, "request_id", None)
+        or request.headers.get(REQUEST_ID_HEADER)
+        or "unknown"
+    )
+    trace_id = _current_trace_id(request)
+
+    is_timeout = isinstance(exc, anthropic.APITimeoutError)
+    log.warning(
+        "llm.rate_limited" if not is_timeout else "llm.timeout",
+        exception_type=type(exc).__name__,
+        path=request.url.path,
+        method=request.method,
+        request_id=request_id,
+    )
+
+    error_payload: dict[str, str | None] = {
+        "type": "rate_limited",
+        "user_message": (
+            "Our reviewer is at capacity right now. Try again in 30-60s — "
+            "your work is saved."
+        ),
+        "message": "Reviewer is at capacity — try again in 30-60s.",
+        "request_id": request_id,
+    }
+    if trace_id is not None:
+        error_payload["trace_id"] = trace_id
+    return JSONResponse(
+        status_code=503,
+        content={"error": error_payload},
+        headers={REQUEST_ID_HEADER: request_id, "Retry-After": "30"},
     )

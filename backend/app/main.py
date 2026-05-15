@@ -1,6 +1,7 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+import anthropic
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,7 +11,10 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from app.api._deprecated import DeprecationHeaderMiddleware
 from app.core.config import settings
-from app.core.exception_handler import unhandled_exception_handler
+from app.core.exception_handler import (
+    llm_rate_limit_handler,
+    unhandled_exception_handler,
+)
 from app.core.logging import configure_logging
 from app.core.metrics_middleware import MetricsMiddleware
 from app.core.rate_limit import limiter
@@ -201,6 +205,14 @@ def create_app() -> FastAPI:
     app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)  # type: ignore[arg-type]
     app.add_middleware(SlowAPIMiddleware)
 
+    # Upstream-LLM rate-limit / timeout handler. Anthropic & MiniMax
+    # 429s used to escape as opaque 500s and trigger the generic
+    # "something went wrong" toast across the app. This handler turns
+    # them into a typed 503 with structured copy so route handlers
+    # don't each need to wrap every llm.ainvoke() call themselves.
+    app.add_exception_handler(anthropic.RateLimitError, llm_rate_limit_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(anthropic.APITimeoutError, llm_rate_limit_handler)  # type: ignore[arg-type]
+
     # PR2/B4.1 — global handler. Catches anything that escaped the route
     # and turns it into a stable {"error": {...}} JSON shape with the
     # request_id surfaced. Registered AFTER slowapi so RateLimitExceeded
@@ -244,69 +256,74 @@ def create_app() -> FastAPI:
 
     # API v1
     from app.api.v1.routes.admin import router as admin_router
+    from app.api.v1.routes.admin_journey import router as admin_journey_router
+
+    # D9 — canonical agentic chat + admin trace endpoints
+    from app.api.v1.routes.agentic import router as agentic_router
+    from app.api.v1.routes.agentic_webhooks import router as agentic_webhooks_router
     from app.api.v1.routes.agents import router as agents_router
     from app.api.v1.routes.application_kit import router as application_kit_router
     from app.api.v1.routes.auth import router as auth_router
     from app.api.v1.routes.billing import router as billing_router
+    from app.api.v1.routes.career import router as career_router
     from app.api.v1.routes.catalog import router as catalog_router
+    from app.api.v1.routes.chat import router as chat_router
+    from app.api.v1.routes.clarification import router as clarification_router
+    from app.api.v1.routes.confidence import router as confidence_router
     from app.api.v1.routes.courses import router as courses_router
+    from app.api.v1.routes.csp_report import router as csp_report_router
     from app.api.v1.routes.demo import router as demo_router
     from app.api.v1.routes.diagnostic import router as diagnostic_router
     from app.api.v1.routes.execute import router as execute_router
     from app.api.v1.routes.exercises import router as exercises_router
+    from app.api.v1.routes.feedback import router as feedback_router
     from app.api.v1.routes.format import router as format_router
     from app.api.v1.routes.goals import router as goals_router
     from app.api.v1.routes.interview import router as interview_router
+    from app.api.v1.routes.jd_decoder import router as jd_decoder_router
     from app.api.v1.routes.learn import router as learn_router
     from app.api.v1.routes.lessons import router as lessons_router
     from app.api.v1.routes.misconceptions import router as misconceptions_router
+    from app.api.v1.routes.mock_interview import router as mock_interview_router
+    from app.api.v1.routes.notebook import router as notebook_router
     from app.api.v1.routes.notifications import router as notifications_router
     from app.api.v1.routes.oauth import router as oauth_router
+    from app.api.v1.routes.path_summary import router as path_summary_router
     from app.api.v1.routes.payments_v2 import router as payments_v2_router
     from app.api.v1.routes.payments_webhook import (
         router as payments_webhook_router,
     )
     from app.api.v1.routes.portfolio_autopsy import router as portfolio_autopsy_router
-    from app.api.v1.routes.confidence import router as confidence_router
+    from app.api.v1.routes.practice import router as practice_router
     from app.api.v1.routes.preferences import router as preferences_router
-    from app.api.v1.routes.receipts import router as receipts_router
-    from app.api.v1.routes.reflections import router as reflections_router
-    from app.api.v1.routes.senior_review import router as senior_review_router
-    from app.api.v1.routes.skill_path import router as skill_path_router
-    from app.api.v1.routes.skills import router as skills_router
-    from app.api.v1.routes.srs import router as srs_router
-    from app.api.v1.routes.career import router as career_router
-    from app.api.v1.routes.chat import router as chat_router
-    from app.api.v1.routes.clarification import router as clarification_router
-    from app.api.v1.routes.notebook import router as notebook_router
-    from app.api.v1.routes.stream import (
-        chat_stream_router,
-        router as stream_router,
-    )
-    from app.api.v1.routes.students import router as students_router
-    from app.api.v1.routes.teach_back import router as teach_back_router
-    from app.api.v1.routes.today import router as today_router
-    from app.api.v1.routes.path_summary import router as path_summary_router
     from app.api.v1.routes.promotion_summary import router as promotion_summary_router
-    from app.api.v1.routes.webhooks import router as webhooks_router
-    from app.api.v1.routes.agentic_webhooks import router as agentic_webhooks_router
-    # D9 — canonical agentic chat + admin trace endpoints
-    from app.api.v1.routes.agentic import router as agentic_router
-    from app.api.v1.routes.admin_journey import router as admin_journey_router
-    from app.api.v1.routes.feedback import router as feedback_router
-    from app.api.v1.routes.mock_interview import router as mock_interview_router
-    from app.api.v1.routes.tailored_resume import router as tailored_resume_router
-    from app.api.v1.routes.jd_decoder import router as jd_decoder_router
     from app.api.v1.routes.readiness import (
         overview_router as readiness_overview_router,
+    )
+    from app.api.v1.routes.readiness import (
         router as readiness_router,
     )
     from app.api.v1.routes.readiness_events import (
         router as readiness_events_router,
     )
+    from app.api.v1.routes.receipts import router as receipts_router
+    from app.api.v1.routes.reflections import router as reflections_router
     from app.api.v1.routes.resources import router as resources_router
-    from app.api.v1.routes.practice import router as practice_router
-    from app.api.v1.routes.csp_report import router as csp_report_router
+    from app.api.v1.routes.senior_review import router as senior_review_router
+    from app.api.v1.routes.skill_path import router as skill_path_router
+    from app.api.v1.routes.skills import router as skills_router
+    from app.api.v1.routes.srs import router as srs_router
+    from app.api.v1.routes.stream import (
+        chat_stream_router,
+    )
+    from app.api.v1.routes.stream import (
+        router as stream_router,
+    )
+    from app.api.v1.routes.students import router as students_router
+    from app.api.v1.routes.tailored_resume import router as tailored_resume_router
+    from app.api.v1.routes.teach_back import router as teach_back_router
+    from app.api.v1.routes.today import router as today_router
+    from app.api.v1.routes.webhooks import router as webhooks_router
 
     api_routers = [
         auth_router,
