@@ -25,6 +25,7 @@ AssetKind = Literal[
     "video",
     "capstone_brief",
     "reading",
+    "git_repo",
 ]
 
 AssetStatus = Literal["not_started", "in_progress", "completed"]
@@ -54,6 +55,9 @@ class LessonAssetOut(BaseModel):
     # URL or playback token through dedicated endpoints rather than ever
     # seeing the opaque key. Prevents leaking R2 keys / Mux playback IDs
     # to anyone who calls /api/v1/learn/timeline without entitlement.
+    # Source hint surfaces metadata.source so the player can branch
+    # without a follow-up call (e.g. youtube vs Mux for video).
+    source: str | None = None
     progress: AssetProgressOut = Field(default_factory=AssetProgressOut)
 
     model_config = ConfigDict(from_attributes=True)
@@ -187,3 +191,81 @@ class ActiveCourseResponse(BaseModel):
     active_course_id: uuid.UUID | None = None
     enrolled_courses: list[EnrolledCourseSummary] = Field(default_factory=list)
     viewer_role: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Admin asset CRUD — used by /api/v1/admin/lessons/{lesson_id}/assets
+# ---------------------------------------------------------------------------
+
+
+class AdminAssetCreate(BaseModel):
+    """Admin payload for creating a LessonAsset row.
+
+    `storage_ref` is intentionally a free-form string — admin pastes
+    whatever the host needs:
+      kind='video'              → Mux playback_id (e.g. "abc123def...")
+      kind='learning_notebook'  → R2 object key  (e.g. "courses/x/l1.ipynb")
+      kind='practice_notebook'  → R2 object key
+      kind='capstone_brief'     → R2 object key (markdown)
+      kind='reading'            → R2 object key (markdown)
+      kind='git_repo'           → public URL    (e.g. "https://github.com/org/repo")
+    """
+
+    kind: AssetKind
+    title: str = Field(min_length=1, max_length=500)
+    description: str | None = None
+    storage_ref: str = Field(min_length=1, max_length=500)
+    order: int = 0
+    duration_seconds: int | None = Field(default=None, ge=0)
+    is_published: bool = True
+    metadata: dict | None = None
+
+
+class AdminAssetUpdate(BaseModel):
+    """Patch payload — every field optional; only set what changed."""
+
+    kind: AssetKind | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=500)
+    description: str | None = None
+    storage_ref: str | None = Field(default=None, min_length=1, max_length=500)
+    order: int | None = None
+    duration_seconds: int | None = Field(default=None, ge=0)
+    is_published: bool | None = None
+    metadata: dict | None = None
+
+
+class AdminAssetReorderItem(BaseModel):
+    asset_id: uuid.UUID
+    order: int
+
+
+class AdminAssetReorderRequest(BaseModel):
+    items: list[AdminAssetReorderItem] = Field(min_length=1)
+
+
+class AdminAssetOut(BaseModel):
+    """Admin projection — includes storage_ref (the student projection
+    intentionally hides it, but admin needs to see and edit it)."""
+
+    id: uuid.UUID
+    lesson_id: uuid.UUID
+    kind: AssetKind
+    order: int
+    title: str
+    description: str | None = None
+    storage_ref: str
+    duration_seconds: int | None = None
+    is_published: bool = True
+    metadata: dict | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminLegacySyncResponse(BaseModel):
+    """Result of the 'sync from legacy fields' helper."""
+
+    lesson_id: uuid.UUID
+    created_assets: list[AdminAssetOut] = Field(default_factory=list)
+    skipped_reasons: list[str] = Field(default_factory=list)

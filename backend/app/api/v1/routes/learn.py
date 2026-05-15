@@ -228,6 +228,11 @@ async def get_course_timeline(
                         title=asset.title,
                         description=asset.description,
                         duration_seconds=asset.duration_seconds,
+                        source=(
+                            (asset.metadata_ or {}).get("source")
+                            if asset.metadata_
+                            else None
+                        ),
                         progress=AssetProgressOut.model_validate(
                             state.progress_by_asset[asset.id]
                         )
@@ -275,10 +280,27 @@ async def get_notebook_signed_url(
     if asset.kind not in NOTEBOOK_KINDS and asset.kind not in {
         "capstone_brief",
         "reading",
+        "git_repo",
     }:
         raise HTTPException(
             status_code=400,
             detail=f"Asset kind '{asset.kind}' is not a notebook/markdown asset",
+        )
+
+    # git_repo: storage_ref IS the URL — don't sign, don't wrap in
+    # JupyterLite. Frontend renders an "Open in GitHub" link directly.
+    if asset.kind == "git_repo":
+        from datetime import UTC as _UTC, datetime as _dt, timedelta as _td
+        log.info(
+            "learn.git_repo_url_returned",
+            student_id=str(current_user.id),
+            asset_id=str(asset_id),
+        )
+        return NotebookSignedUrlResponse(
+            asset_id=asset_id,
+            url=asset.storage_ref,
+            expires_at=_dt.now(_UTC) + _td(days=365),
+            launch_url=asset.storage_ref,
         )
 
     signed = asset_storage_service.signed_notebook_url(asset.storage_ref)

@@ -17,7 +17,8 @@ export type AssetKind =
   | "practice_notebook"
   | "video"
   | "capstone_brief"
-  | "reading";
+  | "reading"
+  | "git_repo";
 
 export type AssetStatus = "not_started" | "in_progress" | "completed";
 export type LessonLockState = "locked" | "unlocked" | "completed";
@@ -39,6 +40,8 @@ export interface LessonAssetOut {
   title: string;
   description: string | null;
   duration_seconds: number | null;
+  /** Surfaces metadata.source so player branches (e.g. youtube vs Mux). */
+  source: string | null;
   progress: AssetProgressOut;
 }
 

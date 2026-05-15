@@ -490,13 +490,27 @@ function ActiveCourseBand({
         <Link href={continueHref} className="btn primary">
           {continueLabel}
         </Link>
-        {enrolledCourses.length > 1 && (
-          <CourseSwitcher
-            courses={enrolledCourses}
-            activeCourseId={activeCourseId}
-            onSwitch={onSwitchCourse}
-          />
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          {enrolledCourses.length > 1 && (
+            <CourseSwitcher
+              courses={enrolledCourses}
+              activeCourseId={activeCourseId}
+              onSwitch={onSwitchCourse}
+            />
+          )}
+          <Link
+            href="/path/courses"
+            className="small"
+            style={{
+              color: "var(--forest)",
+              textDecoration: "none",
+              fontWeight: 600,
+              fontSize: 13,
+            }}
+          >
+            View all my courses →
+          </Link>
+        </div>
       </div>
     </section>
   );

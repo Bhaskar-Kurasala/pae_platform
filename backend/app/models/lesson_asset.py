@@ -38,6 +38,11 @@ ASSET_KIND_PRACTICE_NOTEBOOK = "practice_notebook"
 ASSET_KIND_VIDEO = "video"
 ASSET_KIND_CAPSTONE_BRIEF = "capstone_brief"
 ASSET_KIND_READING = "reading"
+# Admin pastes a public GitHub URL (or org/repo[#branch]); the player
+# renders an "Open in GitHub" / "Open in Colab" link. Repo content is
+# NOT proxied — we trust the host. For private repo proxying use the
+# existing GITHUB_CONTENT_TOKEN flow.
+ASSET_KIND_GIT_REPO = "git_repo"
 
 ASSET_KINDS: frozenset[str] = frozenset(
     {
@@ -46,6 +51,7 @@ ASSET_KINDS: frozenset[str] = frozenset(
         ASSET_KIND_VIDEO,
         ASSET_KIND_CAPSTONE_BRIEF,
         ASSET_KIND_READING,
+        ASSET_KIND_GIT_REPO,
     }
 )
 
@@ -59,7 +65,7 @@ class LessonAsset(Base, UUIDMixin, TimestampMixin):
     __table_args__ = (
         CheckConstraint(
             "kind IN ('learning_notebook','practice_notebook','video',"
-            "'capstone_brief','reading')",
+            "'capstone_brief','reading','git_repo')",
             name="ck_lesson_assets_kind",
         ),
         Index("ix_lesson_assets_lesson_id_order", "lesson_id", "order"),

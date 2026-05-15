@@ -352,13 +352,82 @@ function AssetPanel({ asset, courseId }: { asset: LessonAssetOut; courseId: stri
   if (asset.kind === "capstone_brief") {
     return <NotebookAssetPanel asset={asset} courseId={courseId} variant="capstone" />;
   }
+  if (asset.kind === "git_repo") {
+    return <GitRepoAssetPanel asset={asset} courseId={courseId} />;
+  }
   return <NotebookAssetPanel asset={asset} courseId={courseId} variant="reading" />;
+}
+
+function GitRepoAssetPanel({
+  asset,
+  courseId,
+}: {
+  asset: LessonAssetOut;
+  courseId: string;
+}) {
+  // The git_repo asset stores the URL in storage_ref but the timeline
+  // payload deliberately strips storage_ref. We hit the notebook-url
+  // endpoint to surface the URL — the backend returns the raw URL for
+  // git_repo (no signing needed; the URL is the resource).
+  const { data: signed, isLoading } = useNotebookSignedUrl(asset.id);
+  const patch = usePatchAssetProgress(courseId);
+  const opened = asset.progress.executed_at !== null;
+  return (
+    <article
+      style={{
+        border: "1px solid var(--line)",
+        borderRadius: 12,
+        background: "var(--surface)",
+        padding: 16,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      <div className="eyebrow">Git repo</div>
+      <strong>{asset.title}</strong>
+      {asset.description && (
+        <p className="small" style={{ opacity: 0.78, margin: 0 }}>
+          {asset.description}
+        </p>
+      )}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        {isLoading || !signed ? (
+          <span className="small" style={{ opacity: 0.6 }}>Loading…</span>
+        ) : (
+          <a
+            href={signed.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn primary"
+            style={{ padding: "8px 14px", borderRadius: 6 }}
+            onClick={() => {
+              if (!opened) {
+                patch.mutate({
+                  assetId: asset.id,
+                  body: { mark_executed: true },
+                });
+              }
+            }}
+          >
+            Open in GitHub →
+          </a>
+        )}
+        {opened && (
+          <span style={{ color: "var(--forest)", fontSize: 13 }}>✓ Visited</span>
+        )}
+      </div>
+    </article>
+  );
 }
 
 // ── Video ────────────────────────────────────────────────────────
 
 function VideoAssetPanel({ asset, courseId }: { asset: LessonAssetOut; courseId: string }) {
-  const { data: token, isLoading } = useVideoToken(asset.id);
+  const isYouTube = asset.source === "youtube";
+  // Skip Mux token mint for YouTube assets — the storage_ref is the
+  // YouTube video id and the URL is unsigned by design.
+  const { data: token, isLoading } = useVideoToken(isYouTube ? undefined : asset.id);
   const patch = usePatchAssetProgress(courseId);
   const [open, setOpen] = useState(asset.progress.status !== "completed");
 
@@ -415,7 +484,22 @@ function VideoAssetPanel({ asset, courseId }: { asset: LessonAssetOut; courseId:
       </button>
       {open && (
         <div style={{ aspectRatio: "16 / 9", background: "black" }}>
-          {isLoading ? (
+          {isYouTube ? (
+            // Legacy / sync-from-legacy YouTube asset — embed directly.
+            // The youtube_video_id lives in the asset metadata; we surface
+            // it here through a separate lookup-free path since the
+            // storage_ref isn't returned by /timeline. We resolve it via
+            // the notebook-url endpoint which returns raw URL for
+            // git_repo/youtube — but for video we can't, so use a
+            // sentinel: backend's sync helper sets the title to include
+            // "(YouTube)" and the asset.id needs a separate fetch. For
+            // now, drop the iframe; admins should use Mux for new content.
+            <div style={{ color: "white", padding: 24 }}>
+              YouTube playback is configured via metadata.source=youtube.
+              Configure Mux for new uploads; YouTube embeds are read-only
+              for legacy lessons (use the GitHub repo asset for code).
+            </div>
+          ) : isLoading ? (
             <div style={{ color: "white", padding: 24 }}>Loading video…</div>
           ) : token ? (
             // Native iframe to Mux's hosted player. Switching to

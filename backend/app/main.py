@@ -256,6 +256,9 @@ def create_app() -> FastAPI:
 
     # API v1
     from app.api.v1.routes.admin import router as admin_router
+    from app.api.v1.routes.admin_lesson_assets import (
+        router as admin_lesson_assets_router,
+    )
     from app.api.v1.routes.admin_journey import router as admin_journey_router
 
     # D9 — canonical agentic chat + admin trace endpoints
@@ -328,6 +331,7 @@ def create_app() -> FastAPI:
     api_routers = [
         auth_router,
         admin_router,
+        admin_lesson_assets_router,
         courses_router,
         learn_router,
         lessons_router,
