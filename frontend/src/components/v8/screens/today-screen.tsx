@@ -279,19 +279,12 @@ export function TodayScreen() {
 
                 <form
                   onSubmit={handleSaveIntention}
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    alignItems: "center",
-                    margin: "16px 0 4px",
-                    flexWrap: "wrap",
-                  }}
+                  className="hero-intention-form"
                   aria-label="Today's intention"
                 >
                   <label
                     htmlFor="todayIntention"
-                    className="eyebrow"
-                    style={{ fontSize: 11 }}
+                    className="eyebrow hero-intention-label"
                   >
                     Today I want to
                   </label>
@@ -302,15 +295,13 @@ export function TodayScreen() {
                     onChange={(e) => setIntentionDraft(e.target.value)}
                     placeholder="ship one async client and grade it"
                     aria-label="What do you want to do today"
-                    style={{
-                      flex: "1 1 280px",
-                      padding: "8px 10px",
-                      border: "1px solid #e2e8f0",
-                      borderRadius: 6,
-                      fontSize: 13,
-                    }}
+                    className="hero-intention-input"
                   />
-                  <button className="btn ghost" type="submit" disabled={!intentionDraft.trim()}>
+                  <button
+                    type="submit"
+                    disabled={!intentionDraft.trim()}
+                    className="hero-intention-save"
+                  >
                     Save
                   </button>
                 </form>

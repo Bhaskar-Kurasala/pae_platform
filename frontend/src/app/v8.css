@@ -788,6 +788,67 @@ button{cursor:pointer;border:0}
 .hero h3 i{font-style:italic;color:#beddc8}
 .hero p{margin:0;font-size:14px;line-height:1.72;color:#d7cfbf;max-width:58ch}
 .hero-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
+
+/* The "Today I want to ___ [Save]" intention form sits inside the
+   dark hero gradient. The default .btn.ghost + light grey input
+   border wash into the green background — students could barely
+   read the label or button. Scope hero-specific styles here so the
+   surface stays self-contained without polluting the global input
+   defaults. */
+.hero-intention-form {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 18px 0 6px;
+}
+.hero-intention-label {
+  color: #e8dfca;
+  font-size: 11px;
+  font-weight: 800;
+}
+.hero-intention-input {
+  flex: 1 1 280px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #f7f2e8;
+  font-size: 13px;
+  font-family: inherit;
+  transition: border-color 0.15s var(--ease), background 0.15s var(--ease);
+}
+.hero-intention-input::placeholder {
+  color: rgba(247, 242, 232, 0.45);
+}
+.hero-intention-input:focus {
+  outline: none;
+  border-color: var(--forest-3);
+  background: rgba(255, 255, 255, 0.09);
+}
+.hero-intention-save {
+  padding: 9px 18px;
+  border-radius: 8px;
+  background: var(--forest-3);
+  border: 1px solid var(--forest-3);
+  color: #0f1a13;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease),
+    color 0.15s var(--ease), opacity 0.15s var(--ease);
+}
+.hero-intention-save:hover:not(:disabled) {
+  background: #b8e7c8;
+  border-color: #b8e7c8;
+}
+.hero-intention-save:disabled {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: rgba(247, 242, 232, 0.45);
+  cursor: not-allowed;
+}
 .hero-aside{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .kpi{
   padding:16px;border-radius:18px;
