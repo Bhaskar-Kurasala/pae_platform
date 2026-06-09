@@ -34,10 +34,16 @@ docker-compose.override.yml
 *.swo
 .DS_Store
 
-# ── Claude Code tooling and session artifacts — not part of platform code ──
-.claude/
+# ── Claude Code: track shared config (skills/agents/commands/hooks/rules/
+#    settings.json); ignore only personal + session artifacts ──
+.claude/settings.local.json
+.claude/worktrees/
 CLAUDE.local.md
 docs/claude-code-prompts/
+
+# Generated mirror of .claude/skills/ for other agent runtimes — do not track
+# (regenerated from .claude/skills/, which is the source of truth).
+.agents/
 
 # ── Build ──
 dist/
