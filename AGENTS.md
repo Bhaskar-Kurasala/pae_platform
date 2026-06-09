@@ -1,8 +1,8 @@
 # Production AI Engineering Platform
 
 ## Project Overview
-A git-based learning platform with 18+ AI agents for teaching production GenAI.
-Next.js 15 frontend + FastAPI backend + LangGraph agent orchestration + PostgreSQL + Redis.
+A git-based learning platform with ~28 AI agents for teaching production GenAI.
+Next.js 16 frontend + FastAPI backend + LangGraph agent orchestration + PostgreSQL + Redis.
 
 ## Quick Commands
 ```
@@ -43,13 +43,13 @@ make lint                            # Lint everything
 - ALWAYS add Pydantic schemas for API request/response.
 - ALWAYS write tests before marking a task complete.
 - ALWAYS run `make lint` before committing.
-- When in doubt, check @docs/ADR/ for architecture decisions.
+- When in doubt, check @decisions_taken.md for architecture decisions (ADR log).
 
 ## Monorepo Layout
 ```
 production-ai-engineering-platform/
 ├── AGENTS.md                    # This file (root context)
-├── frontend/                    # Next.js 15 application
+├── frontend/                    # Next.js 16 application
 │   ├── AGENTS.md               # Frontend-specific context
 │   └── src/
 ├── backend/                     # FastAPI application

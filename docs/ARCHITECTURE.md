@@ -2,16 +2,16 @@
 
 ## System Overview
 
-A git-based learning platform with **20 AI agents** that automates content creation,
+A git-based learning platform with **~28 AI agents** that automates content creation,
 student learning, career support, and community engagement. One human (you) injects
 knowledge; the system turns it into a self-serving learning machine.
 
-**Current stats (Phase 5 complete):**
-- 20 registered AI agents
-- 19 API endpoints across 8 route groups
-- 12 database tables (PostgreSQL)
-- 15 frontend routes (Next.js App Router)
-- 84 backend tests · 28 frontend tests · 81% backend coverage
+**Current stats:**
+- ~28 AI agents across two registries (17 legacy `@register` + 11 agentic `AgenticBaseAgent`)
+- 58 route modules under `app/api/v1/routes/`
+- 76 Alembic migrations through revision 0075 (PostgreSQL)
+- 64 frontend routes (Next.js App Router · `page.tsx` files)
+- ~2,700 backend tests across ~290 test files
 
 ## 7-Layer Architecture
 
@@ -19,15 +19,15 @@ knowledge; the system turns it into a self-serving learning machine.
 ┌─────────────────────────────────────────────────────────────┐
 │  Layer 1: PRESENTATION                                       │
 │  Next.js 16 · Tailwind 4 · shadcn/ui · React Query · Zustand│
-│  15 routes: public · student portal · admin dashboard        │
+│  64 routes: public · student portal · admin dashboard        │
 ├─────────────────────────────────────────────────────────────┤
 │  Layer 2: API GATEWAY                                        │
 │  FastAPI · JWT auth · slowapi rate limiting · OpenAPI docs   │
-│  8 route groups: auth, courses, lessons, exercises,          │
-│  students, webhooks, agents, admin                           │
+│  58 route modules: auth, courses, lessons, exercises,        │
+│  students, webhooks, agents, agentic, admin, career, …       │
 ├─────────────────────────────────────────────────────────────┤
 │  Layer 3: AGENT ORCHESTRATION                                │
-│  LangGraph MOA · 20 agents in 5 categories · AGENT_REGISTRY │
+│  LangGraph MOA (legacy) + AgenticBaseAgent · ~28 agents     │
 │  Redis conversation history (1h TTL) · agent_actions logging │
 ├─────────────────────────────────────────────────────────────┤
 │  Layer 4: BUSINESS LOGIC                                     │
@@ -35,7 +35,7 @@ knowledge; the system turns it into a self-serving learning machine.
 │  GitHub/Stripe webhooks · Exercise grading · Notifications   │
 ├─────────────────────────────────────────────────────────────┤
 │  Layer 5: DATA                                               │
-│  PostgreSQL 16 (12 tables) · Redis 7 (cache + sessions)      │
+│  PostgreSQL 16 (76 migrations) · Redis 7 (cache + sessions)  │
 │  Pinecone (RAG, Phase 6) · MinIO/S3 · Meilisearch           │
 ├─────────────────────────────────────────────────────────────┤
 │  Layer 6: INFRASTRUCTURE                                     │
@@ -47,7 +47,12 @@ knowledge; the system turns it into a self-serving learning machine.
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Database Schema (12 tables)
+## Database Schema (core / initial-schema tables)
+
+The platform now spans 76 Alembic migrations through revision 0075; the schema
+has grown well beyond the original set. The table below documents the core
+tables created in the initial schema (see `backend/alembic/versions/` for the
+full, current schema):
 
 | Table | Purpose |
 |---|---|
@@ -68,9 +73,19 @@ All tables: UUID PKs, `created_at`, `updated_at`, soft delete where appropriate.
 
 ## Agent Architecture
 
-20 agents organized in 5 categories, all registered via `@register` decorator in
-`app/agents/registry.py`. The MOA (Master Orchestrator Agent) is a LangGraph
-`StateGraph` that classifies intent and dispatches to the right agent.
+~28 agents live in a **dual-registry** architecture:
+
+- **Legacy path** — 17 agents registered via the `@register` decorator in
+  `app/agents/registry.py` (`AGENT_REGISTRY`). The MOA (Master Orchestrator
+  Agent, `app/agents/moa.py`) is a LangGraph `StateGraph` that classifies intent
+  and dispatches to the right agent. Wired to `routes/agents.py` and
+  `routes/stream.py`.
+- **Agentic path** — 11 agents subclassing `AgenticBaseAgent`, auto-registered
+  via `__init_subclass__` and loaded by `app/agents/_agentic_loader.py`.
+  Dispatched via the canonical `/api/v1/agentic/{flow}/chat` endpoint.
+
+The legacy intent-classification flow below applies to the MOA / `@register`
+path.
 
 ### Intent Classification Flow
 ```
@@ -80,7 +95,7 @@ Student request
 keyword_route() — fast O(1) lookup on 15 keyword patterns
     │ miss
     ▼
-claude-haiku-4-5 — LLM classifier (lists all 20 agents)
+claude-haiku-4-5 — LLM classifier (lists all legacy agents)
     │
     ▼
 run_agent(routed_to) — single generic node dispatches to registry
@@ -93,6 +108,10 @@ Response + evaluation_score + conversation_id
 ```
 
 ## API Route Groups
+
+There are 58 route modules under `app/api/v1/routes/`. The table below shows the
+core groups; see the routes directory for the full set (agentic, career,
+readiness, billing, etc.).
 
 | Prefix | Routes | Auth |
 |---|---|---|
@@ -115,9 +134,9 @@ Response + evaluation_score + conversation_id
 - **Secrets**: all via `.env` (git-ignored); Pydantic Settings validation at startup
 
 ## Key Technical Decisions
-See `docs/ADR/` for full Architecture Decision Records.
-- ADR-001: Next.js 16 over Remix
-- ADR-002: LangGraph over CrewAI (stateful orchestration)
-- ADR-003: PostgreSQL over MongoDB
-- ADR-004: Celery over FastAPI BackgroundTasks
-- ADR-005: Pinecone over Chroma (managed, production-ready)
+See `decisions_taken.md` (root) for the full running ADR log. Recent entries:
+- ADR-001: Full Platform Scope
+- ADR-002: Design Aesthetic
+- ADR-003: Live Agent Demo on Landing Page
+- ADR-004: Deployment Target
+- ADR-005: Pinecone RAG vs. Local Fallback
