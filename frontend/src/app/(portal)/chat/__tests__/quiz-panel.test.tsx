@@ -16,7 +16,7 @@ import {
   vi,
   type Mock,
 } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@/test/test-utils";
 
 // ── Module mocks (hoisted) ───────────────────────────────────────
 
@@ -82,6 +82,7 @@ vi.mock("@/lib/chat-api", async () => {
       listNotebook: vi.fn(),
       deleteNotebookEntry: vi.fn(),
       generateQuiz: vi.fn(),
+      getCachedQuiz: vi.fn(),
     },
     regenerateMessage: vi.fn(),
     uploadAttachment: vi.fn(),

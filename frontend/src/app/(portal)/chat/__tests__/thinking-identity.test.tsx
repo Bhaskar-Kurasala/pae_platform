@@ -14,7 +14,7 @@
  * test focused on the identity wiring.
  */
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@/test/test-utils";
 
 // ── next/navigation ──────────────────────────────────────────────
 let currentSearchParams = new URLSearchParams();

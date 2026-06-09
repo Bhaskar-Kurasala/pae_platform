@@ -9,22 +9,18 @@ exports[`API response shape contracts > CatalogResponse 1`] = `
 
 exports[`API response shape contracts > ExerciseResponse 1`] = `
 {
+  "created_at": "string",
   "description": "string",
   "difficulty": "string",
-  "due_at": "object",
   "exercise_type": "string",
-  "github_template_url": "object",
   "id": "string",
-  "is_capstone": "boolean",
   "lesson_id": "string",
   "order": "number",
-  "pass_score": "number",
   "points": "number",
   "rubric": "object",
-  "solution_code": "object",
   "starter_code": "object",
-  "test_cases": "object",
   "title": "string",
+  "updated_at": "string",
 }
 `;
 

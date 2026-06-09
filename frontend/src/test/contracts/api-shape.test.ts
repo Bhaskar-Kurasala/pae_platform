@@ -169,15 +169,11 @@ const EXERCISE_FIXTURE: ExerciseResponse = {
   exercise_type: "coding",
   difficulty: "intermediate",
   starter_code: null,
-  solution_code: null,
-  test_cases: null,
   rubric: null,
   points: 50,
   order: 0,
-  github_template_url: null,
-  is_capstone: false,
-  pass_score: 70,
-  due_at: null,
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
 };
 
 const NOTEBOOK_FIXTURE: NotebookEntryOut = {

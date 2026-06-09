@@ -16,7 +16,7 @@ import {
   vi,
   type Mock,
 } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@/test/test-utils";
 
 // ── Module mocks (hoisted by vitest) ─────────────────────────────
 
