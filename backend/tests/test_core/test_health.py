@@ -26,3 +26,18 @@ async def test_health_original_still_works(client: AsyncClient) -> None:
     resp = await client.get("/health")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
+
+
+async def test_health_version_returns_triple(client: AsyncClient) -> None:
+    """PR3/C6.2 — /health/version exposes commit_sha, build_time, env."""
+    resp = await client.get("/health/version")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "commit_sha" in data
+    assert "build_time" in data
+    assert "env" in data
+    # Triple is always non-empty — even without build args we fall back
+    # to sentinels so on-call can spot a non-CI build at a glance.
+    assert data["commit_sha"]
+    assert data["build_time"]
+    assert data["env"]

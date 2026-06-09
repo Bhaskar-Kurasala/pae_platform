@@ -13,7 +13,6 @@ students. AI calls are expensive: 20/hour/user.
 
 from __future__ import annotations
 
-import json
 import uuid
 
 import anthropic
@@ -22,19 +21,60 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.base_agent import AgentState
-from app.agents.registry import _ensure_registered, get_agent
+from app.agents.agentic_base import AgentContext
+from app.agents.primitives.communication import CallChain, get_agentic
+from app.agents.senior_engineer import SeniorEngineerInput
+from app.api.v1.routes.senior_review import _adapt_to_legacy
 from app.core.database import get_db
 from app.core.rate_limit import limiter
 from app.core.security import get_current_user
 from app.models.ai_review import AIReview
 from app.models.user import User
+from app.schemas.agents.senior_engineer import SeniorEngineerOutput
 from app.schemas.practice import (
     PracticeReviewListItem,
     PracticeReviewRequest,
     PracticeReviewResponse,
+    RunOutputSnapshot,
 )
 from app.schemas.senior_review import SeniorReviewResponse
+
+
+def _format_run_output(snapshot: RunOutputSnapshot | None) -> str | None:
+    """Render the sandbox run as a structured text block for the agent.
+
+    The senior_engineer prompt was rewritten so a populated [Run results]
+    block licenses the agent to cite the outcome verbatim. When the student
+    hasn't run anything yet (snapshot is None), we return None — the agent
+    then reasons about the code as pure text, per the original constraint.
+    """
+    if snapshot is None:
+        return None
+
+    parts: list[str] = []
+    if snapshot.exit_code is not None:
+        outcome = "success" if snapshot.exit_code == 0 else "failure"
+        parts.append(f"Exit code: {snapshot.exit_code} ({outcome})")
+    if snapshot.timed_out:
+        parts.append("Status: TIMED OUT")
+    if snapshot.quality_score is not None:
+        parts.append(f"Heuristic quality score: {snapshot.quality_score}/100")
+    if snapshot.quality_summary:
+        parts.append(f"Quality summary: {snapshot.quality_summary}")
+    if snapshot.stdout.strip():
+        parts.append(f"--- STDOUT (last 4KB) ---\n{snapshot.stdout.strip()}")
+    if snapshot.stderr.strip():
+        parts.append(f"--- STDERR (last 4KB) ---\n{snapshot.stderr.strip()}")
+
+    if not parts:
+        return None
+
+    block = "\n\n".join(parts)
+    # SeniorEngineerInput.test_results caps at 4_000 chars; trim from the
+    # left (stdout/stderr) so the structural fields at the top survive.
+    if len(block) > 3_900:
+        block = block[-3_900:]
+    return block
 
 log = structlog.get_logger()
 
@@ -71,16 +111,29 @@ async def request_practice_review(
     # request (no-op for the first call, but keeps the contract honest).
     request.state.user = current_user
 
-    _ensure_registered()
-    agent = get_agent("senior_engineer")
+    agent = get_agentic("senior_engineer")
 
-    state = AgentState(
-        student_id=str(current_user.id),
-        task="practice_review",
-        context={
-            "code": payload.code,
-            "problem_context": payload.problem_context or "",
-        },
+    ctx = AgentContext(
+        user_id=current_user.id,
+        chain=CallChain.start_root(caller="practice_review_route", user_id=current_user.id),
+        session=db,
+        permissions=frozenset(
+            {
+                "read:agent_memory",
+                "write:agent_memory",
+                "read:student_data",
+                "write:audit_log",
+            }
+        ),
+    )
+
+    test_results = _format_run_output(payload.run_output)
+
+    agent_input = SeniorEngineerInput(
+        code=payload.code,
+        problem_context=payload.problem_context,
+        test_results=test_results,
+        mode="pr_review",
     )
 
     log.info(
@@ -91,32 +144,43 @@ async def request_practice_review(
     )
 
     try:
-        new_state = await agent.execute(state)
-    except anthropic.OverloadedError:
-        log.warning("practice.review.api_overloaded", user_id=str(current_user.id))
+        result = await agent.execute(agent_input, ctx)
+    except (anthropic.RateLimitError, anthropic.APITimeoutError) as exc:
+        log.warning(
+            "practice.review.rate_limited",
+            user_id=str(current_user.id),
+            error_type=type(exc).__name__,
+        )
         raise HTTPException(
             status_code=503,
-            detail="Reviewer is temporarily busy — try again in a few seconds.",
-        )
+            detail="Reviewer is at capacity — try again in 30–60s.",
+        ) from exc
     except anthropic.APIError as exc:
         log.error("practice.review.api_error", err=str(exc))
-        raise HTTPException(status_code=502, detail=f"Reviewer API error: {exc}")
-
-    try:
-        review_dict = json.loads(new_state.response or "{}")
-    except json.JSONDecodeError as e:
-        log.error("practice.review.parse_error", err=str(e))
         raise HTTPException(
-            status_code=502, detail="Reviewer response was not parseable JSON"
+            status_code=502,
+            detail="Service temporarily unavailable. Please try again.",
+        ) from exc
+
+    output_dict = result.output if isinstance(result.output, dict) else {}
+    if output_dict.get("blocked"):
+        raise HTTPException(
+            status_code=400,
+            detail=output_dict.get("block_reason", "Input failed safety checks."),
         )
 
+    schema_fields = set(SeniorEngineerOutput.model_fields.keys())
+    cleaned = {k: v for k, v in output_dict.items() if k in schema_fields}
+
     try:
-        review = SeniorReviewResponse.model_validate(review_dict)
-    except Exception as e:
-        log.error("practice.review.validation_error", err=str(e))
+        output = SeniorEngineerOutput.model_validate(cleaned)
+    except Exception as exc:
+        log.error("practice.review.validation_error", err=str(exc), output=output_dict)
         raise HTTPException(
             status_code=502, detail="Reviewer response failed schema validation"
-        )
+        ) from exc
+
+    review = _adapt_to_legacy(output)
 
     row = AIReview(
         id=uuid.uuid4(),

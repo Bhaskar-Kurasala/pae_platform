@@ -1,14 +1,15 @@
 # Production AI Engineering Platform
 
 ## Project Overview
-A git-based learning platform with 18+ AI agents for teaching production GenAI.
-Next.js 15 frontend + FastAPI backend + LangGraph agent orchestration + PostgreSQL + Redis.
+A git-based learning platform with ~28 AI agents (dual registry) for teaching
+production GenAI. Next.js 16 frontend + FastAPI backend + LangGraph agent
+orchestration + PostgreSQL + Redis.
 
 ## Quick Commands
 ```
 # Frontend
 cd frontend && pnpm dev              # Start Next.js dev server (port 3000)
-cd frontend && pnpm lint             # ESLint + Prettier check
+cd frontend && pnpm lint             # ESLint
 cd frontend && pnpm test             # Vitest unit tests
 cd frontend && pnpm build            # Production build
 
@@ -17,22 +18,18 @@ cd backend && uv run uvicorn app.main:app --reload   # FastAPI dev (port 8000)
 cd backend && uv run pytest -x                       # Run tests, stop first fail
 cd backend && uv run ruff check .                    # Lint
 cd backend && uv run mypy app/                       # Type check
-cd backend && uv run alembic upgrade head             # Run DB migrations
+cd backend && uv run alembic upgrade head            # Run DB migrations
 
 # Full Stack
 docker compose up -d                 # Start all services
-docker compose logs -f               # Follow logs
 make test                            # Run ALL tests (frontend + backend)
 make lint                            # Lint everything
 ```
 
-## Architecture
-@docs/ARCHITECTURE.md
-
 ## Code Style
 - Python: ruff format, type hints on ALL functions, async by default
 - TypeScript: strict mode, no `any`, Prettier + ESLint
-- Tests: pytest (backend), Vitest (frontend), min 80% coverage
+- Tests: pytest (backend), Vitest (frontend)
 - Commits: conventional commits (feat:, fix:, docs:, test:, chore:)
 - PRs: squash merge, require 1 review, CI must pass
 
@@ -43,39 +40,33 @@ make lint                            # Lint everything
 - ALWAYS add Pydantic schemas for API request/response.
 - ALWAYS write tests before marking a task complete.
 - ALWAYS run `make lint` before committing.
-- When in doubt, check @docs/ADR/ for architecture decisions.
+- When in doubt, check `decisions_taken.md` for architecture decisions (ADR log).
 
 ## Monorepo Layout
 ```
-production-ai-engineering-platform/
-├── CLAUDE.md                    # This file (root context)
-├── frontend/                    # Next.js 15 application
-│   ├── CLAUDE.md               # Frontend-specific context
-│   └── src/
-├── backend/                     # FastAPI application
-│   ├── CLAUDE.md               # Backend-specific context
-│   └── app/
-├── .claude/                     # Claude Code config
-│   ├── settings.json           # Hooks
-│   ├── skills/                 # 8 development skills
-│   ├── agents/                 # 5 subagents
-│   └── commands/               # 6 slash commands
-├── docker-compose.yml           # Full stack local dev
-├── docs/                        # Architecture, ADRs, API docs
-└── .github/workflows/           # CI/CD
+pae_platform/
+├── CLAUDE.md            # This file (root context)
+├── frontend/            # Next.js 16 app  (frontend/CLAUDE.md loads on demand)
+├── backend/             # FastAPI app     (backend/CLAUDE.md loads on demand)
+├── .claude/             # Claude Code config: skills/, agents/, commands/,
+│                        #   hooks/, rules/, settings.json
+├── docker-compose.yml   # Full stack local dev
+├── docs/                # Architecture, operations, references
+└── .github/workflows/   # CI/CD
 ```
 
-## File References
-@README.md
-@docs/ARCHITECTURE.md
-@docs/AGENTS.md
-@docs/API.md
-@docs/DATABASE.md
-@frontend/CLAUDE.md
-@backend/CLAUDE.md
+## Reference Docs (read on demand — not eager-loaded)
+- `docs/ARCHITECTURE.md` — system design, 7-layer architecture, agent registry
+- `docs/AGENTS.md` — full dual-registry agent catalog
+- `decisions_taken.md` — ADR / decision log
+- `README.md` — quick start + stack overview
+- `backend/CLAUDE.md`, `frontend/CLAUDE.md` — auto-load when you work in those dirs.
+  Path-scoped rules in `.claude/rules/` add more guidance for matching files.
 
-## Lessons Learned (Updated by Claude after corrections)
-@docs/lessons.md
+> Note: project-specific learnings are now captured automatically via Auto Memory
+> (`~/.claude/projects/<repo>/memory/`). The historical `docs/lessons.md` is
+> retained for reference; durable backend gotchas live in
+> `.claude/rules/backend-gotchas.md` (loads only for `backend/**`).
 
 ## gstack (REQUIRED — global install)
 

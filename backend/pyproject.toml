@@ -19,12 +19,15 @@ dependencies = [
     "langchain-anthropic>=1.4.0",
     "langgraph>=1.1.6",
     "passlib[bcrypt]>=1.7.4",
+    "pgvector>=0.3.6",
     "pydantic-settings>=2.13.1",
     "pydantic[email]>=2.12.5",
     "pinecone-client>=4.0.0",
     "pygithub>=2.9.0",
     "python-jose[cryptography]>=3.5.0",
     "python-multipart>=0.0.24",
+    "python-magic>=0.4.27",
+    "razorpay>=1.4.2",
     "redis>=7.4.0",
     "sendgrid>=6.12.5",
     "slowapi>=0.1.9",
@@ -37,6 +40,37 @@ dependencies = [
     "pdfplumber>=0.11.4",
     "jinja2>=3.1.4",
     "pyyaml>=6.0.3",
+    "posthog>=7.13.1",
+    "prometheus-client>=0.21.0",
+    # D19.1 CP3 — OpenTelemetry tracing substrate. opentelemetry-api +
+    # -sdk for the in-process tracer; -exporter-otlp-proto-http for the
+    # default exporter (HTTP transport keeps egress simple — no gRPC
+    # cert dance). Auto-instrumentations cover FastAPI / SQLAlchemy /
+    # Redis / httpx / requests / Celery without custom shim work; OTel's
+    # community packages have stabilized over the past year and follow
+    # the OTel-spec versioning.
+    "opentelemetry-api>=1.30.0",
+    "opentelemetry-sdk>=1.30.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.30.0",
+    "opentelemetry-instrumentation-fastapi>=0.51b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.51b0",
+    "opentelemetry-instrumentation-redis>=0.51b0",
+    "opentelemetry-instrumentation-httpx>=0.51b0",
+    "opentelemetry-instrumentation-requests>=0.51b0",
+    "opentelemetry-instrumentation-celery>=0.51b0",
+    "sentry-sdk[fastapi]>=2.0.0",
+    # Lesson player (D-Learn) — Cloudflare R2 is S3-compatible; boto3
+    # is the simplest way to mint presigned GETs. Used only in
+    # AssetStorageService.signed_notebook_url; the sync API is fine
+    # because presigning is pure CPU (no network call).
+    "boto3>=1.35.0",
+    # D9 / Pass 3g — safety primitive. Presidio detects PII (input + output);
+    # spaCy provides the en_core_web_lg NER model Presidio's analyzer uses.
+    # The model itself is downloaded at container build time (see Dockerfile),
+    # not vendored as a wheel — keeping the lock file slim.
+    "presidio-analyzer>=2.2.355",
+    "presidio-anonymizer>=2.2.355",
+    "spacy>=3.7",
 ]
 
 [dependency-groups]
@@ -49,6 +83,10 @@ dev = [
     "types-redis>=4.6.0.20241004",
     "types-stripe>=3.5.2.20240106",
     "httpx>=0.28.1",
+    # D18 Phase A — backend-fixture-driven full-stack journey tests.
+    # Coexists with frontend/e2e (TypeScript Playwright; UI smoke).
+    "pytest-playwright>=0.7.1",
+    "playwright>=1.55.0",
 ]
 
 [tool.pytest.ini_options]
@@ -57,6 +95,18 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+    "real_llm: opt-in tests that require a live LLM call (MINIMAX_API_KEY in env). Run with -m real_llm.",
+    # D18 Phase B test categorization (per d18b-prompt.md D-A and D-E).
+    # Tier markers determine CI splitting; cost marker flags real-LLM
+    # cost class for the session-scope budget tracker.
+    "critical_path: CP1 critical-path happy-path journey; runs every PR.",
+    "edge_case: CP2 high-value edge-case variant on a critical path.",
+    "traceability: CP3 UI action -> backend row verification.",
+    "error_state: CP4 error-path coverage.",
+    "comprehensive: CP4 nice-to-have coverage; nightly only.",
+    "cost: per-test cost class. Use as @pytest.mark.cost('low'|'medium'|'high') aligned to the D12-D17b per-agent cost table.",
+]
 
 [tool.ruff]
 line-length = 100

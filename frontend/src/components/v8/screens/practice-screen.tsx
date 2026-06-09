@@ -1,0 +1,1322 @@
+"use client";
+
+/**
+ * P-Practice1 (2026-04-28) — unified `/practice` workspace.
+ *
+ * Merges the previously fragmented Exercises + Studio + Practice trio into
+ * a single v8 surface that matches the `AI Career OS v10 — Capstone bundle`
+ * mock. The screen carries a real Monaco-backed editor, real Run+Review
+ * round-trips against the backend sandbox, and Save-to-Notebook with a free-
+ * form student note (mirroring the Tutor save flow).
+ *
+ * Modes
+ *   - capstone   → labs from the active path level shown as a file tree.
+ *   - exercises  → full exercise catalog in a grouped task list.
+ *
+ * Both modes share the same code/output/review state — the toggle is purely
+ * about WHAT the rail picks; the editor never gets thrown away mid-thought.
+ */
+
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
+import {
+  BookmarkPlus,
+  Check,
+  ChevronRight,
+  Code2,
+  FileCode,
+  FileText,
+  FolderClosed,
+  Lock,
+  Play,
+  TerminalSquare,
+} from "lucide-react";
+
+import { useSetV8Topbar } from "@/components/v8/v8-topbar-context";
+import { v8Toast } from "@/components/v8/v8-toast";
+import {
+  executeApi,
+  exercisesApi,
+  type ExecuteResponse,
+  type ExerciseResponse,
+  type RunOutputSnapshot,
+} from "@/lib/api-client";
+import { chatApi } from "@/lib/chat-api";
+import {
+  useSeniorReview,
+  usePracticeReviews,
+} from "@/lib/hooks/use-senior-review";
+import { usePracticeWorkspace } from "@/lib/hooks/use-practice-workspace";
+import { trackPracticeRun } from "@/lib/analytics-events";
+import { useAuthStore } from "@/stores/auth-store";
+import { cn } from "@/lib/utils";
+import {
+  ReviewBot,
+  SeniorReviewPanel,
+  buildReviewDecorations,
+  classifyReviewError,
+  severityGutterClass,
+  type BotState,
+} from "@/components/v8/practice/review-bot";
+
+const Monaco = dynamic(() => import("@monaco-editor/react"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+      Loading editor…
+    </div>
+  ),
+});
+
+type PracticeMode = "capstone" | "exercises";
+
+const STORAGE_KEY = "practice.code.v1";
+const STARTER_CAPSTONE = `# AI Career OS capstone · CLI AI Tool
+import os
+import asyncio
+from anthropic import Anthropic, APIError
+
+client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+async def ask_claude(prompt: str) -> str:
+    for attempt in range(3):
+        try:
+            resp = await client.messages.create(
+                model="claude-sonnet-4-5",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return resp.content[0].text
+        except APIError:
+            await asyncio.sleep(2 ** attempt)
+    raise RuntimeError("Request failed after retries")
+
+if __name__ == "__main__":
+    print(asyncio.run(ask_claude("hello")))
+`;
+interface SaveDialogState {
+  open: boolean;
+  note: string;
+  status: "idle" | "saving" | "saved" | "error";
+}
+
+function pluralLabs(n: number): string {
+  return n === 1 ? "lab" : "labs";
+}
+
+function readStoredCode(): string {
+  if (typeof window === "undefined") return STARTER_CAPSTONE;
+  try {
+    return window.localStorage.getItem(STORAGE_KEY) ?? STARTER_CAPSTONE;
+  } catch {
+    return STARTER_CAPSTONE;
+  }
+}
+
+export function PracticeScreen() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const isAuthed = useAuthStore((s) => s.isAuthenticated);
+
+  const initialMode: PracticeMode =
+    searchParams.get("mode") === "exercises" ? "exercises" : "capstone";
+  const initialTaskId = searchParams.get("task");
+  const labParam = searchParams.get("lab");
+
+  const [mode, setMode] = useState<PracticeMode>(initialMode);
+  const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(
+    initialTaskId,
+  );
+  const [code, setCode] = useState<string>(readStoredCode);
+  const [runResult, setRunResult] = useState<ExecuteResponse | null>(null);
+  const [activeTab, setActiveTab] = useState<"code" | "trace" | "tests">("code");
+  const [saveDialog, setSaveDialog] = useState<SaveDialogState>({
+    open: false,
+    note: "",
+    status: "idle",
+  });
+  const seniorReview = useSeniorReview();
+  const codeChangedSinceMount = useRef(false);
+
+  // P-Practice2 (2026-05-14) — collapsible left rail. When collapsed the
+  // rail shrinks to a 56px strip of badge codes (F1, C2, P1, …); the editor
+  // and review panel claim the recovered width. Persisted across reloads.
+  const [railCollapsed, setRailCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem("practice-rail-collapsed-v1") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleRail = useCallback(() => {
+    setRailCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(
+          "practice-rail-collapsed-v1",
+          next ? "1" : "0",
+        );
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
+  // ── data ────────────────────────────────────────────────────────────
+  const workspace = usePracticeWorkspace();
+
+  // P-Path1 deep-link: /practice?lab=B comes from My Path. We resolve to the
+  // matching exercise the first time exercises load, then strip the param so
+  // refreshes don't repeatedly re-seed.
+  useEffect(() => {
+    if (!labParam || !workspace.exercises.length) return;
+    // Lab tokens are letters in the mock; map A→0, B→1, C→2, etc.
+    const idx =
+      labParam.length === 1
+        ? labParam.toUpperCase().charCodeAt(0) - "A".charCodeAt(0)
+        : Number(labParam) - 1;
+    if (idx >= 0 && idx < workspace.exercises.length) {
+      const ex = workspace.exercises[idx];
+      setMode("exercises");
+      setSelectedExerciseId(ex.id);
+    }
+  }, [labParam, workspace.exercises]);
+
+  // ── selected exercise (full record, with starter_code) ──────────────
+  const [selectedExerciseDetail, setSelectedExerciseDetail] =
+    useState<ExerciseResponse | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedExerciseId) {
+      setSelectedExerciseDetail(null);
+      return;
+    }
+    void exercisesApi
+      .get(selectedExerciseId)
+      .then((ex) => {
+        if (cancelled) return;
+        setSelectedExerciseDetail(ex);
+        // Seed the editor with starter_code only if the user hasn't typed
+        // anything yet for this session. (`codeChangedSinceMount` flips to
+        // true on first onChange.)
+        if (!codeChangedSinceMount.current && ex.starter_code) {
+          setCode(ex.starter_code);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedExerciseDetail(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedExerciseId]);
+
+  // ── persistent local code draft ─────────────────────────────────────
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(STORAGE_KEY, code);
+    } catch {
+      /* quota / disabled — ignore */
+    }
+  }, [code]);
+
+  // ── topbar wiring ───────────────────────────────────────────────────
+  const titleSuffix =
+    mode === "capstone"
+      ? workspace.capstone?.title ?? workspace.activeCourseTitle ?? "your capstone"
+      : selectedExerciseDetail?.title ?? "an exercise";
+  useSetV8Topbar({
+    eyebrow: mode === "capstone" ? "Practice · Capstone" : "Practice · Exercises",
+    titleHtml: `Write code, get senior review, ship the proof — <i>${titleSuffix}</i>.`,
+    chips: [],
+    progress: runResult?.quality?.score ?? 0,
+  });
+
+  // ── mode + selection ────────────────────────────────────────────────
+  const switchMode = useCallback(
+    (next: PracticeMode) => {
+      setMode(next);
+      const params = new URLSearchParams(Array.from(searchParams.entries()));
+      params.set("mode", next);
+      params.delete("lab");
+      router.replace(`/practice?${params.toString()}`);
+    },
+    [router, searchParams],
+  );
+
+  const selectExercise = useCallback((id: string, starter: string | null) => {
+    setSelectedExerciseId(id);
+    if (starter && !codeChangedSinceMount.current) {
+      setCode(starter);
+    }
+  }, []);
+
+  // ── run + review pipeline ──────────────────────────────────────────
+  const [running, setRunning] = useState(false);
+  const [hasRunOnce, setHasRunOnce] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
+
+  // Load prior reviews for the active problem so the bot can light up
+  // on resume and surface recurring patterns at the top of the panel.
+  const problemId = mode === "exercises" ? selectedExerciseId ?? undefined : undefined;
+  const priorReviews = usePracticeReviews(problemId, 20);
+
+  const recurringPatterns = useMemo(() => {
+    const records = priorReviews.data ?? [];
+    if (records.length === 0) return [];
+    const counts = new Map<string, number>();
+    for (const rec of records) {
+      // SeniorReviewResponse doesn't carry patterns_observed today (the
+      // adapter strips it). Until the route projects patterns through,
+      // we mine signal from comments by re-counting blocking/concern
+      // themes — keyed by a normalized snippet of the message. That
+      // gives "the same gripe twice" surfacing even without server
+      // patterns, and the slug shape stays compatible when we wire
+      // patterns_observed through later.
+      for (const c of rec.review.comments) {
+        if (c.severity !== "blocking" && c.severity !== "concern") continue;
+        const key = c.message
+          .toLowerCase()
+          .replace(/[^a-z0-9 ]+/g, "")
+          .split(/\s+/)
+          .filter((w) => w.length > 4)
+          .slice(0, 3)
+          .join("-");
+        if (!key) continue;
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+    }
+    return Array.from(counts.entries())
+      .filter(([, n]) => n >= 2)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([slug, count]) => ({ slug, count }));
+  }, [priorReviews.data]);
+
+  const handleRun = useCallback(async () => {
+    if (!isAuthed) {
+      v8Toast("Sign in to run code in the sandbox.");
+      return;
+    }
+    // PR3/C3.2 — track *attempts*, not successes; a Run that fails is
+    // still useful product signal (sandbox flakiness). Fired here
+    // before the await so it lands even if the request errors.
+    trackPracticeRun({
+      mode,
+      exercise_id: selectedExerciseId ?? undefined,
+    });
+    setRunning(true);
+    setActiveTab("trace");
+    try {
+      const result = await executeApi.run({ code });
+      setRunResult(result);
+      setHasRunOnce(true);
+    } catch {
+      v8Toast("Run failed. Try again in a moment.");
+    } finally {
+      setRunning(false);
+    }
+  }, [code, isAuthed, mode, selectedExerciseId]);
+
+  const handleRequestReview = useCallback(() => {
+    if (!isAuthed) {
+      v8Toast("Sign in to request a senior review.");
+      return;
+    }
+    const ex = selectedExerciseDetail;
+    const problemContext =
+      mode === "exercises" && ex
+        ? `Exercise: ${ex.title}\n\n${ex.description ?? ""}`.slice(0, 1900)
+        : mode === "capstone" && workspace.capstone
+          ? `Capstone: ${workspace.capstone.title}\n\n${workspace.capstone.blurb}`.slice(
+              0,
+              1900,
+            )
+          : undefined;
+    const runOutput: RunOutputSnapshot | undefined = runResult
+      ? {
+          stdout: (runResult.stdout ?? "").slice(-4000),
+          stderr: (runResult.stderr ?? "").slice(-4000),
+          exit_code: runResult.exit_code,
+          timed_out: runResult.timed_out,
+          quality_score: runResult.quality?.score ?? null,
+          quality_summary: runResult.quality?.summary ?? null,
+        }
+      : undefined;
+    setPanelOpen(true);
+    seniorReview.mutate({
+      code,
+      problemId,
+      problemContext,
+      runOutput,
+    });
+  }, [
+    code,
+    isAuthed,
+    mode,
+    problemId,
+    runResult,
+    selectedExerciseDetail,
+    seniorReview,
+    workspace.capstone,
+  ]);
+
+  // Bot state derives from the mutation + run state. "ready" lights up
+  // once the student has run at least once OR there's prior review
+  // history for this problem (lit-on-resume).
+  const hasPriorHistory = (priorReviews.data?.length ?? 0) > 0;
+  const botState: BotState = panelOpen
+    ? "open"
+    : seniorReview.isPending
+      ? "loading"
+      : hasRunOnce || hasPriorHistory || seniorReview.data
+        ? "ready"
+        : "idle";
+
+  const currentReview = seniorReview.data?.review ?? null;
+  const currentReviewCreatedAt = seniorReview.data?.created_at ?? null;
+  const findingsCount = currentReview?.comments.length ?? 0;
+  const reviewError = seniorReview.isError
+    ? classifyReviewError(seniorReview.error)
+    : null;
+
+  // Stale-review tracking: snapshot the code at the moment a review
+  // lands; the panel's "Get a fresh review" affordance lights up when
+  // the live editor content diverges. We watch `seniorReview.data` so
+  // a successful mutation re-snapshots automatically.
+  const codeAtReviewTime = useRef<string | null>(null);
+  useEffect(() => {
+    if (currentReview) codeAtReviewTime.current = code;
+    // Intentionally don't depend on `code` — we only re-snapshot when
+    // the review changes, not on every keystroke. eslint exhaustive-deps
+    // is fine to suppress on the next line.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentReview]);
+  const reviewIsStale =
+    currentReview != null &&
+    codeAtReviewTime.current != null &&
+    codeAtReviewTime.current !== code;
+
+  const handleBotClick = useCallback(() => {
+    if (panelOpen) {
+      setPanelOpen(false);
+      return;
+    }
+    // The bot is now the single trigger for senior review. Three paths:
+    //   1. No run yet → toast nudge ("run first").
+    //   2. Ran, no review yet → fire review + open panel with loading state.
+    //   3. Review exists → open panel showing the existing review.
+    // The "code edited since this review" affordance lives inside the
+    // panel itself as a "Get a fresh review" button, so the bot's job
+    // here is just open-or-trigger.
+    if (!hasRunOnce && !hasPriorHistory) {
+      v8Toast("Run your code first — I'll review what happens.");
+      return;
+    }
+    if (!currentReview && !seniorReview.isPending) {
+      handleRequestReview();
+      return;
+    }
+    setPanelOpen(true);
+  }, [
+    currentReview,
+    handleRequestReview,
+    hasPriorHistory,
+    hasRunOnce,
+    panelOpen,
+    seniorReview.isPending,
+  ]);
+
+  // ── keyboard shortcuts ─────────────────────────────────────────────
+  //
+  // Ctrl/Cmd+Enter        → Run (industry standard for "execute code")
+  // Ctrl/Cmd+Shift+R      → Ask for review
+  //
+  // We listen on the document so the shortcut works whether focus is
+  // in the Monaco editor or anywhere else on the page. Skipped while
+  // a run / review is already in flight to match the buttons' disabled
+  // state. Modifier check uses metaKey || ctrlKey so Mac and Win/Linux
+  // students both get the muscle-memory binding.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+      if (e.shiftKey && (e.key === "R" || e.key === "r")) {
+        e.preventDefault();
+        if (
+          !running &&
+          !seniorReview.isPending &&
+          (hasRunOnce || hasPriorHistory)
+        ) {
+          handleRequestReview();
+        }
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        if (!running) handleRun();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    handleRequestReview,
+    handleRun,
+    hasPriorHistory,
+    hasRunOnce,
+    running,
+    seniorReview.isPending,
+  ]);
+
+  // ── save to notebook ───────────────────────────────────────────────
+  const openSaveDialog = useCallback(() => {
+    if (!isAuthed) {
+      v8Toast("Sign in to save notes.");
+      return;
+    }
+    setSaveDialog({ open: true, note: "", status: "idle" });
+  }, [isAuthed]);
+
+  const closeSaveDialog = useCallback(() => {
+    setSaveDialog({ open: false, note: "", status: "idle" });
+  }, []);
+
+  const handleSaveNote = useCallback(async () => {
+    setSaveDialog((s) => ({ ...s, status: "saving" }));
+    const stdout = runResult?.stdout?.trim() ?? "";
+    const titleAnchor =
+      mode === "exercises"
+        ? selectedExerciseDetail?.title ?? "Practice exercise"
+        : workspace.capstone?.title ?? "Practice capstone";
+    const content = [
+      `**${titleAnchor}**`,
+      "",
+      "```python",
+      code.trim(),
+      "```",
+      stdout
+        ? ["", "**Output**", "```", stdout, "```"].join("\n")
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    try {
+      await chatApi.saveToNotebook({
+        messageId: `practice-${Date.now()}`,
+        conversationId: "practice",
+        content,
+        title: `Practice · ${titleAnchor}`,
+        sourceType: "studio",
+        topic: "code-practice",
+        userNote: saveDialog.note.trim() || undefined,
+        tags: [mode === "exercises" ? "exercise" : "capstone"],
+      });
+      setSaveDialog((s) => ({ ...s, status: "saved" }));
+      v8Toast("Saved to Notebook.");
+      window.setTimeout(closeSaveDialog, 900);
+    } catch {
+      setSaveDialog((s) => ({ ...s, status: "error" }));
+    }
+  }, [
+    closeSaveDialog,
+    code,
+    mode,
+    runResult,
+    saveDialog.note,
+    selectedExerciseDetail?.title,
+    workspace.capstone?.title,
+  ]);
+
+  // ── Monaco wiring: decorations + scroll-to-line ────────────────────
+  //
+  // We don't depend on the `monaco-editor` package directly (only
+  // `@monaco-editor/react`), so we use a minimal structural type for
+  // the handful of editor APIs we touch. Monaco's runtime is exposed
+  // globally as `window.monaco` once the editor mounts; we read the
+  // `Range` constructor from there.
+  type MinimalMonacoEditor = {
+    deltaDecorations: (oldIds: string[], newDecorations: unknown[]) => string[];
+    revealLineInCenter: (line: number) => void;
+    setPosition: (pos: { lineNumber: number; column: number }) => void;
+    focus: () => void;
+  };
+  const editorRef = useRef<MinimalMonacoEditor | null>(null);
+  const decorationsRef = useRef<string[]>([]);
+
+  const applyReviewDecorations = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const w = window as typeof window & {
+      monaco?: { Range: new (sl: number, sc: number, el: number, ec: number) => unknown };
+    };
+    const monaco = w.monaco;
+    if (!monaco) return;
+    const decos = buildReviewDecorations(currentReview?.comments ?? []);
+    const next = decos.map((d) => ({
+      range: new monaco.Range(d.line, 1, d.line, 1),
+      options: {
+        isWholeLine: false,
+        linesDecorationsClassName: severityGutterClass(d.severity),
+        hoverMessage: { value: `**${d.severity}** — ${d.message}` },
+      },
+    }));
+    decorationsRef.current = editor.deltaDecorations(decorationsRef.current, next);
+  }, [currentReview]);
+
+  useEffect(() => {
+    applyReviewDecorations();
+  }, [applyReviewDecorations]);
+
+  const handleJumpToLine = useCallback((line: number) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    setActiveTab("code");
+    editor.revealLineInCenter(line);
+    editor.setPosition({ lineNumber: line, column: 1 });
+    editor.focus();
+  }, []);
+
+  // ── derived view-data ──────────────────────────────────────────────
+  const qualityScore = runResult?.quality?.score ?? null;
+  const showStdoutInTrace = activeTab === "trace";
+  const showTestsTab = activeTab === "tests";
+
+  // ── render ─────────────────────────────────────────────────────────
+  return (
+    <section className="screen active" id="screen-practice">
+      <div className="pad" data-testid="practice-screen">
+        {/* Slim breadcrumb-style header */}
+        <div className="practice-bar reveal">
+          <div className="pbar-crumbs">
+            <span className="pbar-root">Practice</span>
+            <span className="pbar-sep">/</span>
+            <span className="pbar-crumb-ctx">
+              {mode === "capstone" ? "Capstone" : "Exercises"}
+            </span>
+          </div>
+          <div className="pbar-title">{titleSuffix}</div>
+          <div
+            className="pbar-modes"
+            role="tablist"
+            aria-label="Practice modes"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "exercises"}
+              data-testid="mode-exercises"
+              className={cn("pmode", mode === "exercises" && "active")}
+              onClick={() => switchMode("exercises")}
+            >
+              Exercises
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "capstone"}
+              data-testid="mode-capstone"
+              className={cn("pmode", mode === "capstone" && "active")}
+              onClick={() => switchMode("capstone")}
+            >
+              Capstone <span className="pmode-tag">Gate</span>
+            </button>
+          </div>
+        </div>
+
+        <div className={cn("practice-grid", railCollapsed && "rail-collapsed")}>
+          {/* ─── LEFT RAIL ─── */}
+          <aside className="practice-rail reveal" data-testid="practice-rail">
+            {railCollapsed ? (
+              <CompactRail
+                exercises={workspace.exercises}
+                selectedId={selectedExerciseId}
+                onSelect={(ex) =>
+                  selectExercise(ex.id, ex.starter_code ?? null)
+                }
+                onExpand={toggleRail}
+              />
+            ) : (
+              <div className="rail-expanded">
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    padding: "0 4px 4px",
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="practice-rail-toggle"
+                    onClick={toggleRail}
+                    aria-label="Collapse exercises rail"
+                    title="Collapse exercises rail"
+                  >
+                    <span aria-hidden="true">‹</span>
+                  </button>
+                </div>
+                {mode === "capstone" ? (
+                  <CapstoneRail
+                    capstone={workspace.capstone}
+                    loading={workspace.isLoading}
+                    selectedLabId={selectedExerciseId}
+                    onSelectLab={(id) => selectExercise(id, null)}
+                  />
+                ) : (
+                  <ExerciseRail
+                    exercises={workspace.exercises}
+                    loading={workspace.isLoading}
+                    selectedId={selectedExerciseId}
+                    onSelect={(ex) =>
+                      selectExercise(ex.id, ex.starter_code ?? null)
+                    }
+                  />
+                )}
+              </div>
+            )}
+          </aside>
+
+          {/* ─── CENTER: editor + tabs ─── */}
+          <section className="editor practice-editor reveal">
+            <div className="editor-bar">
+              <div className="editor-tabs">
+                <button
+                  type="button"
+                  className={cn("editor-tab", activeTab === "code" && "active")}
+                  onClick={() => setActiveTab("code")}
+                  data-testid="tab-code"
+                >
+                  <Code2 className="inline-block h-3 w-3 mr-1" /> main.py
+                </button>
+                <button
+                  type="button"
+                  className={cn("editor-tab", activeTab === "trace" && "active")}
+                  onClick={() => setActiveTab("trace")}
+                  data-testid="tab-trace"
+                >
+                  <TerminalSquare className="inline-block h-3 w-3 mr-1" /> Output
+                </button>
+                <button
+                  type="button"
+                  className={cn("editor-tab", activeTab === "tests" && "active")}
+                  onClick={() => setActiveTab("tests")}
+                  data-testid="tab-tests"
+                >
+                  Tests
+                </button>
+              </div>
+              <div className="editor-actions flex items-center gap-3">
+                {qualityScore !== null ? (
+                  <span className="editor-status">{`Quality ${qualityScore}/100`}</span>
+                ) : null}
+                <ReviewBot
+                  state={botState}
+                  findingsCount={findingsCount}
+                  hasRunCode={hasRunOnce || hasPriorHistory}
+                  onClick={handleBotClick}
+                />
+              </div>
+            </div>
+
+            {activeTab === "code" ? (
+              <div className="practice-monaco-shell">
+                <Monaco
+                  height="100%"
+                  defaultLanguage="python"
+                  language="python"
+                  value={code}
+                  onChange={(v) => {
+                    codeChangedSinceMount.current = true;
+                    setCode(v ?? "");
+                  }}
+                  theme="vs-dark"
+                  onMount={(editor) => {
+                    editorRef.current = editor as unknown as MinimalMonacoEditor;
+                    applyReviewDecorations();
+                  }}
+                  options={{
+                    minimap: { enabled: false },
+                    fontSize: 13,
+                    tabSize: 4,
+                    scrollBeyondLastLine: false,
+                    automaticLayout: true,
+                    wordWrap: "on",
+                    padding: { top: 8, bottom: 8 },
+                    glyphMargin: true,
+                  }}
+                />
+              </div>
+            ) : showStdoutInTrace ? (
+              <OutputPane result={runResult} />
+            ) : showTestsTab ? (
+              <TestsPane result={runResult} />
+            ) : null}
+
+            {/* P-Practice2 — editor footer. Bottom-anchored Save + Run match
+                the v10 mock; left side shows lightweight code-meta + an
+                inline Reset that restores the starter. */}
+            <div className="practice-editor-footer">
+              <div className="practice-editor-footer-left">
+                <button
+                  type="button"
+                  className="editor-chip"
+                  onClick={() => {
+                    const starter =
+                      selectedExerciseDetail?.starter_code ?? STARTER_CAPSTONE;
+                    setCode(starter);
+                    codeChangedSinceMount.current = false;
+                  }}
+                  data-testid="editor-reset"
+                  aria-label="Reset to starter code"
+                  title="Reset to starter code"
+                >
+                  ↺ Reset
+                </button>
+                <span className="practice-editor-meta">
+                  python 3.11 · {code.split("\n").length} lines
+                </span>
+              </div>
+              <div className="practice-editor-footer-right">
+                <button
+                  type="button"
+                  className="editor-btn"
+                  onClick={openSaveDialog}
+                  data-testid="save-to-notebook"
+                  aria-label="Save to notebook"
+                >
+                  <BookmarkPlus className="inline-block h-3 w-3 mr-1" />
+                  Save to Notebook
+                </button>
+                {/* Run is the only footer action. The senior-review
+                    trigger lives on the floating bot in the editor
+                    toolbar (top-right). Splitting them keeps the
+                    common "run-run-run iterate" path one click away
+                    and the deliberate "ask for review" path a
+                    visible-but-separate affordance. */}
+                <button
+                  type="button"
+                  className={cn("editor-btn run", running && "running")}
+                  onClick={handleRun}
+                  disabled={running}
+                  data-testid="run-code"
+                  aria-label="Run code"
+                  title="Run your code (Ctrl+Enter)"
+                >
+                  <Play className="inline-block h-3 w-3 mr-1" />
+                  {running ? "Running…" : "Run"}
+                </button>
+              </div>
+            </div>
+          </section>
+
+        </div>
+      </div>
+
+      {/* Senior-review bot lives inside the editor toolbar (top-right
+          of the editor card). The slide-over panel only mounts when
+          opened — keeping it out of the DOM when closed avoids the
+          horizontal-scroll bug an off-screen fixed element triggers. */}
+      <SeniorReviewPanel
+        open={panelOpen}
+        loading={seniorReview.isPending}
+        error={reviewError}
+        review={currentReview}
+        createdAt={currentReviewCreatedAt}
+        stale={reviewIsStale}
+        recurringPatterns={recurringPatterns}
+        onClose={() => setPanelOpen(false)}
+        onJumpToLine={handleJumpToLine}
+        onRetry={handleRequestReview}
+        onRefresh={handleRequestReview}
+      />
+
+      {saveDialog.open ? (
+        <SaveDialog
+          state={saveDialog}
+          onClose={closeSaveDialog}
+          onChangeNote={(note) => setSaveDialog((s) => ({ ...s, note }))}
+          onSave={handleSaveNote}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// Sub-components
+// ───────────────────────────────────────────────────────────────────────
+
+interface CapstoneRailProps {
+  capstone: ReturnType<typeof usePracticeWorkspace>["capstone"];
+  loading: boolean;
+  selectedLabId: string | null;
+  onSelectLab: (id: string) => void;
+}
+
+function CapstoneRail({
+  capstone,
+  loading,
+  selectedLabId,
+  onSelectLab,
+}: CapstoneRailProps) {
+  if (loading) {
+    return (
+      <div className="rail-eyebrow" aria-busy="true">
+        Loading bundle…
+      </div>
+    );
+  }
+  if (!capstone) {
+    return (
+      <div>
+        <div className="rail-eyebrow">No capstone yet</div>
+        <p className="small" style={{ padding: "10px 8px" }}>
+          Enroll in a track to unlock a capstone bundle. Until then, switch to{" "}
+          <b>Exercises</b>.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div data-testid="capstone-rail">
+      <div className="rail-eyebrow">
+        Bundle · {capstone.title}
+        <span className="rail-count gold">{capstone.labs.length} labs</span>
+      </div>
+      <div className="tree-root">
+        <div className="tree-folder">
+          <FolderClosed className="inline-block h-3 w-3" />
+          <span>capstone/</span>
+        </div>
+        <div className="tree-children">
+          {capstone.labs.map((lab) => {
+            const isLocked = lab.status === "locked";
+            const isActive = lab.id === selectedLabId;
+            return (
+              <button
+                key={lab.id}
+                type="button"
+                className={cn(
+                  "tree-file editable",
+                  isActive && "active",
+                  isLocked && "locked",
+                )}
+                onClick={() => !isLocked && onSelectLab(lab.id)}
+                disabled={isLocked}
+                data-testid={`capstone-lab-${lab.id}`}
+              >
+                {isLocked ? (
+                  <Lock className="tf-icon h-3 w-3" />
+                ) : (
+                  <FileCode className="tf-icon h-3 w-3" />
+                )}
+                <span className="tf-name">{lab.title}</span>
+                <span className="tf-badge">
+                  {isLocked ? "Locked" : lab.status === "done" ? "Done" : "Edit"}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * P-Practice2 — Compact rail. Shown when the user collapses the exercises
+ * list. Each exercise becomes a square badge with a short code derived from
+ * its difficulty group (F = Foundations, C = Core craft, P = Capstone) and
+ * its 1-based index inside that group.
+ */
+interface CompactRailProps {
+  exercises: ExerciseResponse[];
+  selectedId: string | null;
+  onSelect: (ex: ExerciseResponse) => void;
+  onExpand: () => void;
+}
+
+function CompactRail({
+  exercises,
+  selectedId,
+  onSelect,
+  onExpand,
+}: CompactRailProps) {
+  const groups = useMemo(() => {
+    const F: ExerciseResponse[] = [];
+    const C: ExerciseResponse[] = [];
+    const P: ExerciseResponse[] = [];
+    for (const ex of exercises) {
+      const d = (ex.difficulty || "").toLowerCase();
+      if (d === "beginner" || d === "easy") F.push(ex);
+      else if (d === "advanced" || d === "hard") P.push(ex);
+      else C.push(ex);
+    }
+    return [
+      { prefix: "F", items: F },
+      { prefix: "C", items: C },
+      { prefix: "P", items: P },
+    ] as const;
+  }, [exercises]);
+
+  return (
+    <div className="practice-rail-compact" data-testid="practice-rail-compact">
+      <button
+        type="button"
+        className="practice-rail-toggle"
+        onClick={onExpand}
+        aria-label="Expand exercises rail"
+        title="Expand exercises rail"
+      >
+        <span aria-hidden="true">›</span>
+      </button>
+      {groups.map(({ prefix, items }) =>
+        items.length === 0 ? null : (
+          <div className="practice-badge-group" key={prefix}>
+            {items.map((ex, idx) => {
+              const code = `${prefix}${idx + 1}`;
+              const isActive = ex.id === selectedId;
+              return (
+                <button
+                  key={ex.id}
+                  type="button"
+                  className={cn("practice-badge", isActive && "active")}
+                  onClick={() => onSelect(ex)}
+                  title={ex.title}
+                  aria-label={`${ex.title} (${code})`}
+                  aria-pressed={isActive}
+                  data-testid={`practice-badge-${ex.id}`}
+                >
+                  {code}
+                </button>
+              );
+            })}
+          </div>
+        ),
+      )}
+    </div>
+  );
+}
+
+interface ExerciseRailProps {
+  exercises: ExerciseResponse[];
+  loading: boolean;
+  selectedId: string | null;
+  onSelect: (ex: ExerciseResponse) => void;
+}
+
+function ExerciseRail({
+  exercises,
+  loading,
+  selectedId,
+  onSelect,
+}: ExerciseRailProps) {
+  const grouped = useMemo(() => {
+    const out: Record<string, ExerciseResponse[]> = {
+      Foundations: [],
+      "Core craft": [],
+      Capstone: [],
+    };
+    for (const ex of exercises) {
+      const d = (ex.difficulty || "").toLowerCase();
+      if (d === "beginner" || d === "easy") out.Foundations.push(ex);
+      else if (d === "advanced" || d === "hard") out.Capstone.push(ex);
+      else out["Core craft"].push(ex);
+    }
+    return out;
+  }, [exercises]);
+
+  if (loading) {
+    return (
+      <div className="rail-eyebrow" aria-busy="true">
+        Loading exercises…
+      </div>
+    );
+  }
+  if (exercises.length === 0) {
+    return (
+      <div>
+        <div className="rail-eyebrow">No exercises yet</div>
+        <p className="small" style={{ padding: "10px 8px" }}>
+          Your instructor hasn&apos;t published any exercises. Try{" "}
+          <b>Capstone</b> mode.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div data-testid="exercise-rail">
+      <div className="rail-eyebrow">
+        Exercises · {exercises.length}
+        <span className="rail-count">{pluralLabs(exercises.length)}</span>
+      </div>
+      {Object.entries(grouped).map(([groupLabel, list]) =>
+        list.length === 0 ? null : (
+          <div className="rail-group" key={groupLabel}>
+            <div className="rail-group-h">{groupLabel}</div>
+            {list.map((ex) => (
+              <button
+                key={ex.id}
+                type="button"
+                className={cn("rail-task", ex.id === selectedId && "active")}
+                onClick={() => onSelect(ex)}
+                data-testid={`exercise-task-${ex.id}`}
+              >
+                <span className="task-dot" />
+                <span className="task-n">{ex.title}</span>
+                <ChevronRight className="h-3 w-3 text-muted-foreground" />
+              </button>
+            ))}
+          </div>
+        ),
+      )}
+    </div>
+  );
+}
+
+interface OutputPaneProps {
+  result: ExecuteResponse | null;
+}
+
+function OutputPane({ result }: OutputPaneProps) {
+  if (!result) {
+    return (
+      <div className="trace-shell" data-testid="output-pane-empty">
+        <p className="small">No output yet — click Run & review to execute.</p>
+      </div>
+    );
+  }
+  const { stdout, stderr, exit_code, timed_out, error } = result;
+  return (
+    <div className="trace-shell" data-testid="output-pane">
+      <div className="tests-summary">
+        Exit code <strong>{exit_code}</strong>
+        <span className="tests-time">
+          {" "}
+          · {timed_out ? "timed out" : `${result.events.length} steps traced`}
+        </span>
+      </div>
+      {error ? (
+        <pre className="break-shell" style={{ color: "var(--rose)" }}>
+          {error}
+        </pre>
+      ) : null}
+      {stdout ? (
+        <div>
+          <div className="rail-eyebrow">stdout</div>
+          <pre>{stdout}</pre>
+        </div>
+      ) : null}
+      {stderr ? (
+        <div>
+          <div className="rail-eyebrow">stderr</div>
+          <pre style={{ color: "var(--rose)" }}>{stderr}</pre>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+interface TestsPaneProps {
+  result: ExecuteResponse | null;
+}
+
+function TestsPane({ result }: TestsPaneProps) {
+  const issues = result?.quality?.issues ?? [];
+  if (!result) {
+    return (
+      <div className="tests-shell" data-testid="tests-pane-empty">
+        <p className="small">
+          Quality issues appear after the first run. Click Run & review.
+        </p>
+      </div>
+    );
+  }
+  if (issues.length === 0) {
+    return (
+      <div className="tests-shell" data-testid="tests-pane">
+        <div className="test-row pass">
+          <span className="test-ic">✓</span>
+          <div className="test-body">
+            <b>No quality issues</b>
+            <span>Code passes the quality analyser. Ship it.</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="tests-shell" data-testid="tests-pane">
+      <div className="tests-summary">
+        <strong>{issues.length}</strong> quality{" "}
+        {issues.length === 1 ? "issue" : "issues"}
+        <span className="tests-time">
+          {" "}
+          · score {result.quality?.score ?? 0}/100
+        </span>
+      </div>
+      {issues.map((it, idx) => (
+        <div
+          key={`${it.rule}-${idx}`}
+          className={cn(
+            "test-row",
+            it.severity === "warning" ? "fail" : "pass",
+          )}
+        >
+          <span className="test-ic">
+            {it.severity === "warning" ? "!" : "·"}
+          </span>
+          <div className="test-body">
+            <b>
+              {it.rule} <span className="small">(line {it.line})</span>
+            </b>
+            <span>{it.message}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+interface SaveDialogProps {
+  state: SaveDialogState;
+  onClose: () => void;
+  onChangeNote: (note: string) => void;
+  onSave: () => void;
+}
+
+function SaveDialog({ state, onClose, onChangeNote, onSave }: SaveDialogProps) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="practice-save-title"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(16,18,14,0.55)",
+        backdropFilter: "blur(4px)",
+        zIndex: 80,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="card pad"
+        style={{
+          maxWidth: 540,
+          width: "100%",
+          maxHeight: "calc(100vh - 48px)",
+          overflow: "auto",
+          background: "var(--cream-1, #f7f3ea)",
+          boxShadow: "0 30px 80px rgba(0,0,0,0.35)",
+          borderRadius: 18,
+          position: "relative",
+        }}
+        data-testid="save-dialog"
+      >
+        <div className="eyebrow">Save to Notebook</div>
+        <h3
+          id="practice-save-title"
+          style={{ marginTop: 6, marginBottom: 10 }}
+        >
+          What clicked? Add a note in your own words.
+        </h3>
+        <p className="small" style={{ marginBottom: 14 }}>
+          Your code and any output are attached automatically. The note below
+          becomes the front of an SRS card so future-you actually remembers
+          this.
+        </p>
+        <label
+          htmlFor="practice-note-textarea"
+          className="small"
+          style={{ display: "block", marginBottom: 6, fontWeight: 700 }}
+        >
+          Your note (optional)
+        </label>
+        <textarea
+          id="practice-note-textarea"
+          data-testid="save-note-input"
+          value={state.note}
+          onChange={(e: ChangeEvent<HTMLTextAreaElement>) =>
+            onChangeNote(e.target.value)
+          }
+          placeholder="One sentence: the idea you want to remember."
+          rows={4}
+          style={{
+            width: "100%",
+            padding: 12,
+            borderRadius: 10,
+            border: "1px solid var(--ink-3, #d8d2c2)",
+            background: "white",
+            fontFamily: "var(--sans)",
+            fontSize: 13,
+          }}
+        />
+        <div
+          className="rd-footer"
+          style={{
+            justifyContent: "flex-end",
+            marginTop: 18,
+            display: "flex",
+            gap: 8,
+          }}
+        >
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={onClose}
+            disabled={state.status === "saving"}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn primary"
+            onClick={onSave}
+            disabled={state.status === "saving" || state.status === "saved"}
+            data-testid="save-confirm"
+          >
+            {state.status === "saving"
+              ? "Saving…"
+              : state.status === "saved"
+                ? (
+                    <>
+                      <Check className="inline-block h-3 w-3 mr-1" /> Saved
+                    </>
+                  )
+                : state.status === "error"
+                  ? "Try again"
+                  : (
+                      <>
+                        <FileText className="inline-block h-3 w-3 mr-1" /> Save
+                      </>
+                    )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

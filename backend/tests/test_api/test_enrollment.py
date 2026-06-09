@@ -7,7 +7,7 @@ COURSE_PAYLOAD = {
     "title": "GenAI Engineering",
     "slug": "genai-enroll-test",
     "description": "Learn to build production GenAI systems",
-    "price_cents": 9900,
+    "price_cents": 0,
     "difficulty": "intermediate",
     "estimated_hours": 20,
 }
@@ -43,9 +43,9 @@ async def _create_published_course(client: AsyncClient, admin_token: str) -> str
 
 @pytest.mark.asyncio
 async def test_enroll_in_published_course_returns_201(client: AsyncClient) -> None:
-    admin_token = await _register_and_login(client, "admin_enroll@example.com", "pass1234", "admin")
+    admin_token = await _register_and_login(client, "admin_enroll@example.com", "pass12345678", "admin")
     student_token = await _register_and_login(
-        client, "student_enroll@example.com", "pass1234", "student"
+        client, "student_enroll@example.com", "pass12345678", "student"
     )
     course_id = await _create_published_course(client, admin_token)
 
@@ -66,10 +66,10 @@ async def test_enroll_in_published_course_returns_201(client: AsyncClient) -> No
 @pytest.mark.asyncio
 async def test_enroll_twice_returns_409(client: AsyncClient) -> None:
     admin_token = await _register_and_login(
-        client, "admin_dup@example.com", "pass1234", "admin"
+        client, "admin_dup@example.com", "pass12345678", "admin"
     )
     student_token = await _register_and_login(
-        client, "student_dup@example.com", "pass1234", "student"
+        client, "student_dup@example.com", "pass12345678", "student"
     )
     course_id = await _create_published_course(client, admin_token)
 
@@ -88,7 +88,7 @@ async def test_enroll_twice_returns_409(client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_enroll_nonexistent_course_returns_404(client: AsyncClient) -> None:
     student_token = await _register_and_login(
-        client, "student_404@example.com", "pass1234", "student"
+        client, "student_404@example.com", "pass12345678", "student"
     )
     resp = await client.post(
         f"/api/v1/courses/{uuid.uuid4()}/enroll",

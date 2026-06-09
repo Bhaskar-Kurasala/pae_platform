@@ -95,11 +95,11 @@ export function Footer() {
           <div className="sm:col-span-2 lg:col-span-1">
             <Link
               href="/"
-              aria-label="PAE Platform home"
+              aria-label="AI Career OS home"
               className="inline-block font-bold text-lg mb-3 focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:outline-none rounded"
             >
-              <span className="text-primary">PAE</span>
-              <span className="text-foreground"> Platform</span>
+              <span className="text-primary">AI Career</span>
+              <span className="text-foreground"> OS</span>
             </Link>
             <p className="text-sm text-muted-foreground leading-6 max-w-xs mb-4">
               Master production GenAI engineering with 20 AI agents guiding
@@ -142,8 +142,7 @@ export function Footer() {
         {/* Bottom bar */}
         <div className="mt-12 pt-6 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">
-            &copy; {year} Production AI Engineering Platform. All rights
-            reserved.
+            &copy; {year} AI Career OS. All rights reserved.
           </p>
 
           {/* "Built with Claude API" badge */}

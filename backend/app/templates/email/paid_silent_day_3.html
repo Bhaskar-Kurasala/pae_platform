@@ -1,0 +1,47 @@
+{# F6 — Paid-silent day-3 email.
+   Sent to users who paid recently (≤30d ago) but have been silent
+   for 7+ days. This is the highest-stakes outreach in the system —
+   refund risk + reputation risk. Tone: direct, personal, signed by
+   Bhaskar specifically. Single CTA: reply with one word.
+
+   Variables:
+     name, days_since_last_session, target_role
+#}
+{% set subject = "Quick check — you paid for the " ~ (target_role or "track") ~ ", what's blocking you?" %}
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ subject }}</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #1a1a1a; line-height: 1.6;">
+
+  <p>Hey {{ name or "there" }},</p>
+
+  <p>This isn't an automated email. I'm Bhaskar — I run PAE Platform.</p>
+
+  <p>You paid for the {{ target_role or "AI engineer" }} track and then
+  stopped using it
+  {% if days_since_last_session %}{{ days_since_last_session }} days ago{% else %}recently{% endif %}.
+  I'd like to fix whatever broke.</p>
+
+  <p><strong>Just reply with one word</strong>:</p>
+
+  <ul>
+    <li><strong>"stuck"</strong> — you hit a wall and need help</li>
+    <li><strong>"busy"</strong> — life happened and you'll be back</li>
+    <li><strong>"refund"</strong> — it's not the right fit and you want your money back</li>
+  </ul>
+
+  <p>Any of those is fine. I'll respond personally. The third option is
+  no harm done — better that than a paid student who feels stuck.</p>
+
+  <p>—Bhaskar</p>
+  <p>(reply directly to this email)</p>
+
+  <p style="font-size: 12px; color: #888; margin-top: 32px;">
+    <a href="{{ unsubscribe_url or '#' }}" style="color: #888;">Unsubscribe</a>.
+  </p>
+</body>
+</html>

@@ -4,6 +4,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api._deprecated import deprecated
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.lesson import Lesson
@@ -52,6 +53,8 @@ async def get_lesson(
     current_user: User = Depends(get_current_user),
 ) -> Lesson:
     lesson = await service.get_lesson(lesson_id)
+    if not lesson.is_published and current_user.role != "admin":
+        raise HTTPException(status_code=404, detail="Lesson not found")
     course = await CourseRepository(db).get_active(lesson.course_id)
     if course is not None and course.price_cents > 0 and current_user.role != "admin":
         enrollment = await EnrollmentRepository(db).get_by_student_and_course(
@@ -70,6 +73,7 @@ async def get_lesson(
 
 
 @router.post("/lessons", response_model=LessonResponse, status_code=201)
+@deprecated(sunset="2026-07-01", reason="lessons created via admin tooling")
 async def create_lesson(
     payload: LessonCreate,
     service: LessonService = Depends(get_service),
@@ -79,6 +83,7 @@ async def create_lesson(
 
 
 @router.put("/lessons/{lesson_id}", response_model=LessonResponse)
+@deprecated(sunset="2026-07-01", reason="lessons edited via admin tooling")
 async def update_lesson(
     lesson_id: uuid.UUID,
     payload: LessonUpdate,
@@ -92,6 +97,7 @@ async def update_lesson(
     "/lessons/{lesson_id}/questions",
     response_model=LessonQuestionsResponse,
 )
+@deprecated(sunset="2026-07-01", reason="lesson Q&A feature not in v8")
 async def get_lesson_questions(
     lesson_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -110,6 +116,7 @@ async def get_lesson_questions(
     response_model=QuestionPostItem,
     status_code=201,
 )
+@deprecated(sunset="2026-07-01", reason="lesson Q&A feature not in v8")
 async def post_lesson_question(
     lesson_id: uuid.UUID,
     payload: QuestionPostCreate,
@@ -136,6 +143,7 @@ async def post_lesson_question(
     "/lessons/questions/{post_id}/replies",
     response_model=QuestionRepliesResponse,
 )
+@deprecated(sunset="2026-07-01", reason="lesson Q&A feature not in v8")
 async def get_question_replies(
     post_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -152,6 +160,7 @@ async def get_question_replies(
     "/lessons/questions/{post_id}/vote",
     response_model=QuestionPostItem,
 )
+@deprecated(sunset="2026-07-01", reason="lesson Q&A feature not in v8")
 async def vote_on_question(
     post_id: uuid.UUID,
     payload: QuestionVoteRequest,
@@ -175,6 +184,7 @@ async def vote_on_question(
     "/lessons/questions/{post_id}",
     response_model=QuestionPostItem,
 )
+@deprecated(sunset="2026-07-01", reason="lesson Q&A feature not in v8")
 async def delete_question(
     post_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),

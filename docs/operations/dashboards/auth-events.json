@@ -1,0 +1,73 @@
+{
+  "id": "auth-events",
+  "title": "Auth Events",
+  "owner": "ops",
+  "description": "Signup, login, login-failure rates and signup→first-action funnel. Trend-shape window for cohort onboarding observation.",
+  "runbook": "../runbooks.md#auth-events",
+  "time_range_default": "24h",
+  "panels": [
+    {
+      "id": "signup-rate",
+      "title": "Signup rate (signups/hour)",
+      "panel_type": "counter_rate",
+      "description": "Rate of completed registrations. Filter event_type='signup'.",
+      "query": {
+        "metric": "aicareeros_auth_events",
+        "aggregation": "rate",
+        "rate_window": "1h",
+        "filter": {"event_type": "signup"}
+      }
+    },
+    {
+      "id": "login-rate",
+      "title": "Login rate (logins/hour)",
+      "panel_type": "counter_rate",
+      "description": "Rate of successful logins.",
+      "query": {
+        "metric": "aicareeros_auth_events",
+        "aggregation": "rate",
+        "rate_window": "1h",
+        "filter": {"event_type": "login"}
+      }
+    },
+    {
+      "id": "login-failure-rate",
+      "title": "Login failure rate (failures/hour)",
+      "panel_type": "counter_rate",
+      "description": "Rate of failed login attempts. Spike = brute-force probe; ratio vs login rate matters more than absolute.",
+      "query": {
+        "metric": "aicareeros_auth_events",
+        "aggregation": "rate",
+        "rate_window": "1h",
+        "filter": {"event_type": "login_failure"}
+      }
+    },
+    {
+      "id": "signup-conflict-rate",
+      "title": "Signup conflict rate (conflicts/hour)",
+      "panel_type": "counter_rate",
+      "description": "409 conflicts on the registration endpoint. Sustained high rate = users hitting the form repeatedly with already-registered emails.",
+      "query": {
+        "metric": "aicareeros_auth_events",
+        "aggregation": "rate",
+        "rate_window": "1h",
+        "filter": {"event_type": "signup_conflict"}
+      }
+    },
+    {
+      "id": "events-by-type-stacked",
+      "title": "Auth events by type (stacked)",
+      "panel_type": "counter_rate",
+      "description": "All event_type values stacked. Visual ratio between successful auth and failure modes.",
+      "query": {
+        "metric": "aicareeros_auth_events",
+        "aggregation": "rate",
+        "rate_window": "1h",
+        "by": ["event_type"]
+      }
+    }
+  ],
+  "notes": [
+    "signup→first-action funnel needs join with the agent_invocations counter scoped to the user's first action; conventional Prometheus can't do that join. The funnel-class question lives in logs (CP1 user_id contextvar) — the on-call answer is 'grep structlog for first agent.run.start by user_id' or, post-CP5 backend choice, a tail-sampled trace query. Surfacing this as a dashboard placeholder rather than building a wrong metric."
+  ]
+}

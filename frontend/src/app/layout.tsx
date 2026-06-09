@@ -26,7 +26,7 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: "CareerForge — become, do not just learn",
+  title: "AI Career OS — become, do not just learn",
   description:
     "Promotion-ritual learning. 18+ AI agents guide you from your current role to your next title with proof, capstones, and senior review.",
 };

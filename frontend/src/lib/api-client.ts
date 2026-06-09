@@ -5,10 +5,32 @@ class ApiError extends Error {
     public status: number,
     message: string,
     public body?: unknown,
+    public requestId?: string,
   ) {
     super(message);
     this.name = "ApiError";
   }
+}
+
+// PR3/C1.1 — last X-Request-ID we saw on any API response. The backend
+// (RequestIDMiddleware in app/core/request_id.py, shipped in PR2/B4.1)
+// echoes a UUID4 in the X-Request-ID header on every response. We stash
+// the latest one in module scope so error toasts can show it as a
+// "Reference:" tag students can paste to support, even when the failure
+// path is non-ApiError (network blips, ApiTimeoutError, etc.) and so
+// has no body to read it out of.
+//
+// `getLastRequestId()` is the one read API; `_setLastRequestId` is
+// `_`-prefixed to flag it as internal-only — only the api-client itself
+// should write it.
+let lastRequestId: string | null = null;
+
+export function getLastRequestId(): string | null {
+  return lastRequestId;
+}
+
+function _setLastRequestId(id: string | null): void {
+  if (id) lastRequestId = id;
 }
 
 interface StoredAuth {
@@ -105,15 +127,96 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshInFlight;
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+// PR2/B5.3 — hard wall-clock cap on every API request that flows
+// through this helper. 30 seconds matches the backend's
+// `_LLM_TIMEOUT_S` so a stuck LLM call gives up at the same moment
+// on both sides; the user sees a deterministic "request took too
+// long" toast (PR2/B1.1) instead of a hung spinner.
+//
+// Streaming endpoints (chat SSE, anything that intentionally lives
+// >30s) MUST NOT use this helper. They wire their own
+// AbortController with their own lifetime.
+const REQUEST_TIMEOUT_MS = 30_000;
+
+class ApiTimeoutError extends Error {
+  constructor() {
+    super("Request took too long. Try again in a moment.");
+    this.name = "ApiTimeoutError";
+  }
+}
+
+/** Race a promise against an AbortController-driven timer. */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    // PR3/C1.1 — capture the trace ID so error toasts can ship it.
+    // Header may be cased differently across fetch implementations;
+    // Headers.get() is case-insensitive per Fetch spec but be explicit.
+    _setLastRequestId(
+      res.headers.get("X-Request-ID") ?? res.headers.get("x-request-id"),
+    );
+    return res;
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new ApiTimeoutError();
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+interface RequestOptions {
+  /** Override the default 30s wall-clock timeout for a specific call.
+   * Use for endpoints that intentionally take longer than a typical
+   * REST request — e.g. the senior-review path goes through an LLM
+   * with internal retries on 429, which can legitimately push past 30s.
+   * Streaming endpoints should NOT go through this helper at all. */
+  timeoutMs?: number;
+}
+
+async function request<T>(
+  path: string,
+  init: RequestInit = {},
+  options: RequestOptions = {},
+): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(init.headers as Record<string, string>),
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
+  // Admin "view as student" — backend ignores this for non-admin tokens
+  // (returns 403), so it is safe to attach unconditionally. Reading
+  // sessionStorage here keeps the api-client framework-free; the
+  // store hydration order doesn't matter.
+  if (typeof window !== "undefined") {
+    try {
+      const raw = window.sessionStorage.getItem("pae-impersonation");
+      if (raw) {
+        const parsed = JSON.parse(raw) as {
+          state?: { target?: { studentId?: string } | null };
+        };
+        const targetId = parsed.state?.target?.studentId;
+        if (targetId) headers["X-Impersonate-Student-Id"] = targetId;
+      }
+    } catch {
+      // sessionStorage parsing is best-effort; ignore failures.
+    }
+  }
 
-  let res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  let res = await fetchWithTimeout(
+    `${API_BASE}${path}`,
+    { ...init, headers },
+    timeoutMs,
+  );
 
   // On 401 with an existing token, attempt a single silent refresh + retry.
   // Skip for the refresh endpoint itself to avoid infinite loops.
@@ -121,7 +224,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const fresh = await refreshAccessToken();
     if (fresh) {
       const retryHeaders = { ...headers, Authorization: `Bearer ${fresh}` };
-      res = await fetch(`${API_BASE}${path}`, { ...init, headers: retryHeaders });
+      res = await fetchWithTimeout(
+        `${API_BASE}${path}`,
+        { ...init, headers: retryHeaders },
+        timeoutMs,
+      );
     }
   }
 
@@ -147,21 +254,28 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     } else {
       message = res.statusText;
     }
-    throw new ApiError(res.status, message, detail);
+    // PR3/C1.1 — attach the X-Request-ID so the toast classifier can
+    // surface "Reference: abc123de" without re-reading module state.
+    const requestId =
+      res.headers.get("X-Request-ID") ??
+      res.headers.get("x-request-id") ??
+      undefined;
+    throw new ApiError(res.status, message, detail, requestId ?? undefined);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>(path),
-  post: <T>(path: string, body: unknown) =>
-    request<T>(path, { method: "POST", body: JSON.stringify(body) }),
-  put: <T>(path: string, body: unknown) =>
-    request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
-  patch: <T>(path: string, body: unknown) =>
-    request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
-  del: (path: string) => request<void>(path, { method: "DELETE" }),
+  get: <T>(path: string, options?: RequestOptions) => request<T>(path, {}, options),
+  post: <T>(path: string, body: unknown, options?: RequestOptions) =>
+    request<T>(path, { method: "POST", body: JSON.stringify(body) }, options),
+  put: <T>(path: string, body: unknown, options?: RequestOptions) =>
+    request<T>(path, { method: "PUT", body: JSON.stringify(body) }, options),
+  patch: <T>(path: string, body: unknown, options?: RequestOptions) =>
+    request<T>(path, { method: "PATCH", body: JSON.stringify(body) }, options),
+  del: (path: string, options?: RequestOptions) =>
+    request<void>(path, { method: "DELETE" }, options),
 };
 
 // ── Typed API calls ──────────────────────────────────────────────
@@ -175,6 +289,10 @@ export interface UserResponse {
   is_verified: boolean;
   github_username?: string;
   avatar_url?: string;
+  // D16/CP3.1 — manual-WhatsApp outreach destination. Rendered on the
+  // admin cockpit per-student panel as a wa.me/{number} deep link
+  // when set.
+  whatsapp_number?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -241,11 +359,18 @@ export interface DailyCompletion {
 export interface ProgressResponse {
   courses: CourseProgress[];
   overall_progress: number;
+  lessons_completed_total: number;
+  lessons_total: number;
   exercises_completed: number;
   total_exercises: number;
   exercise_completion_rate: number;
   watch_time_minutes: number;
   completions_by_day: DailyCompletion[];
+  active_course_id: string | null;
+  active_course_title: string | null;
+  next_lesson_id: string | null;
+  next_lesson_title: string | null;
+  today_unlock_percentage: number;
 }
 
 export interface LessonProgressRecord {
@@ -300,8 +425,21 @@ export interface PeerSubmissionItem {
 }
 
 export const authApi = {
-  register: (body: { email: string; full_name: string; password: string }) =>
-    api.post<UserResponse>("/api/v1/auth/register", body),
+  register: (body: {
+    email: string;
+    full_name: string;
+    password: string;
+    // D16/CP3.1 — optional, E.164 recommended (e.g. "+919876543210").
+    whatsapp_number?: string;
+  }) => api.post<{ message: string }>("/api/v1/auth/register", body),
+  verifyEmail: (token: string) =>
+    api.post<{ message: string }>("/api/v1/auth/verify-email", { token }),
+  resendVerificationEmail: (email: string) =>
+    api.post<{ message: string }>("/api/v1/auth/verify-email/resend", { email }),
+  requestPasswordReset: (email: string) =>
+    api.post<{ message: string }>("/api/v1/auth/password-reset/request", { email }),
+  confirmPasswordReset: (token: string, new_password: string) =>
+    api.post<{ message: string }>("/api/v1/auth/password-reset/confirm", { token, new_password }),
   login: (body: { email: string; password: string }) =>
     api.post<TokenResponse>("/api/v1/auth/login", body),
   refresh: (body: { refresh_token: string }) =>
@@ -438,6 +576,9 @@ export interface GoalContract {
   motivation: Motivation;
   deadline_months: number;
   success_statement: string;
+  weekly_hours: string | null;
+  target_role: string | null;
+  days_remaining: number;
   created_at: string;
   updated_at: string;
 }
@@ -446,6 +587,8 @@ export interface GoalContractInput {
   motivation: Motivation;
   deadline_months: number;
   success_statement: string;
+  weekly_hours?: string | null;
+  target_role?: string | null;
 }
 
 export const goalsApi = {
@@ -702,6 +845,13 @@ export interface AutopsyFinding {
 }
 
 export interface PortfolioAutopsy {
+  /**
+   * The persisted row id is currently NOT returned by `POST /receipts/autopsy`
+   * (the route still uses the legacy `AutopsyResponse` shape). Marked optional
+   * so that a future backend change adding `id` to the response is non-breaking.
+   * The list/detail endpoints (`GET /receipts/autopsy[/{id}]`) DO carry `id`.
+   */
+  id?: string;
   headline: string;
   overall_score: number;
   architecture: AutopsyAxis;
@@ -714,6 +864,31 @@ export interface PortfolioAutopsy {
   next_project_seed: string;
 }
 
+// Persistence-side rows for the Proof Portfolio view.
+export interface PortfolioAutopsyListItem {
+  id: string;
+  project_title: string;
+  headline: string;
+  overall_score: number;
+  created_at: string;
+}
+
+export interface PortfolioAutopsyDetailResponse {
+  id: string;
+  user_id: string;
+  project_title: string;
+  project_description: string;
+  headline: string;
+  overall_score: number;
+  axes: Record<string, unknown>;
+  what_worked: string[];
+  what_to_do_differently: Record<string, unknown>[];
+  production_gaps: string[];
+  next_project_seed: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export const portfolioAutopsyApi = {
   create: (payload: {
     project_title: string;
@@ -723,6 +898,12 @@ export const portfolioAutopsyApi = {
     what_was_hard_self?: string;
   }) =>
     api.post<PortfolioAutopsy>("/api/v1/receipts/autopsy", payload),
+  list: () =>
+    api.get<PortfolioAutopsyListItem[]>("/api/v1/receipts/autopsy"),
+  get: (id: string) =>
+    api.get<PortfolioAutopsyDetailResponse>(
+      `/api/v1/receipts/autopsy/${id}`,
+    ),
 };
 
 export const interviewApi = {
@@ -868,12 +1049,34 @@ export interface PracticeReviewRecord {
   created_at: string;
 }
 
+export interface RunOutputSnapshot {
+  stdout: string;
+  stderr: string;
+  exit_code: number | null;
+  timed_out: boolean;
+  quality_score: number | null;
+  quality_summary: string | null;
+}
+
+export interface PracticeReviewPayload {
+  code: string;
+  problem_id?: string;
+  problem_context?: string;
+  run_output?: RunOutputSnapshot;
+}
+
+/** Senior-review fetch may legitimately take 60-90s when the upstream
+ * LLM provider rate-limits us and the Anthropic SDK retries internally.
+ * The default 30s timeout aborts mid-retry and surfaces a confusing
+ * "Request took too long" instead of the real "Reviewer is at capacity"
+ * message. 90s lines up with the agent's preemptive ceiling. */
+const SENIOR_REVIEW_TIMEOUT_MS = 90_000;
+
 export const practiceApi = {
-  review: (payload: {
-    code: string;
-    problem_id?: string;
-    problem_context?: string;
-  }) => api.post<PracticeReviewRecord>("/api/v1/practice/review", payload),
+  review: (payload: PracticeReviewPayload) =>
+    api.post<PracticeReviewRecord>("/api/v1/practice/review", payload, {
+      timeoutMs: SENIOR_REVIEW_TIMEOUT_MS,
+    }),
   listReviews: (problemId?: string, limit = 20) => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (problemId) params.set("problem_id", problemId);
@@ -910,6 +1113,8 @@ export interface SRSCard {
   id: string;
   concept_key: string;
   prompt: string;
+  answer: string;
+  hint: string;
   ease_factor: number;
   interval_days: number;
   repetitions: number;
@@ -951,6 +1156,98 @@ export interface MicroWinsResponse {
   wins: MicroWinItem[];
 }
 
+// ── Today summary (DISC: today refactor 2026-04-26) ──────────────
+export interface TodayUser {
+  first_name: string;
+}
+
+export interface TodayGoal {
+  success_statement: string | null;
+  target_role: string | null;
+  days_remaining: number;
+  motivation: string | null;
+}
+
+export interface TodayConsistency {
+  days_active: number;
+  window_days: number;
+}
+
+export interface TodayProgress {
+  overall_percentage: number;
+  lessons_completed_total: number;
+  lessons_total: number;
+  today_unlock_percentage: number;
+  active_course_id: string | null;
+  active_course_title: string | null;
+  next_lesson_id: string | null;
+  next_lesson_title: string | null;
+}
+
+export interface TodaySession {
+  id: string | null;
+  ordinal: number;
+  started_at: string | null;
+  warmup_done_at: string | null;
+  lesson_done_at: string | null;
+  reflect_done_at: string | null;
+}
+
+export interface TodayCurrentFocus {
+  skill_slug: string | null;
+  skill_name: string | null;
+  skill_blurb: string | null;
+}
+
+export interface TodayCapstone {
+  exercise_id: string | null;
+  title: string | null;
+  days_to_due: number | null;
+  draft_quality: number | null;
+  drafts_count: number;
+}
+
+export interface TodayMilestone {
+  label: string | null;
+  days: number;
+}
+
+export interface TodayReadiness {
+  current: number;
+  delta_week: number;
+}
+
+export interface TodayIntentionField {
+  text: string | null;
+}
+
+export interface TodayCohortEventItem {
+  kind: string;
+  actor_handle: string;
+  label: string;
+  occurred_at: string;
+}
+
+export interface TodaySummaryResponse {
+  user: TodayUser;
+  goal: TodayGoal;
+  consistency: TodayConsistency;
+  progress: TodayProgress;
+  session: TodaySession;
+  current_focus: TodayCurrentFocus;
+  capstone: TodayCapstone;
+  next_milestone: TodayMilestone;
+  readiness: TodayReadiness;
+  intention: TodayIntentionField;
+  due_card_count: number;
+  peers_at_level: number;
+  promotions_today: number;
+  micro_wins: MicroWinItem[];
+  cohort_events: TodayCohortEventItem[];
+}
+
+export type SessionStep = "warmup" | "lesson" | "reflect";
+
 export const todayApi = {
   getIntention: () => api.get<DailyIntention | null>("/api/v1/today/intention"),
   setIntention: (text: string, intentionDate?: string) =>
@@ -961,6 +1258,9 @@ export const todayApi = {
   consistency: () =>
     api.get<ConsistencyResponse>("/api/v1/today/consistency"),
   microWins: () => api.get<MicroWinsResponse>("/api/v1/today/micro-wins"),
+  summary: () => api.get<TodaySummaryResponse>("/api/v1/today/summary"),
+  markStep: (step: SessionStep) =>
+    api.post<TodaySummaryResponse>(`/api/v1/today/session/step/${step}`, {}),
 };
 
 // ── Retrieval quiz (3A-10) ───────────────────────────────────────
@@ -1022,4 +1322,515 @@ export const clarifyApi = {
     api.post<FollowupResponse>("/api/v1/clarify/followups", { reply }),
 };
 
-export { ApiError, API_BASE, sanitizeNext };
+// ── Readiness Overview + Proof Portfolio ─────────────────────────
+// Mirrors `backend/app/schemas/readiness_overview.py`. The wire is
+// snake_case so the FE types preserve snake_case (no remapping here).
+
+export interface ReadinessSubScores {
+  skill: number;
+  proof: number;
+  interview: number;
+  targeting: number;
+}
+
+export interface ReadinessNorthStarDelta {
+  current: number;
+  prior: number;
+  delta_week: number;
+}
+
+export interface ReadinessNextAction {
+  kind: string;
+  route: string;
+  label: string;
+  payload?: Record<string, unknown> | null;
+}
+
+export interface ReadinessLatestVerdict {
+  session_id: string;
+  headline: string;
+  next_action: ReadinessNextAction;
+  created_at: string;
+}
+
+export interface ReadinessTrendPoint {
+  week_start: string; // ISO date
+  score: number;
+}
+
+export interface ReadinessOverviewResponse {
+  user_first_name: string;
+  target_role: string | null;
+  overall_readiness: number;
+  sub_scores: ReadinessSubScores;
+  north_star: ReadinessNorthStarDelta;
+  top_actions: ReadinessNextAction[];
+  latest_verdict: ReadinessLatestVerdict | null;
+  trend_8w: ReadinessTrendPoint[];
+}
+
+export interface ProofCapstoneArtifact {
+  exercise_id: string;
+  title: string;
+  draft_count: number;
+  last_score: number | null;
+  days_since_last_edit: number | null;
+}
+
+export interface ProofAIReviewItem {
+  id: string;
+  problem_title: string | null;
+  score: number | null;
+  created_at: string;
+}
+
+export interface ProofAIReviews {
+  count: number;
+  last_three: ProofAIReviewItem[];
+}
+
+export interface ProofMockReport {
+  session_id: string;
+  headline: string | null;
+  verdict: string | null;
+  created_at: string;
+  target_role: string | null;
+}
+
+export interface ProofAutopsy {
+  id: string;
+  project_title: string;
+  headline: string;
+  overall_score: number;
+  created_at: string;
+}
+
+export interface ProofPeerReviews {
+  count_received: number;
+  count_given: number;
+}
+
+export interface ProofPrimaryArtifact {
+  title: string | null;
+  snippet: string | null;
+}
+
+export interface ProofResponse {
+  capstone_artifacts: ProofCapstoneArtifact[];
+  ai_reviews: ProofAIReviews;
+  mock_reports: ProofMockReport[];
+  autopsies: ProofAutopsy[];
+  peer_reviews: ProofPeerReviews;
+  last_capstone_summary: ProofPrimaryArtifact | null;
+}
+
+export const readinessOverviewApi = {
+  getOverview: () =>
+    api.get<ReadinessOverviewResponse>("/api/v1/readiness/overview"),
+  getProof: () => api.get<ProofResponse>("/api/v1/readiness/proof"),
+};
+
+// ── Application Kit ─────────────────────────────────────────────
+// Mirrors `backend/app/schemas/application_kit.py`.
+
+export interface BuildKitRequest {
+  label: string;
+  target_role?: string | null;
+  jd_library_id?: string | null;
+  tailored_resume_id?: string | null;
+  mock_session_id?: string | null;
+  autopsy_id?: string | null;
+}
+
+export interface ApplicationKitListItem {
+  id: string;
+  label: string;
+  target_role: string | null;
+  status: string;
+  generated_at: string | null;
+  created_at: string;
+  manifest_keys: string[];
+}
+
+export interface ApplicationKitResponse {
+  id: string;
+  label: string;
+  target_role: string | null;
+  status: string;
+  generated_at: string | null;
+  created_at: string;
+  manifest: Record<string, unknown>;
+  has_pdf: boolean;
+}
+
+export const applicationKitApi = {
+  build: (req: BuildKitRequest) =>
+    api.post<ApplicationKitResponse>("/api/v1/readiness/kit", req),
+  list: () =>
+    api.get<ApplicationKitListItem[]>("/api/v1/readiness/kit"),
+  get: (id: string) =>
+    api.get<ApplicationKitResponse>(`/api/v1/readiness/kit/${id}`),
+  delete: (id: string) => api.del(`/api/v1/readiness/kit/${id}`),
+  /**
+   * Returns the absolute URL for the PDF stream so callers can drop it
+   * into an `<a href download>` rather than fetching it through the JSON
+   * `request()` helper (which assumes JSON bodies).
+   */
+  downloadUrl: (id: string): string =>
+    `${API_BASE}/api/v1/readiness/kit/${id}/download`,
+};
+
+// ── Readiness Workspace Events ──────────────────────────────────
+// Mirrors `backend/app/schemas/readiness_events.py`.
+
+export interface RecordEventInput {
+  view: string;
+  event: string;
+  payload?: Record<string, unknown> | null;
+  session_id?: string | null;
+  occurred_at?: string | null;
+}
+
+export interface RecordEventBatchResponse {
+  recorded: number;
+  skipped: number;
+}
+
+export interface WorkspaceEventOut {
+  id: string;
+  view: string;
+  event: string;
+  payload: Record<string, unknown> | null;
+  session_id: string | null;
+  occurred_at: string;
+}
+
+export interface WorkspaceEventSummaryResponse {
+  total: number;
+  by_view: Record<string, number>;
+  by_event: Record<string, number>;
+  last_event_at: string | null;
+  since_days: number;
+  generated_at: string;
+}
+
+export interface WorkspaceEventListOpts {
+  view?: string;
+  limit?: number;
+}
+
+export interface WorkspaceEventSummaryOpts {
+  since_days?: number;
+}
+
+export const readinessEventsApi = {
+  /**
+   * Always normalizes to a wrapped batch — the backend pre-validator
+   * accepts both shapes but `{events: [...]}` keeps the wire predictable.
+   */
+  record: (events: RecordEventInput | RecordEventInput[]) => {
+    const batch = Array.isArray(events) ? events : [events];
+    return api.post<RecordEventBatchResponse>(
+      "/api/v1/readiness/events",
+      { events: batch },
+    );
+  },
+  list: (opts: WorkspaceEventListOpts = {}) => {
+    const params = new URLSearchParams();
+    if (opts.view) params.set("view", opts.view);
+    if (typeof opts.limit === "number") {
+      params.set("limit", String(opts.limit));
+    }
+    const qs = params.toString();
+    return api.get<WorkspaceEventOut[]>(
+      `/api/v1/readiness/events${qs ? `?${qs}` : ""}`,
+    );
+  },
+  summary: (opts: WorkspaceEventSummaryOpts = {}) => {
+    const params = new URLSearchParams();
+    if (typeof opts.since_days === "number") {
+      params.set("since_days", String(opts.since_days));
+    }
+    const qs = params.toString();
+    return api.get<WorkspaceEventSummaryResponse>(
+      `/api/v1/readiness/events/summary${qs ? `?${qs}` : ""}`,
+    );
+  },
+};
+
+// ── Catalog + Payments v2 (DISC: payments-v2 + catalog refactor 2026-04-26) ─
+// Mirrors `backend/app/schemas/payments_v2.py`. Wire is snake_case so the FE
+// types preserve snake_case (no remapping). UUIDs travel as strings; datetimes
+// as ISO-8601 strings.
+
+export interface CatalogBullet {
+  text: string;
+  included: boolean;
+}
+
+export interface CatalogCourseResponse {
+  id: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  price_cents: number;
+  currency: string;
+  is_published: boolean;
+  /** Featured courses are pinned to the top of the student catalog with a badge. */
+  is_featured?: boolean;
+  difficulty: string;
+  bullets: CatalogBullet[];
+  metadata: Record<string, unknown>;
+  /** Per-user. False for anon callers. */
+  is_unlocked: boolean;
+}
+
+export interface CatalogBundleResponse {
+  id: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  price_cents: number;
+  currency: string;
+  /** UUIDs of the courses included in this bundle. */
+  course_ids: string[];
+  metadata: Record<string, unknown>;
+  is_published: boolean;
+}
+
+export interface CatalogResponse {
+  courses: CatalogCourseResponse[];
+  bundles: CatalogBundleResponse[];
+}
+
+export type PaymentTargetType = "course" | "bundle";
+export type PaymentProvider = "razorpay" | "stripe";
+
+export interface CreateOrderRequest {
+  target_type: PaymentTargetType;
+  target_id: string;
+  provider?: PaymentProvider;
+  /** When omitted, the route falls back to settings.payments_default_currency. */
+  currency?: string | null;
+}
+
+export interface CreateOrderResponse {
+  order_id: string;
+  provider: string;
+  provider_order_id: string;
+  amount_cents: number;
+  currency: string;
+  receipt_number: string;
+  /** May be null in dev when the MockProvider fallback is active. */
+  razorpay_key_id: string | null;
+  user_email: string;
+  user_name: string;
+  target_title: string;
+}
+
+export interface ConfirmOrderRequest {
+  razorpay_order_id?: string | null;
+  razorpay_payment_id?: string | null;
+  razorpay_signature?: string | null;
+}
+
+export interface ConfirmOrderResponse {
+  order_id: string;
+  status: string;
+  paid_at: string | null;
+  fulfilled_at: string | null;
+  /** Course UUIDs whose entitlements were granted (may be >1 for bundles). */
+  entitlements_granted: string[];
+}
+
+export interface FreeEnrollRequest {
+  course_id: string;
+}
+
+export interface FreeEnrollResponse {
+  course_id: string;
+  entitlement_id: string;
+  granted_at: string;
+}
+
+export interface PaymentAttemptItem {
+  id: string;
+  provider: string;
+  provider_payment_id: string | null;
+  amount_cents: number;
+  status: string;
+  failure_reason: string | null;
+  attempted_at: string;
+}
+
+export interface OrderListItem {
+  id: string;
+  target_type: string;
+  target_id: string;
+  target_title: string | null;
+  amount_cents: number;
+  currency: string;
+  status: string;
+  receipt_number: string | null;
+  created_at: string;
+}
+
+export interface OrderDetailResponse extends OrderListItem {
+  paid_at: string | null;
+  fulfilled_at: string | null;
+  failure_reason: string | null;
+  payment_attempts: PaymentAttemptItem[];
+}
+
+export const catalogApi = {
+  // Trailing slash matters — the FastAPI route is mounted at `/catalog/`.
+  get: () => api.get<CatalogResponse>("/api/v1/catalog/"),
+};
+
+export const paymentsApi = {
+  createOrder: (body: CreateOrderRequest) =>
+    api.post<CreateOrderResponse>("/api/v1/payments/orders", body),
+  confirmOrder: (orderId: string, body: ConfirmOrderRequest) =>
+    api.post<ConfirmOrderResponse>(
+      `/api/v1/payments/orders/${orderId}/confirm`,
+      body,
+    ),
+  listOrders: () =>
+    api.get<OrderListItem[]>("/api/v1/payments/orders"),
+  getOrder: (orderId: string) =>
+    api.get<OrderDetailResponse>(`/api/v1/payments/orders/${orderId}`),
+  freeEnroll: (body: FreeEnrollRequest) =>
+    api.post<FreeEnrollResponse>("/api/v1/payments/free-enroll", body),
+  /**
+   * Returns the absolute URL for the receipt PDF stream so callers can drop
+   * it into an `<a href download>` rather than fetching it through the JSON
+   * `request()` helper (which assumes JSON bodies).
+   */
+  receiptUrl: (orderId: string): string =>
+    `${API_BASE}/api/v1/payments/orders/${orderId}/receipt.pdf`,
+};
+
+// ── Path screen aggregator (P-Path1) ───────────────────────────────────
+export type PathStarState = "done" | "current" | "upcoming" | "goal";
+export type PathLessonStatus = "done" | "current" | "upcoming";
+export type PathLabStatus = "done" | "current" | "locked";
+
+export interface PathStar {
+  /** Label may include `\n` for a forced line break inside the star tile. */
+  label: string;
+  sub: string;
+  state: PathStarState;
+  badge: string;
+}
+
+export interface PathLab {
+  id: string;
+  title: string;
+  description: string | null;
+  duration_minutes: number;
+  status: PathLabStatus;
+}
+
+export interface PathLesson {
+  id: string;
+  title: string;
+  meta: string;
+  duration_minutes: number;
+  status: PathLessonStatus;
+  labs: PathLab[];
+  labs_completed: number;
+}
+
+export interface PathLevel {
+  badge: string;
+  title: string;
+  blurb: string;
+  progress_percentage: number;
+  lessons: PathLesson[];
+  state: "current" | "upcoming" | "goal";
+  unlock_course_id: string | null;
+  unlock_price_cents: number | null;
+  unlock_currency: string | null;
+  unlock_lesson_count: number | null;
+  unlock_lab_count: number | null;
+}
+
+export interface PathProofEntry {
+  submission_id: string;
+  code_snippet: string;
+  author_name: string;
+  score: number;
+  promoted: boolean;
+}
+
+export interface PathSummaryResponse {
+  overall_progress: number;
+  active_course_id: string | null;
+  active_course_title: string | null;
+  constellation: PathStar[];
+  levels: PathLevel[];
+  proof_wall: PathProofEntry[];
+}
+
+export const pathApi = {
+  summary: () => api.get<PathSummaryResponse>("/api/v1/path/summary"),
+};
+
+// ── Promotion screen aggregator (P-Promo1) ─────────────────────────────
+export type PromotionRungState = "done" | "current" | "locked";
+export type PromotionGateStatus =
+  | "not_ready"
+  | "ready_to_promote"
+  | "promoted";
+export type PromotionRungKind =
+  | "lessons_foundation"
+  | "lessons_complete"
+  | "capstone_submitted"
+  | "interviews_complete";
+
+export interface PromotionRung {
+  kind: PromotionRungKind;
+  title: string;
+  detail: string;
+  state: PromotionRungState;
+  progress: number;
+  short_label: string;
+}
+
+export interface PromotionRoleTransition {
+  from_role: string;
+  to_role: string;
+}
+
+export interface PromotionStats {
+  completed_lessons: number;
+  total_lessons: number;
+  due_card_count: number;
+  completed_interviews: number;
+  capstone_submissions: number;
+}
+
+export interface PromotionSummaryResponse {
+  overall_progress: number;
+  rungs: PromotionRung[];
+  role: PromotionRoleTransition;
+  stats: PromotionStats;
+  gate_status: PromotionGateStatus;
+  promoted_at: string | null;
+  promoted_to_role: string | null;
+  user_first_name: string | null;
+}
+
+export interface PromotionConfirmResponse {
+  promoted_at: string;
+  promoted_to_role: string;
+}
+
+export const promotionApi = {
+  summary: () =>
+    api.get<PromotionSummaryResponse>("/api/v1/promotion/summary"),
+  confirm: () =>
+    api.post<PromotionConfirmResponse>("/api/v1/promotion/confirm", {}),
+};
+
+export { ApiError, ApiTimeoutError, API_BASE, sanitizeNext };

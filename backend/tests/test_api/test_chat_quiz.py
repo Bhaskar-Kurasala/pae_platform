@@ -68,13 +68,13 @@ async def _register_and_login(client: AsyncClient, email: str) -> str:
         json={
             "email": email,
             "full_name": "Test User",
-            "password": "pass1234",
+            "password": "pass12345678",
             "role": "student",
         },
     )
     resp = await client.post(
         "/api/v1/auth/login",
-        json={"email": email, "password": "pass1234"},
+        json={"email": email, "password": "pass12345678"},
     )
     return str(resp.json()["access_token"])
 
@@ -138,7 +138,7 @@ async def test_quiz_returns_200_with_questions(client: AsyncClient) -> None:
     token = await _register_and_login(client, "quiz_student@example.com")
 
     fake_llm = _FakeLLM(_MOCK_MCQ_JSON)
-    with patch("app.agents.mcq_factory.build_llm", return_value=fake_llm):
+    with patch("app.agents.llm_factory.build_llm", return_value=fake_llm):
         resp = await client.post(
             "/api/v1/chat/quiz",
             json={
@@ -172,7 +172,7 @@ async def test_quiz_fallback_when_llm_returns_garbage(client: AsyncClient) -> No
     token = await _register_and_login(client, "quiz_fallback@example.com")
 
     fake_llm = _FakeLLM("this is not valid json !!!!")
-    with patch("app.agents.mcq_factory.build_llm", return_value=fake_llm):
+    with patch("app.agents.llm_factory.build_llm", return_value=fake_llm):
         resp = await client.post(
             "/api/v1/chat/quiz",
             json={"message_id": "msg-bad", "content": "topic content"},

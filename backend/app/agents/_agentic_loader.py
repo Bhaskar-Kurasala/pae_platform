@@ -1,0 +1,180 @@
+"""Agentic-agent module loader.
+
+Single responsibility: import every module under `app/agents/` that
+defines an `AgenticBaseAgent` subclass, so the `__init_subclass__`
+hook fires and the agentic registry is populated.
+
+Why this lives in its own file:
+  • The legacy `app/agents/registry.py::_ensure_registered` imports
+    the legacy BaseAgent modules. We could overload that file, but
+    keeping the agentic loader separate means a stale legacy
+    agent's import error doesn't take down the agentic side, and
+    vice-versa.
+  • Boot-order matters: this MUST run before
+    `register_proactive_schedules(celery_app)`, which reads the
+    decorator-registered schedules. The intent is documented at
+    the call site in `app/core/celery_app.py`.
+
+Loud-fail contract (per D7b directive):
+  If any agentic agent module fails to import (broken syntax,
+  missing dep, bad decorator usage), boot fails LOUDLY here with
+  a wrapped exception that names which module broke. A swallowed
+  import error means a proactive flow silently stops working in
+  prod and nobody notices for a week.
+"""
+
+from __future__ import annotations
+
+import importlib
+from collections.abc import Iterable
+
+import structlog
+
+log = structlog.get_logger().bind(layer="agentic_loader")
+
+
+# Modules under app/agents/ that define AgenticBaseAgent subclasses.
+# Keep this list in sync as new agentic agents land. The legacy
+# BaseAgent modules live in `app/agents/registry.py::_ensure_registered`
+# and are NOT loaded here.
+_AGENTIC_AGENT_MODULES: tuple[str, ...] = (
+    # D8 — reference Learning Coach (replaces socratic_tutor /
+    # student_buddy / adaptive_path / spaced_repetition /
+    # knowledge_graph). Demonstrates all 5 primitives across chat,
+    # cron, and webhook entry points.
+    "app.agents.example_learning_coach",
+    # D10 — billing_support migration. Cutover landed in Checkpoint 4
+    # (commit reference TBD): legacy backend/app/agents/billing_support.py
+    # (the BaseAgent version) deleted; billing_support_v2.py renamed
+    # to billing_support.py. The class reachable through this loader
+    # is the AgenticBaseAgent version. The legacy AGENT_REGISTRY
+    # entry was removed at the same time (registry.py:38 import line
+    # dropped — the new class registers via _agentic_registry, not
+    # via the legacy @register decorator).
+    "app.agents.billing_support",
+    # D11 — senior_engineer migration (Pass 3c E2). Cutover at
+    # Checkpoint 4 deleted the legacy BaseAgent file and renamed
+    # senior_engineer_v2.py → senior_engineer.py at the same commit
+    # (mirroring the D10 billing_support pattern). The class
+    # reachable through this loader is the AgenticBaseAgent
+    # successor; the legacy AGENT_REGISTRY entries for
+    # senior_engineer + code_review + coding_assistant were dropped
+    # at the same commit (registry.py imports removed).
+    "app.agents.senior_engineer",
+    # D12 — career bundle migration (Pass 3c E3-E6). CP4 cutover
+    # collapsed the dual-registry pattern: legacy AGENT_REGISTRY
+    # entries for career_coach + resume_reviewer were removed and
+    # the legacy modules deleted; tailored_resume_llm.py kept the
+    # file (it's the inner LLM helper the service uses) but lost
+    # its @register decorator. AgenticBaseAgent is now the only
+    # path for these four agents.
+    "app.agents.career_coach_v2",
+    "app.agents.study_planner_v2",
+    "app.agents.resume_reviewer_v2",
+    "app.agents.tailored_resume_v2",
+    # D13 — mock_interview migration (Pass 3c E7). Stateful multi-turn
+    # interviews (session_id binds turns); first v2 agent with
+    # uses_self_eval=True per spec. CP4 cutover (D13 Checkpoint 4)
+    # deleted the legacy BaseAgent file and renamed mock_interview_v2.py
+    # → mock_interview.py at the same commit (mirroring the D10/D11/D12
+    # cutover pattern). The class reachable through this loader is the
+    # AgenticBaseAgent successor; the legacy AGENT_REGISTRY @register
+    # decorator was dropped at the same commit (registry.py import
+    # removed). First v2 agent to flip uses_self_eval=True; established
+    # the strip_extra_fields + truncate_to_schema canonical composition
+    # for "make LLM output safe before validation" (Bug 17 + Bug 23
+    # architectural fixes).
+    "app.agents.mock_interview",
+    # D14b — practice_curator migration (Pass 3c E8). NET-NEW agent (no
+    # legacy BaseAgent file existed). CP4 cutover named the file
+    # canonically as `practice_curator.py` (D8 example_learning_coach
+    # net-new naming pattern; no _v2 suffix needed since there's nothing
+    # to disambiguate from). Single-shot content-generating agent: each
+    # call produces ONE personalized exercise. uses_self_eval=False
+    # (D-C), uses_inter_agent=False (D-A: orchestration layer owns the
+    # handoff to senior_engineer). Sandbox dependency for reference-
+    # solution verification deferred (D-B; see follow-up doc). First v2
+    # agent producing user-facing content directly.
+    "app.agents.practice_curator",
+    # D14c — project_evaluator migration (Pass 3c E9). CP4 cutover
+    # deleted the legacy BaseAgent file and renamed
+    # project_evaluator_v2.py → project_evaluator.py at the same
+    # commit (D11 senior_engineer / D13 mock_interview cutover
+    # pattern). The class reachable through this loader is the
+    # AgenticBaseAgent successor; the legacy AGENT_REGISTRY @register
+    # decorator was dropped at the same commit (registry.py import
+    # removed). Single-shot content-generating agent: each call
+    # evaluates ONE capstone submission against the published rubric.
+    # Highest-cost deliverable of the D14 arc (typical_cost_inr=8.00).
+    # Per locked D-A single-shot, D-B no sandbox dependency, D-C no
+    # Critic / no mandatory validation chain (no meta-evaluator
+    # exists yet), D-D Pattern 18b held at preemptive 90s after a
+    # CP4 75s tightening attempt timed out (MiniMax tail-latency
+    # spread wider than observed_max × 1.30 at n=2), D-E rubric-grounding
+    # enforcement (prompt + runtime + schema-flag triple-layered
+    # defense), D-4 dual-rail graceful refusal on non-capstone
+    # submissions.
+    "app.agents.project_evaluator",
+    # "app.agents.engagement_watchdog",      # future
+    # "app.agents.code_mentor",              # future
+)
+
+
+class AgenticAgentImportError(RuntimeError):
+    """Boot-time failure importing an agentic agent module.
+
+    Wraps the underlying exception with the module name so the
+    operator sees the diagnosis without spelunking through a
+    multi-frame traceback. Always raised with `from exc` so the
+    original cause is preserved.
+    """
+
+
+def load_agentic_agents(
+    *,
+    modules: Iterable[str] | None = None,
+) -> list[str]:
+    """Import every agentic agent module so subclasses register.
+
+    Returns the list of module names that imported successfully.
+    Raises `AgenticAgentImportError` on the first failure — the
+    call site (Celery beat / FastAPI startup) is responsible for
+    catching and crashing the process loudly. We don't continue
+    past a broken module: a partial registration is worse than no
+    registration, because it makes "did my agent fire?" a guessing
+    game.
+
+    `modules` is overridable for tests that want to inject a
+    different list. Production callers pass nothing and use the
+    module-level constant.
+    """
+    target = list(modules) if modules is not None else list(_AGENTIC_AGENT_MODULES)
+    if not target:
+        log.info("agentic_loader.empty")
+        return []
+
+    loaded: list[str] = []
+    for module_name in target:
+        try:
+            importlib.import_module(module_name)
+        except Exception as exc:  # noqa: BLE001 - we want every cause surfaced
+            # Re-raise with context so the operator sees which
+            # module is broken, not a generic ImportError 6 frames
+            # deep. `from exc` keeps the original traceback chain.
+            raise AgenticAgentImportError(
+                f"failed to import agent module {module_name!r}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        loaded.append(module_name)
+    log.info(
+        "agentic_loader.loaded",
+        count=len(loaded),
+        modules=loaded,
+    )
+    return loaded
+
+
+__all__ = [
+    "AgenticAgentImportError",
+    "load_agentic_agents",
+]

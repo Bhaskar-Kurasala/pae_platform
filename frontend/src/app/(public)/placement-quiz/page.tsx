@@ -1,12 +1,22 @@
-import type { Metadata } from "next";
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useAuthStore } from "@/stores/auth-store";
 import { PlacementQuiz } from "./_quiz";
 
-export const metadata: Metadata = {
-  title: "Placement Quiz · Find your fastest path",
-  description:
-    "5 questions, 4 minutes. Get a personalized track recommendation based on where you are, where you want to go, and how fast you want to get there.",
-};
-
 export default function PlacementQuizPage() {
+  const router = useRouter();
+  const { isAuthenticated, _hasHydrated } = useAuthStore();
+
+  useEffect(() => {
+    if (_hasHydrated && isAuthenticated) {
+      router.replace("/quiz");
+    }
+  }, [isAuthenticated, _hasHydrated, router]);
+
+  // While hydrating or if logged in (redirect pending), show nothing
+  if (!_hasHydrated || isAuthenticated) return null;
+
   return <PlacementQuiz />;
 }

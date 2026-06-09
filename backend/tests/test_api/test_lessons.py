@@ -18,13 +18,13 @@ async def _admin_token(client: AsyncClient) -> str:
         json={
             "email": "lessonadmin@example.com",
             "full_name": "Admin",
-            "password": "admin123",
+            "password": "admin1234567",
             "role": "admin",
         },
     )
     resp = await client.post(
         "/api/v1/auth/login",
-        json={"email": "lessonadmin@example.com", "password": "admin123"},
+        json={"email": "lessonadmin@example.com", "password": "admin1234567"},
     )
     return resp.json()["access_token"]
 
@@ -71,5 +71,9 @@ async def test_admin_can_create_lesson(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_get_lesson_not_found(client: AsyncClient) -> None:
-    resp = await client.get(f"/api/v1/lessons/{uuid.uuid4()}")
+    token = await _admin_token(client)
+    resp = await client.get(
+        f"/api/v1/lessons/{uuid.uuid4()}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
     assert resp.status_code == 404

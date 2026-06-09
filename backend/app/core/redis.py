@@ -15,6 +15,16 @@ _KEY_CATEGORIES = frozenset(
         "courses",  # published course list cache
         "interview",  # mock-interview session store
         "quiz",  # pre-generated quiz versions keyed by message_id
+        "notebook",  # P-Today2: bookmark summarization cache by message_id
+        # Track 2 — Agentic OS escalation limiter. Per-agent
+        # sorted set, scored by epoch seconds, ZREMRANGEBYSCORE
+        # window of 3600s. See evaluation.RedisEscalationLimiter
+        # for the full key shape.
+        "escalation",
+        # Batch 1 / D-F — per-user per-type email rate limiter.
+        # Key shape: email_rate:{user_id}:{token_type}:{hour_bucket}
+        # INCR + EXPIRE pattern; max 5 emails of each type per user per hour.
+        "email_rate",
     }
 )
 

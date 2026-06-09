@@ -14,6 +14,8 @@ import {
   portfolioAutopsyApi,
   type PortfolioAutopsy,
 } from "@/lib/api-client";
+import { GracefulFailureMessage } from "@/components/errors/graceful-failure-message";
+import { translateError } from "@/lib/error-toast";
 
 function scoreTone(score: number, max: number): string {
   const pct = score / max;
@@ -74,7 +76,8 @@ export function PortfolioAutopsyWidget() {
       });
       setResult(autopsy);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Autopsy failed");
+      console.error("[portfolio-autopsy] submit failed", err);
+      setError(translateError(err));
     } finally {
       setSubmitting(false);
     }
@@ -224,9 +227,12 @@ export function PortfolioAutopsyWidget() {
             </div>
           </div>
           {error && (
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {error}
-            </div>
+            <GracefulFailureMessage
+              userMessage={error}
+              onRetry={() => setError(null)}
+              retryLabel="Dismiss"
+              className="text-xs"
+            />
           )}
           <div className="flex items-center gap-2">
             <button

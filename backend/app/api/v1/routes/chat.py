@@ -15,8 +15,10 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api._deprecated import deprecated
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.core.uploads import ALLOWED_CHAT_ATTACHMENT_MIMES, validate_upload_mime
 from app.models.user import User
 from app.schemas.chat import (
     ChatAttachmentRead,
@@ -28,8 +30,8 @@ from app.schemas.chat import (
     ConversationListItem,
     ConversationRead,
     ConversationUpdate,
-    FlashcardExtractRequest,
-    FlashcardExtractResponse,
+    FlashcardCreateRequest,
+    FlashcardCreateResponse,
     FlashcardItem,
     QuizGenerateRequest,
     QuizGenerateResponse,
@@ -53,6 +55,7 @@ def _service(db: AsyncSession = Depends(get_db)) -> ChatService:
     response_model=ConversationRead,
     status_code=status.HTTP_201_CREATED,
 )
+@deprecated(sunset="2026-07-01", reason="frontend creates conversations implicitly via /chat")
 async def create_conversation(
     payload: ConversationCreate,
     service: ChatService = Depends(_service),
@@ -292,6 +295,7 @@ async def get_conversation(
     "/conversations/{conversation_id}/messages",
     response_model=list[ChatMessageRead],
 )
+@deprecated(sunset="2026-07-01", reason="frontend uses /conversations/{id} (returns messages)")
 async def list_messages(
     conversation_id: uuid.UUID,
     limit: int = Query(default=50, ge=1, le=200),
@@ -581,6 +585,7 @@ async def upload_attachment(
     `attachment_ids`. The attachment is created with `message_id = NULL`
     until the stream endpoint binds it.
     """
+    await validate_upload_mime(file, allowed_mimes=ALLOWED_CHAT_ATTACHMENT_MIMES)
     data = await file.read()
     declared_mime = file.content_type or ""
     filename = file.filename or "attachment.bin"
@@ -602,6 +607,7 @@ async def upload_attachment(
     "/context-suggestions",
     response_model=ContextSuggestionsResponse,
 )
+@deprecated(sunset="2026-07-01", reason="no live UI caller -- re-evaluate when context UX returns")
 async def context_suggestions(
     lesson_id: uuid.UUID | None = Query(
         default=None,
@@ -635,129 +641,102 @@ import structlog as _structlog
 _flash_log = _structlog.get_logger()
 
 
-def _parse_flashcards(text: str) -> list[FlashcardItem]:
-    """Extract Q/A pairs from agent response text.
+# P-Today3 (2026-04-26): code fences inside a flashcard back are a smell —
+# the warm-up screen renders one bullet of text, not Markdown. Strip them
+# silently and count it so the UI can show a quiet "trimmed N" hint.
+_CODE_FENCE_RE = _re.compile(r"```[^\n]*\n.*?```", _re.DOTALL)
 
-    Supports two formats:
-      1. A JSON array ``[{"question": ..., "answer": ...}, ...]``
-      2. ``Q: ... / A: ...`` line pairs
+
+def _normalize_back(raw: str) -> tuple[str, bool]:
+    """Strip code fences and collapse internal whitespace in card backs.
+
+    Returns ``(cleaned, was_modified)``. Anything that arrives at the SRS
+    review screen should read as a single recall sentence — fenced code is
+    not appropriate for that surface and almost always indicates the student
+    pasted the LLM's example block.
     """
-    # Try JSON array first
-    try:
-        json_match = _re.search(r"\[.*\]", text, _re.DOTALL)
-        if json_match:
-            items = _json.loads(json_match.group())
-            if isinstance(items, list):
-                cards: list[FlashcardItem] = []
-                for item in items:
-                    if isinstance(item, dict):
-                        q = str(item.get("question", item.get("q", ""))).strip()
-                        a = str(item.get("answer", item.get("a", ""))).strip()
-                        if q and a:
-                            cards.append(FlashcardItem(question=q, answer=a))
-                if cards:
-                    return cards
-    except Exception:
-        pass
-
-    # Fallback: Q: / A: line patterns
-    qa_cards: list[FlashcardItem] = []
-    pattern = _re.compile(
-        r"Q:\s*(.+?)\s*\n\s*A:\s*(.+?)(?=\n\s*Q:|\Z)", _re.DOTALL | _re.IGNORECASE
-    )
-    for m in pattern.finditer(text):
-        q = m.group(1).strip()
-        a = m.group(2).strip()
-        if q and a:
-            qa_cards.append(FlashcardItem(question=q, answer=a))
-    return qa_cards
+    cleaned = _CODE_FENCE_RE.sub(" ", raw)
+    # Collapse runs of whitespace (including newlines) to single spaces so the
+    # card renders as one clean line on the warm-up screen.
+    cleaned = " ".join(cleaned.split()).strip()
+    return cleaned, cleaned != raw.strip()
 
 
 @router.post(
     "/flashcards",
-    response_model=FlashcardExtractResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Extract flashcards from a chat message (P3-2)",
+    response_model=FlashcardCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create student-authored flashcards from a chat message",
 )
-async def extract_flashcards(
-    payload: FlashcardExtractRequest,
+async def create_flashcards(
+    payload: FlashcardCreateRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> FlashcardExtractResponse:
-    """Extract Q/A cards from content and persist them to the SRS table.
+) -> FlashcardCreateResponse:
+    """Persist 1–10 student-authored Q/A cards to the SRS review queue.
 
-    Calls the spaced_repetition agent to identify Q/A pairs, then writes each
-    card via SRSService.upsert_card so it appears in the student's review queue.
+    The auto-extraction path was removed in P-Today3 (2026-04-26) — see the
+    schema docstring for the rationale. Cards are now always student-authored
+    in the chat-side modal. We dedupe by ``(message_id, normalized_front)``
+    so the same card written twice in the modal doesn't create two SRS rows.
+
+    Each card becomes one ``SRSCard`` keyed by ``chat:<message_id>:<idx>``.
+    The index suffix avoids collisions when two cards on the same message
+    share similar fronts.
     """
-    from app.agents.registry import get_agent, _ensure_registered
-    from app.agents.base_agent import AgentState
     from app.services.srs_service import SRSService
-    import re as _re_slug
 
-    _ensure_registered()
-    try:
-        agent = get_agent("spaced_repetition")
-    except KeyError:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="spaced_repetition agent is not registered",
-        )
+    seen_fronts: set[str] = set()
+    persisted: list[FlashcardItem] = []
+    trimmed_count = 0
 
-    state = AgentState(
-        student_id=str(current_user.id),
-        conversation_history=[],
-        task=f"Extract flashcards from: {payload.content[:2000]}",
-        context={"source_message_id": payload.message_id},
-        response=None,
-        tools_used=[],
-        evaluation_score=None,
-        agent_name=None,
-        error=None,
-        metadata={},
-    )
-
-    try:
-        result_state = await agent.execute(state)
-    except Exception as exc:
-        _flash_log.warning("flashcard_extract.agent_failed", error=str(exc))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to invoke spaced_repetition agent",
-        ) from exc
-
-    response_text = result_state.response or ""
-    cards = _parse_flashcards(response_text)
-
-    # If the agent returned nothing parseable, synthesise one card from the
-    # raw content so the student always gets at least one review item.
-    if not cards and payload.content.strip():
-        snippet = payload.content.strip()[:200]
-        cards = [FlashcardItem(question=snippet, answer="Review this material.")]
-
-    # Persist each extracted card to the SRS table so it enters the review queue.
     srs = SRSService(db)
-    for card in cards:
-        slug = _re_slug.sub(r"[^a-z0-9]+", "-", card.question.lower())[:80].strip("-")
-        concept_key = f"chat:{slug}"
+    for idx, raw_card in enumerate(payload.cards):
+        front = raw_card.front.strip()
+        front_key = front.lower()
+        if not front or front_key in seen_fronts:
+            continue
+        seen_fronts.add(front_key)
+
+        back, was_trimmed = _normalize_back(raw_card.back)
+        if was_trimmed:
+            trimmed_count += 1
+        # If trimming nuked everything (pure code-fence card), drop it
+        # rather than persist a junk row.
+        if not back:
+            continue
+
+        concept_key = f"chat:{payload.message_id}:{idx}"
         try:
             await srs.upsert_card(
                 user_id=current_user.id,
                 concept_key=concept_key,
-                prompt=card.question,
+                prompt=front,
+                answer=back,
+                hint="Say it out loud first, then reveal.",
             )
         except Exception as exc:
             _flash_log.warning(
-                "flashcard_extract.srs_persist_failed",
+                "flashcards.persist_failed",
                 concept_key=concept_key,
                 error=str(exc),
             )
+            continue
+
+        persisted.append(FlashcardItem(question=front, answer=back))
 
     _flash_log.info(
-        "flashcard_extract.persisted",
+        "flashcards.persisted",
         user_id=str(current_user.id),
-        cards=len(cards),
+        message_id=payload.message_id,
+        cards=len(persisted),
+        trimmed=trimmed_count,
     )
-    return FlashcardExtractResponse(cards_added=len(cards), cards=cards)
+    return FlashcardCreateResponse(
+        cards_added=len(persisted),
+        cards=persisted,
+        cards_trimmed=trimmed_count,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -807,6 +786,11 @@ def _extract_partial_json_objects(text: str) -> list[dict]:
                             if isinstance(obj, dict):
                                 objects.append(obj)
                         except json.JSONDecodeError:
+                            # PR3/C2.1 — intentional silent skip:
+                            # this brace match wasn't valid JSON, so
+                            # we move on to the next candidate. No log
+                            # because we'd emit one per false-positive
+                            # brace and drown signal in noise.
                             pass
                         i = j + 1
                         break
@@ -1092,3 +1076,49 @@ async def trigger_quiz_pregeneration(
         _quiz_log.info("quiz_pregenerate.enqueued", message_id=message_id)
 
     return {"status": "accepted"}
+
+
+# ---------------------------------------------------------------------------
+# Welcome prompts (Tutor refactor 2026-04-26)
+# ---------------------------------------------------------------------------
+
+
+from app.schemas.chat_welcome import (  # noqa: E402
+    WelcomePromptItem,
+    WelcomePromptsResponse,
+)
+from app.services.welcome_prompt_service import (  # noqa: E402
+    ChatMode,
+    build_welcome_prompts,
+)
+
+
+@router.get("/welcome-prompts", response_model=WelcomePromptsResponse)
+async def get_welcome_prompts(
+    mode: str = Query(default="auto", max_length=16),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> WelcomePromptsResponse:
+    """Personalized starter prompts for the chat WelcomeScreen.
+
+    `mode` mirrors the chat mode chips: auto / tutor / code / career / quiz.
+    Falls back to a curated default set when the user has no signal.
+    """
+    valid_modes: set[str] = {"auto", "tutor", "code", "career", "quiz"}
+    if mode not in valid_modes:
+        mode = "auto"
+    chosen = await build_welcome_prompts(
+        db, user=current_user, mode=mode  # type: ignore[arg-type]
+    )
+    return WelcomePromptsResponse(
+        mode=mode,  # type: ignore[arg-type]
+        prompts=[
+            WelcomePromptItem(
+                text=p.text,
+                icon=p.icon,
+                kind=p.kind,
+                rationale=p.rationale,
+            )
+            for p in chosen
+        ],
+    )

@@ -22,6 +22,8 @@ import {
 import { PeerGallery } from "@/components/features/peer-gallery";
 import { SelfExplanationModal } from "@/components/features/self-explanation-modal";
 import { PageShell } from "@/components/layouts/page-shell";
+import { GracefulFailureMessage } from "@/components/errors/graceful-failure-message";
+import { translateError } from "@/lib/error-toast";
 
 const CODE_MIN = 1;
 const CODE_MAX = 20000;
@@ -124,11 +126,8 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
       setExplainOpen(false);
       historyQuery.refetch();
     } catch (err) {
-      if (err instanceof ApiError) {
-        setError(err.message);
-      } else {
-        setError("Submission failed. Please try again.");
-      }
+      console.error("[exercises] submit failed", err);
+      setError(translateError(err));
       setExplainOpen(false);
     } finally {
       setSubmitting(false);
@@ -155,11 +154,8 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
       const res = await exercisesApi.getSolution(id);
       setSolution(res.solution_code);
     } catch (err) {
-      if (err instanceof ApiError) {
-        setSolutionError(err.message);
-      } else {
-        setSolutionError("Could not load the solution. Try again.");
-      }
+      console.error("[exercises] reveal solution failed", err);
+      setSolutionError(translateError(err));
     } finally {
       setSolutionLoading(false);
     }
@@ -284,9 +280,12 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
         </div>
 
         {error && (
-          <div className="rounded-lg bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">
-            {error}
-          </div>
+          <GracefulFailureMessage
+            userMessage={error}
+            onRetry={() => setError("")}
+            retryLabel="Dismiss"
+            className="text-sm"
+          />
         )}
 
         <button
@@ -424,7 +423,12 @@ export default function ExerciseDetailPage({ params }: { params: Promise<{ id: s
                 Reveal solution
               </button>
               {solutionError && (
-                <p className="text-sm text-destructive">{solutionError}</p>
+                <GracefulFailureMessage
+                  userMessage={solutionError}
+                  onRetry={() => void handleRevealSolution()}
+                  retryLabel="Try again"
+                  className="text-sm"
+                />
               )}
             </>
           )}

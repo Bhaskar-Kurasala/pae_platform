@@ -76,8 +76,8 @@ function MobileDrawer({
                 onClick={onClose}
                 className="font-bold text-lg focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:outline-none rounded"
               >
-                <span className="text-primary">PAE</span>
-                <span className="text-foreground"> Platform</span>
+                <span className="text-primary">AI Career</span>
+                <span className="text-foreground"> OS</span>
               </Link>
               <button
                 type="button"
@@ -156,7 +156,7 @@ export function Header() {
           {/* Logo */}
           <Link
             href="/"
-            aria-label="PAE Platform home"
+            aria-label="AI Career OS home"
             className="font-bold text-xl shrink-0 focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:outline-none rounded"
           >
             <span className="text-primary">PAE</span>

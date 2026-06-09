@@ -1,0 +1,122 @@
+{
+  "id": "cost",
+  "title": "Cost (INR)",
+  "owner": "founder + ops",
+  "description": "LLM cost burn — founder-glance view (D19.3 D-A: sub-60-second daily scan answers 'is today's burn on track? any student over ceiling? any agent producing outsized cost?'). Deeper investigation flows through individual panels' drill-downs.",
+  "runbook": "../runbooks.md#cost",
+  "time_range_default": "24h",
+  "panels": [
+    {
+      "id": "todays-burn-vs-expected",
+      "title": "Today's burn vs expected",
+      "panel_type": "delta_vs_baseline",
+      "description": "Single big number with delta + sparkline. Cumulative cost_inr today vs expected daily cost. Color-coded: green within 1.0-1.2x expected, amber 1.2-1.5x, red >1.5x. The cost-spike Trigger fires at 1.5x (see alerts/cost-spike-trigger.md); this panel makes the same signal visible during the daily review BEFORE the trigger fires.",
+      "query": {
+        "metric": "aicareeros_agent_cost_inr",
+        "aggregation": "sum",
+        "rate_window": "24h"
+      },
+      "baseline_query": {
+        "metric": "aicareeros_agent_cost_inr",
+        "aggregation": "quantile",
+        "quantile": 0.5,
+        "rate_window": "24h",
+        "over_window": "7d",
+        "description": "Rolling 7-day median of daily cost — the 'normal day' baseline. PromQL: quantile_over_time(0.5, sum_over_time(aicareeros_agent_cost_inr[24h])[7d:24h]). Honeycomb: equivalent BubbleUp on a 7d slice."
+      },
+      "thresholds": {
+        "green_max_multiple": 1.2,
+        "amber_max_multiple": 1.5,
+        "red_above_multiple": 1.5
+      }
+    },
+    {
+      "id": "students-near-or-at-ceiling",
+      "title": "Students near or at daily ceiling",
+      "panel_type": "table",
+      "description": "Students where today's cost / ceiling > 0.7. Empty state ('No students near ceiling today') is the positive signal — founder scans for the empty state and moves on. Non-empty rows: investigate same-day. Sourced from mv_student_daily_cost JOINed against users.daily_cost_ceiling_inr_override; per-student cardinality is bounded at cohort-1 scale (~20-100 rows) and the query is filtered at the DB.",
+      "source": "db_query",
+      "query": {
+        "sql": "SELECT u.id AS student_id, u.full_name, COALESCE(mv.cost_inr_total, 0) AS cost_inr_today, COALESCE(u.daily_cost_ceiling_inr_override, :default_ceiling) AS ceiling_inr, ROUND((COALESCE(mv.cost_inr_total, 0) / NULLIF(COALESCE(u.daily_cost_ceiling_inr_override, :default_ceiling), 0))::numeric, 2) AS pct_used FROM users u LEFT JOIN mv_student_daily_cost mv ON mv.user_id = u.id AND mv.day_utc = CURRENT_DATE WHERE u.is_deleted = false AND COALESCE(mv.cost_inr_total, 0) / NULLIF(COALESCE(u.daily_cost_ceiling_inr_override, :default_ceiling), 0) > 0.7 ORDER BY pct_used DESC LIMIT 50",
+        "params": {
+          "default_ceiling": "STUDENT_DAILY_COST_CEILING_INR env var or tier-config default"
+        }
+      },
+      "empty_state": "No students near ceiling today",
+      "columns": ["student_id", "full_name", "cost_inr_today", "ceiling_inr", "pct_used"]
+    },
+    {
+      "id": "ceiling-hits-today",
+      "title": "Ceiling hits today",
+      "panel_type": "count_with_drilldown",
+      "description": "Count of cohort_events.kind='daily_cost_ceiling_hit' in last 24h. Each hit means a student was declined an invocation at dispatch entry because they were at/over ceiling. Empty (count=0) is the positive signal during normal operation; a count > 0 means at least one student hit the wall today — investigate via cohort-events-review-process.md.",
+      "source": "db_query",
+      "query": {
+        "sql": "SELECT COUNT(*) AS hit_count FROM cohort_events WHERE kind = 'daily_cost_ceiling_hit' AND occurred_at >= NOW() - INTERVAL '24 hours'",
+        "drilldown_sql": "SELECT occurred_at, actor_handle, label, payload FROM cohort_events WHERE kind = 'daily_cost_ceiling_hit' AND occurred_at >= NOW() - INTERVAL '24 hours' ORDER BY occurred_at DESC"
+      },
+      "empty_state": "No ceiling hits today"
+    },
+    {
+      "id": "cost-rate-by-agent",
+      "title": "Cost (INR/hour) by agent",
+      "panel_type": "counter_rate",
+      "description": "Hourly cost-burn rate per agent. Sustained outliers signal prompt regressions or specialist runaway. Drill-down: agent-health.json for the offending agent.",
+      "query": {
+        "metric": "aicareeros_agent_cost_inr",
+        "aggregation": "rate",
+        "rate_window": "1h",
+        "by": ["agent_id"]
+      }
+    },
+    {
+      "id": "top-cost-agents-today",
+      "title": "Top 5 cost-burning agents today",
+      "panel_type": "table",
+      "description": "Sorted table of agents by today's cost. Founder catches anomalies like 'career_coach is 3x its usual cost today' at a glance.",
+      "query": {
+        "metric": "aicareeros_agent_cost_inr",
+        "aggregation": "sum",
+        "rate_window": "24h",
+        "by": ["agent_id"],
+        "sort": "desc",
+        "limit": 5
+      }
+    },
+    {
+      "id": "cumulative-cost-today-week-month",
+      "title": "Cumulative cost: today / this week / this month",
+      "panel_type": "multi_number_with_deltas",
+      "description": "Three numbers with week-over-week and month-over-month deltas. The 'is the business sustainable' view — founder reviews weekly. Today: rolling 24h. Week: rolling 7d with delta vs prior 7d. Month: rolling 30d with delta vs prior 30d.",
+      "query": {
+        "metric": "aicareeros_agent_cost_inr",
+        "aggregation": "sum",
+        "rate_windows": ["24h", "7d", "30d"],
+        "include_deltas": true,
+        "delta_baselines": {
+          "7d": "prior_7d",
+          "30d": "prior_30d"
+        }
+      },
+      "supersedes": [
+        "cumulative-cost-today",
+        "cumulative-cost-week",
+        "cumulative-cost-month"
+      ]
+    },
+    {
+      "id": "per-cohort-attribution-placeholder",
+      "title": "Per-cohort cost attribution",
+      "panel_type": "placeholder",
+      "description": "Per-cohort cost attribution available in pre-cohort-2 deliverable. See docs/followups/cohort-membership-modeling.md for the deferred decision + re-evaluation trigger. Cohort_id is not yet a first-class concept on User; cohort-1's high-touch operating mode treats the entire active cohort as one bucket. When cohort-2 onboarding planning begins OR a corporate cohort enrollment commitment lands OR a cohort-1 retrospective surfaces a cost-attribution question the per-student view can't answer, the deferred decision (FK / derived view / level_slug proxy) is made with cohort-1 empirical data informing the choice.",
+      "placeholder_reason": "cohort_id schema deferred; see docs/followups/cohort-membership-modeling.md",
+      "expected_render_target": "pre-cohort-2 architect-led deliverable"
+    }
+  ],
+  "notes": [
+    "D19.3 D-A reshape (2026-05-13): founder-glance panels first (todays-burn-vs-expected, students-near-ceiling, ceiling-hits-today), trend panels next (cost-rate-by-agent, top-cost-agents-today, cumulative-multi-window), placeholder last. Daily founder review takes <60s in the optimistic-empty-state case; investigation drills down from the panels that aren't empty.",
+    "Per-user / per-cohort cost attribution lives in logs (CP1 contextvars carry user_id; trace_id correlates the cost-burn span to the originating request) and in agent_actions / mv_student_daily_cost rows. Metric labels stay agent-scoped per D-C cardinality discipline; the students-near-ceiling + ceiling-hits-today panels are DB-sourced explicitly (source: db_query) because the cardinality boundary that makes per-student-as-metric-label unsafe doesn't apply to per-student-as-SQL-row.",
+    "Cohort-1 launch cost ceiling: defaults to ₹50/student/day per Pass 3f §D.1; per-student override via users.daily_cost_ceiling_inr_override (D19.2 CP1.4). mv_student_daily_cost enforces; this dashboard observes.",
+    "Per-provider attribution (Anthropic / MiniMax / model version / token class) is registered as a deferred follow-up; see docs/followups/provider-level-cost-attribution-via-gen-ai-otel.md. Awaiting Anthropic OTel gen_ai conventions to reach stable status."
+  ]
+}

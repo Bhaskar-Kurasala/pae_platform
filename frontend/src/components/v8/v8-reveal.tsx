@@ -53,10 +53,26 @@ export function V8Reveal() {
         .forEach((el) => maybeAnimateCount(el));
     }, 60);
 
-    // Watch for new .reveal elements added later (data-loaded content).
+    // Watch for new .reveal elements added later (data-loaded content) AND
+    // for `data-to` updates on existing `.count` nodes (so when async data
+    // resolves AFTER first render, the counter re-animates to the new value
+    // instead of staying frozen on the loading-state 0).
     const mutation = new MutationObserver((records) => {
       let dirty = false;
       for (const r of records) {
+        if (
+          r.type === "attributes" &&
+          r.attributeName === "data-to" &&
+          r.target.nodeType === 1
+        ) {
+          const el = r.target as HTMLElement;
+          if (el.classList.contains("count")) {
+            // Reset and re-run the animation so the new target sticks.
+            delete el.dataset.animated;
+            maybeAnimateCount(el);
+          }
+          continue;
+        }
         r.addedNodes.forEach((n) => {
           if (n.nodeType !== 1) return;
           const el = n as HTMLElement;
@@ -69,7 +85,12 @@ export function V8Reveal() {
       }
       if (dirty) observeReveals();
     });
-    mutation.observe(document.body, { childList: true, subtree: true });
+    mutation.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-to"],
+    });
 
     // Failsafe: anything still un-revealed after 1.2s gets force-revealed so
     // off-screen or never-intersected content doesn't stay blurred forever.

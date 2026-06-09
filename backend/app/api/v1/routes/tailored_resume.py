@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api._deprecated import deprecated
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user
@@ -144,6 +145,7 @@ async def generate(
 
 
 @router.get("/{tailored_resume_id}/pdf")
+@deprecated(sunset="2026-07-01", reason="PDF download not yet wired in v8")
 async def download_pdf(
     tailored_resume_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),

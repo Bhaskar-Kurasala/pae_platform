@@ -14,6 +14,8 @@ class SRSCardResponse(BaseModel):
     id: uuid.UUID
     concept_key: str
     prompt: str
+    answer: str = ""
+    hint: str = ""
     ease_factor: float
     interval_days: int
     repetitions: int
@@ -32,3 +34,5 @@ class SRSReviewRequest(BaseModel):
 class SRSUpsertRequest(BaseModel):
     concept_key: str = Field(min_length=1, max_length=128)
     prompt: str = Field(default="", max_length=2000)
+    answer: str = Field(default="", max_length=4000)
+    hint: str = Field(default="", max_length=2000)

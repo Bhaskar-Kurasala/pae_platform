@@ -1,6 +1,6 @@
 import { StubPage } from "../_components/stub-page";
 
-export const metadata = { title: "Docs · PAE Platform" };
+export const metadata = { title: "Docs · AI Career OS" };
 
 export default function DocsPage() {
   return (

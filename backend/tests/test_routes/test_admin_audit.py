@@ -10,13 +10,13 @@ async def _admin_token(client: AsyncClient) -> str:
         json={
             "email": "auditadmin@example.com",
             "full_name": "Audit Admin",
-            "password": "admin1234",
+            "password": "admin12345678",
             "role": "admin",
         },
     )
     resp = await client.post(
         "/api/v1/auth/login",
-        json={"email": "auditadmin@example.com", "password": "admin1234"},
+        json={"email": "auditadmin@example.com", "password": "admin12345678"},
     )
     return str(resp.json()["access_token"])
 
@@ -27,12 +27,12 @@ async def _student_token(client: AsyncClient) -> str:
         json={
             "email": "auditstudent@example.com",
             "full_name": "Audit Student",
-            "password": "pass1234",
+            "password": "pass12345678",
         },
     )
     resp = await client.post(
         "/api/v1/auth/login",
-        json={"email": "auditstudent@example.com", "password": "pass1234"},
+        json={"email": "auditstudent@example.com", "password": "pass12345678"},
     )
     return str(resp.json()["access_token"])
 

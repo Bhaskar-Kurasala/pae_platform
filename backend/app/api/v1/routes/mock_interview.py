@@ -193,7 +193,11 @@ async def start_mock_session(
             voice_enabled=payload.voice_enabled,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        log.warning("mock.start.validation_error", error=str(exc))
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to start mock interview session. Please check your request.",
+        ) from exc
     except Exception as exc:
         log.exception("mock.start.failed", error=str(exc))
         raise HTTPException(
@@ -238,7 +242,11 @@ async def submit_mock_answer(
             time_to_first_word_ms=payload.time_to_first_word_ms,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        log.warning("mock.answer.validation_error", error=str(exc))
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to submit answer. Please check your request.",
+        ) from exc
     except CostCapExceededError as exc:
         log.warning(
             "mock.answer.cost_cap",

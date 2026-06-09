@@ -71,9 +71,12 @@ def test_detects_error_paste_negative(message: str) -> None:
 # --- should_apply_intent_overlay (agent gate) -----------------------------
 
 
-def test_overlay_applies_for_coding_assistant() -> None:
+def test_overlay_applies_for_senior_engineer() -> None:
+    """D11 cutover (Checkpoint 4) absorbed coding_assistant +
+    code_review into senior_engineer. The overlay still applies for
+    code-flavored agents — just the canonical name is different."""
     paste = "Traceback (most recent call last):\nValueError: x"
-    assert should_apply_intent_overlay("coding_assistant", paste) is True
+    assert should_apply_intent_overlay("senior_engineer", paste) is True
 
 
 def test_overlay_applies_for_studio_tutor() -> None:
@@ -81,9 +84,12 @@ def test_overlay_applies_for_studio_tutor() -> None:
     assert should_apply_intent_overlay("studio_tutor", paste) is True
 
 
-def test_overlay_applies_for_code_review() -> None:
+def test_overlay_applies_for_senior_engineer_with_keyerror() -> None:
+    """Variant of the above with a different paste shape — confirms
+    the overlay fires regardless of which Python error class is in
+    the paste."""
     paste = "KeyError: 'missing'"
-    assert should_apply_intent_overlay("code_review", paste) is True
+    assert should_apply_intent_overlay("senior_engineer", paste) is True
 
 
 def test_overlay_skipped_for_socratic_tutor() -> None:
@@ -101,7 +107,7 @@ def test_overlay_skipped_for_student_buddy() -> None:
 
 def test_overlay_skipped_when_no_paste() -> None:
     assert (
-        should_apply_intent_overlay("coding_assistant", "can you help me refactor?")
+        should_apply_intent_overlay("senior_engineer", "can you help me refactor?")
         is False
     )
 

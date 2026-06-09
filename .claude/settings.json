@@ -3,18 +3,25 @@
     "PostToolUse": [
       {
         "matcher": "Write|Edit",
-        "command": "FILE=\"${file}\"; EXT=\"${FILE##*.}\"; if [ \"$EXT\" = \"py\" ]; then cd backend && uv run ruff check --fix \"$FILE\" 2>/dev/null && uv run ruff format \"$FILE\" 2>/dev/null; elif [ \"$EXT\" = \"ts\" ] || [ \"$EXT\" = \"tsx\" ]; then cd frontend && npx eslint --fix \"$FILE\" 2>/dev/null; fi; true"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/format.sh\"",
+            "statusMessage": "Formatting…"
+          }
+        ]
       }
     ],
     "PreToolUse": [
       {
         "matcher": "Write",
-        "command": "if grep -qn 'api_key\\s*=\\|secret_key\\s*=\\|password\\s*=' \"${file}\" 2>/dev/null; then echo '❌ BLOCKED: Possible secret detected in file. Use environment variables.' && exit 1; fi; true"
-      }
-    ],
-    "Stop": [
-      {
-        "command": "echo '--- Running quick validation ---' && cd backend && uv run pytest -x --tb=line -q 2>&1 | tail -5 && cd ../frontend && pnpm lint --quiet 2>&1 | tail -5; true"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/secret-scan.py\"",
+            "statusMessage": "Scanning for secrets…"
+          }
+        ]
       }
     ]
   },

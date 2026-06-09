@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api._deprecated import deprecated
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.growth_snapshot import GrowthSnapshot
@@ -65,6 +66,7 @@ async def list_my_receipts(
 
 
 @router.get("/me/gaps", response_model=list[SkillGapEntry])
+@deprecated(sunset="2026-07-01", reason="gaps widget not in v8")
 async def list_my_gaps(
     limit: int = 3,
     current_user: User = Depends(get_current_user),

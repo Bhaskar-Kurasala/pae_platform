@@ -3,7 +3,7 @@ FROM node:22-alpine AS deps
 WORKDIR /app
 
 # Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@10.5.0 --activate
 
 COPY package.json pnpm-lock.yaml* ./
 RUN pnpm install --frozen-lockfile
@@ -12,7 +12,7 @@ RUN pnpm install --frozen-lockfile
 FROM node:22-alpine AS builder
 WORKDIR /app
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@10.5.0 --activate
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -29,6 +29,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# PR3/D5.1 — non-root runtime. This was already in place from the
+# original Next standalone Dockerfile pattern; keeping the comment
+# in case anyone tries to "simplify" it later. Verify with:
+# `docker run --rm <image> whoami` → "nextjs".
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 

@@ -1,7 +1,8 @@
 """Integration tests for career API routes (#168 #169 #171 #172 #173).
 
-Claude-powered endpoints (resume summary, learning plan) mock the Anthropic
-client to avoid live API calls in tests.
+Claude-powered endpoints (resume summary, learning plan) mock build_llm to
+avoid live API calls in tests. career_service calls llm.ainvoke() and reads
+result.content as a plain string.
 """
 from __future__ import annotations
 
@@ -18,7 +19,7 @@ from httpx import AsyncClient
 REGISTER_PAYLOAD = {
     "email": "careertest@example.com",
     "full_name": "Career Tester",
-    "password": "testpass123",
+    "password": "testpass12345",
 }
 
 
@@ -42,18 +43,13 @@ _RESUME_JSON_RESPONSE = (
 )
 
 
-def _mock_anthropic_response(text: str) -> Any:
-    """Return a mock AsyncAnthropic.messages.create response."""
-    content_block = MagicMock()
-    content_block.text = text
-    mock_response = MagicMock()
-    mock_response.content = [content_block]
-    return mock_response
-
-
-def _mock_resume_response() -> Any:
-    """Return a mock Anthropic response containing valid resume JSON."""
-    return _mock_anthropic_response(_RESUME_JSON_RESPONSE)
+def _make_llm_mock(content: str) -> Any:
+    """Return a MagicMock LLM whose ainvoke returns result.content as a string."""
+    mock_llm = MagicMock()
+    mock_result = MagicMock()
+    mock_result.content = content
+    mock_llm.ainvoke = AsyncMock(return_value=mock_result)
+    return mock_llm
 
 
 # ---------------------------------------------------------------------------
@@ -67,10 +63,8 @@ async def test_get_resume_creates_row(client: AsyncClient) -> None:
     token = await _get_token(client)
     headers = {"Authorization": f"Bearer {token}"}
 
-    with patch("app.services.career_service.AsyncAnthropic") as mock_cls:
-        mock_instance = AsyncMock()
-        mock_cls.return_value = mock_instance
-        mock_instance.messages.create = AsyncMock(return_value=_mock_resume_response())
+    with patch("app.services.career_service.build_llm") as mock_build:
+        mock_build.return_value = _make_llm_mock(_RESUME_JSON_RESPONSE)
 
         resp = await client.get("/api/v1/career/resume", headers=headers)
 
@@ -90,10 +84,8 @@ async def test_get_resume_returns_existing(client: AsyncClient) -> None:
     token = await _get_token(client)
     headers = {"Authorization": f"Bearer {token}"}
 
-    with patch("app.services.career_service.AsyncAnthropic") as mock_cls:
-        mock_instance = AsyncMock()
-        mock_cls.return_value = mock_instance
-        mock_instance.messages.create = AsyncMock(return_value=_mock_resume_response())
+    with patch("app.services.career_service.build_llm") as mock_build:
+        mock_build.return_value = _make_llm_mock(_RESUME_JSON_RESPONSE)
 
         # First call — generates full resume content
         r1 = await client.get("/api/v1/career/resume", headers=headers)
@@ -111,10 +103,8 @@ async def test_resume_regenerate_endpoint(client: AsyncClient) -> None:
     token = await _get_token(client)
     headers = {"Authorization": f"Bearer {token}"}
 
-    with patch("app.services.career_service.AsyncAnthropic") as mock_cls:
-        mock_instance = AsyncMock()
-        mock_cls.return_value = mock_instance
-        mock_instance.messages.create = AsyncMock(return_value=_mock_resume_response())
+    with patch("app.services.career_service.build_llm") as mock_build:
+        mock_build.return_value = _make_llm_mock(_RESUME_JSON_RESPONSE)
 
         resp = await client.post(
             "/api/v1/career/resume/regenerate",
@@ -178,13 +168,9 @@ async def test_fit_score_no_jd_skills_gives_zero(client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_learning_plan_returns_plan(client: AsyncClient) -> None:
     token = await _get_token(client)
-    mock_resp = _mock_anthropic_response(
-        "Week 1: Learn Docker basics. Week 2: Kubernetes. Week 3: CI/CD. Week 4: Deploy."
-    )
-    with patch("app.services.career_service.AsyncAnthropic") as mock_cls:
-        mock_instance = AsyncMock()
-        mock_cls.return_value = mock_instance
-        mock_instance.messages.create = AsyncMock(return_value=mock_resp)
+    plan_text = "Week 1: Learn Docker basics. Week 2: Kubernetes. Week 3: CI/CD. Week 4: Deploy."
+    with patch("app.services.career_service.build_llm") as mock_build:
+        mock_build.return_value = _make_llm_mock(plan_text)
 
         resp = await client.post(
             "/api/v1/career/learning-plan",

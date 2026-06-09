@@ -54,6 +54,30 @@ def _usage_from(response: Any) -> tuple[int, int]:
     return 0, 0
 
 
+def _model_from(response: Any) -> str | None:
+    """D17b/ITEM 1 — extract the model that actually produced *response*.
+
+    Mirrors the canonical pattern in agentic_base.py:587-616 and
+    tailored_resume_llm.py: prefer response_metadata['model'], fall back
+    to ['model_name']. Returns None when neither is present, signalling
+    "use intent fallback" (model_for(self.tier)) at the call site.
+
+    Why this matters under MiniMax: build_llm() routes to MiniMax M2.7
+    when MINIMAX_API_KEY is set, but model_for(tier) still returns
+    'claude-sonnet-4-6' (the agent's intended Anthropic default).
+    Recording intent over truth produces an under-cost shape — Sonnet
+    pricing applied to MiniMax rates, ~10× over-attribution. Same bug
+    shape as the D12 CP3 tailored_resume fix, one architectural layer
+    up in the readiness sub-agent abstraction.
+    """
+    resp_meta = getattr(response, "response_metadata", {}) or {}
+    if isinstance(resp_meta, dict):
+        mdl = resp_meta.get("model") or resp_meta.get("model_name")
+        if isinstance(mdl, str) and mdl:
+            return mdl
+    return None
+
+
 @dataclass
 class SubAgentResult:
     parsed: dict[str, Any]
@@ -131,7 +155,14 @@ class JDAnalyst:
         return SubAgentResult(
             parsed=parsed,
             raw_text=raw_text,
-            model=model_for(self.tier),
+            # D17b/ITEM 1 — capture the model that actually produced the
+            # response (truth) instead of model_for(self.tier) (intent).
+            # Under MiniMax routing the two diverge; recording intent
+            # produces an under-cost shape downstream at jd_decoder /
+            # readiness_orchestrator. _model_from() falls back to None
+            # when response_metadata is absent (stub LLMs); the `or`
+            # restores intent as the honest signal in that case.
+            model=_model_from(response) or model_for(self.tier),
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             latency_ms=latency_ms,
@@ -207,7 +238,14 @@ class MatchScorer:
         return SubAgentResult(
             parsed=parsed,
             raw_text=raw_text,
-            model=model_for(self.tier),
+            # D17b/ITEM 1 — capture the model that actually produced the
+            # response (truth) instead of model_for(self.tier) (intent).
+            # Under MiniMax routing the two diverge; recording intent
+            # produces an under-cost shape downstream at jd_decoder /
+            # readiness_orchestrator. _model_from() falls back to None
+            # when response_metadata is absent (stub LLMs); the `or`
+            # restores intent as the honest signal in that case.
+            model=_model_from(response) or model_for(self.tier),
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             latency_ms=latency_ms,
@@ -297,7 +335,14 @@ class DiagnosticInterviewer:
         return SubAgentResult(
             parsed=parsed,
             raw_text=raw_text,
-            model=model_for(self.tier),
+            # D17b/ITEM 1 — capture the model that actually produced the
+            # response (truth) instead of model_for(self.tier) (intent).
+            # Under MiniMax routing the two diverge; recording intent
+            # produces an under-cost shape downstream at jd_decoder /
+            # readiness_orchestrator. _model_from() falls back to None
+            # when response_metadata is absent (stub LLMs); the `or`
+            # restores intent as the honest signal in that case.
+            model=_model_from(response) or model_for(self.tier),
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             latency_ms=latency_ms,
@@ -382,7 +427,14 @@ class VerdictGenerator:
         return SubAgentResult(
             parsed=parsed,
             raw_text=raw_text,
-            model=model_for(self.tier),
+            # D17b/ITEM 1 — capture the model that actually produced the
+            # response (truth) instead of model_for(self.tier) (intent).
+            # Under MiniMax routing the two diverge; recording intent
+            # produces an under-cost shape downstream at jd_decoder /
+            # readiness_orchestrator. _model_from() falls back to None
+            # when response_metadata is absent (stub LLMs); the `or`
+            # restores intent as the honest signal in that case.
+            model=_model_from(response) or model_for(self.tier),
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             latency_ms=latency_ms,

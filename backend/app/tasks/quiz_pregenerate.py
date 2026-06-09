@@ -43,6 +43,8 @@ async def _generate_versions(message_id: str, content: str) -> list[list[dict]]:
             conversation_history=[],
             task=f"Generate 5 MCQ questions (version {attempt + 1})",
             context={
+                "actor_role": "system",
+                "actor_id": None,
                 "focus_topic": content,
                 "source_message_id": message_id,
                 "content": content,

@@ -85,7 +85,12 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-export function PlacementQuiz() {
+interface PlacementQuizProps {
+  /** When true, renders without the dark full-screen shell (used inside V8Shell portal). */
+  portalMode?: boolean;
+}
+
+export function PlacementQuiz({ portalMode = false }: PlacementQuizProps) {
   const router = useRouter();
   const { isAuthenticated } = useAuthStore();
   const { data: courses } = useCourses();
@@ -294,7 +299,7 @@ export function PlacementQuiz() {
 
   // SSR-safe placeholder until hydration finishes.
   if (!hydrated) {
-    return <Shell progressPct={0}>{null}</Shell>;
+    return <Shell progressPct={0} portalMode={portalMode}>{null}</Shell>;
   }
 
   // -------------------------------------------------------------------------
@@ -334,7 +339,7 @@ export function PlacementQuiz() {
   }
 
   return (
-    <Shell progressPct={progressPct} onBack={showBack ? goBack : undefined}>
+    <Shell progressPct={progressPct} onBack={showBack ? goBack : undefined} portalMode={portalMode}>
       {body}
     </Shell>
   );
@@ -350,11 +355,57 @@ function Shell({
   children,
   progressPct,
   onBack,
+  portalMode = false,
 }: {
   children: React.ReactNode;
   progressPct: number;
   onBack?: () => void;
+  portalMode?: boolean;
 }) {
+  if (portalMode) {
+    return (
+      <div className="text-[#f0ece1] selection:bg-[#5db288]/40">
+        {/* Header row */}
+        <div className="flex items-center justify-between mb-6">
+          <Link
+            href="/catalog"
+            className="text-[11px] uppercase tracking-[.18em] font-bold text-[#a29a8a] hover:text-[#f0ece1] transition-colors"
+          >
+            ← Catalog
+          </Link>
+          <span className="text-[11px] uppercase tracking-[.18em] font-bold text-[#a29a8a]">
+            Placement Quiz
+          </span>
+        </div>
+
+        {/* Progress bar */}
+        <div
+          className="h-1 w-full overflow-hidden rounded-full bg-white/5 mb-8"
+          role="progressbar"
+          aria-valuenow={Math.round(progressPct)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Quiz progress"
+        >
+          <div
+            className="h-full bg-gradient-to-r from-[#244f39] via-[#4e9470] to-[#8fd6b1] transition-[width] duration-500 ease-out"
+            style={{ width: `${progressPct}%` }}
+          />
+        </div>
+
+        <div className="pb-10">
+          {onBack ? (
+            <div className="mb-6">
+              <BackButton onClick={onBack} />
+            </div>
+          ) : null}
+          <div className="quiz-fade">{children}</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Standalone (public) dark-mode shell — unchanged
   return (
     <div className="min-h-screen bg-[#10120e] text-[#f0ece1] selection:bg-[#5db288]/40">
       <div

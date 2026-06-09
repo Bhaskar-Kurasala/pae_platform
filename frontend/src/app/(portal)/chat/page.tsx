@@ -5,8 +5,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { AlertTriangle, Archive, ArchiveRestore, ArrowDown, ArrowUp, AtSign, Bookmark, BookmarkCheck, BookOpen, Bot, BriefcaseBusiness, Check, ChevronLeft, ChevronRight, Clock, Code2, Copy, Download, FileCode, FileText, GraduationCap, ImageIcon, ListChecks, Lock, Menu, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Puzzle, RefreshCw, RotateCw, Search, Sparkles, Square, Timer, Trash2, User, X } from "lucide-react";
+import { AlertTriangle, Archive, ArchiveRestore, ArrowDown, ArrowUp, AtSign, Bookmark, BookmarkCheck, BookOpen, Bot, BriefcaseBusiness, Check, ChevronLeft, ChevronRight, Clock, Code2, Copy, Download, FileCode, FileText, GraduationCap, ImageIcon, ListChecks, Lock, MoreHorizontal, Paperclip, Pencil, Pin, PinOff, Plus, Puzzle, RefreshCw, RotateCw, Search, Sparkles, Square, Timer, Trash2, User, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { stripMarkdownToText, truncateAtWord } from "@/lib/markdown-text";
 import { MarkdownRenderer } from "@/components/features/markdown-renderer";
 import {
   useStream,
@@ -15,8 +16,10 @@ import {
   type StreamMessage,
 } from "@/hooks/use-stream";
 import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
+import { useAuthStore } from "@/stores/auth-store";
 import { exercisesApi, srsApi } from "@/lib/api-client";
 import { useDueCards } from "@/lib/hooks/use-srs";
+import { useWelcomePrompts } from "@/lib/hooks/use-welcome-prompts";
 import {
   chatApi,
   exportConversationMarkdown,
@@ -32,8 +35,13 @@ import {
   type QuizQuestion,
 } from "@/lib/chat-api";
 import { toast } from "@/lib/toast";
+import { translateError } from "@/lib/error-toast";
+import { GracefulFailureMessage } from "@/components/errors/graceful-failure-message";
 import { ChatSkeleton } from "./chat-skeleton";
 import { FeedbackControls } from "./feedback-controls";
+import { SaveNoteModal } from "@/components/features/notebook/save-note-modal";
+import { MakeFlashcardsModal } from "@/components/features/flashcards/make-flashcards-modal";
+import { TutorScreen } from "@/components/v8/screens/tutor-screen";
 import {
   getAgentLabel,
   getAgentGroups,
@@ -683,16 +691,31 @@ function ChatSidebar({
 }
 
 // ── Welcome screen ───────────────────────────────────────────────
-const SUGGESTED_PROMPTS = [
-  { text: "What is RAG and how does it work?",                    icon: "🔍" },
-  { text: "Review my Python code for production readiness",       icon: "🐍" },
-  { text: "Quiz me on LangGraph concepts",                        icon: "⚡" },
-  { text: "Help me build my AI engineering portfolio",            icon: "🚀" },
-  { text: "Explain the difference between ReAct and CoT",         icon: "🧠" },
-  { text: "How do I deploy a LangGraph agent to production?",     icon: "☁️" },
-];
+// Welcome prompts now come from `useWelcomePrompts(mode)` — the backend
+// personalizes them from the user's last lesson, last failed exercise,
+// last touched skill, and recent misconceptions. The hook ships a curated
+// fallback so anonymous / loading users still see something useful.
+function modeAgentToHookMode(
+  agentName: ModeAgent,
+): "auto" | "tutor" | "code" | "career" | "quiz" {
+  switch (agentName) {
+    case "socratic_tutor":
+      return "tutor";
+    case "coding_assistant":
+      return "code";
+    case "career_coach":
+      return "career";
+    case "adaptive_quiz":
+      return "quiz";
+    default:
+      return "auto";
+  }
+}
 
 function WelcomeScreen({ mode, onPrompt }: { mode: typeof MODES[number]; onPrompt: (text: string) => void }) {
+  const hookMode = modeAgentToHookMode(mode.agentName);
+  const { data: promptsData } = useWelcomePrompts(hookMode);
+  const prompts = promptsData.prompts;
   return (
     <div className="flex flex-col items-center justify-center h-full px-6 py-12 gap-8">
       <div className="relative">
@@ -716,11 +739,12 @@ function WelcomeScreen({ mode, onPrompt }: { mode: typeof MODES[number]; onPromp
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 w-full max-w-4xl">
-        {SUGGESTED_PROMPTS.map((p) => (
+        {prompts.map((p) => (
           <button
             key={p.text}
             onClick={() => onPrompt(p.text)}
             aria-label={`Suggested prompt: ${p.text}`}
+            data-prompt-rationale={p.rationale}
             className="group flex items-start gap-3 rounded-2xl border border-border/60 bg-card/80 px-4 py-3.5 text-left hover:border-primary/40 hover:bg-primary/5 hover:shadow-sm transition-all duration-150"
           >
             <span className="text-lg leading-none mt-0.5 shrink-0">{p.icon}</span>
@@ -955,9 +979,30 @@ function UserBubble({
           </>
         )}
       </div>
-      <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0 mt-1 border border-border/50">
-        <User className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-      </div>
+      <UserAvatar />
+    </div>
+  );
+}
+
+function UserAvatar() {
+  const fullName = useAuthStore((s) => s.user?.full_name);
+  const text = (() => {
+    if (!fullName) return "YOU";
+    const parts = fullName.trim().split(/\s+/).slice(0, 2);
+    const ini = parts.map((p) => p[0]?.toUpperCase() ?? "").join("");
+    return ini || "YOU";
+  })();
+  return (
+    <div
+      className="h-8 w-8 rounded-full flex items-center justify-center shrink-0 mt-1 text-[11px] font-extrabold"
+      style={{
+        background: "linear-gradient(135deg, var(--gold, #d6a54d), #f0d6a2)",
+        color: "#1f160a",
+        boxShadow: "0 6px 14px rgba(214,165,77,0.22)",
+      }}
+      aria-hidden="true"
+    >
+      {text}
     </div>
   );
 }
@@ -1451,60 +1496,41 @@ function RoutingAffordance({
   );
 }
 
-// P3-2 — Flashcard extraction button. Calls the spaced_repetition agent and
-// shows a toast with the card count.
+// P-Today3 (2026-04-26) — pure trigger. The parent owns modal state +
+// the saved-set tracking, mirroring how the bookmark button feeds the
+// SaveNoteModal. Removed the inline immediate POST that used to call the
+// spaced_repetition extractor — see MakeFlashcardsModal docstring for why.
 function FlashcardButton({
-  messageId,
-  content,
+  onClick,
+  isSaved,
 }: {
-  messageId: string;
-  content: string;
+  onClick: () => void;
+  isSaved: boolean;
 }) {
-  const router = useRouter();
-  const qc = useQueryClient();
-  const [loading, setLoading] = useState(false);
-  const [saved, setSaved] = useState(false);
-
-  const handleClick = async () => {
-    setLoading(true);
-    try {
-      const result = await chatApi.addFlashcards(messageId, content);
-      setSaved(true);
-      void qc.invalidateQueries({ queryKey: ["srs", "due"] });
-      toast.success(
-        `${result.cards_added} card${result.cards_added !== 1 ? "s" : ""} saved to review queue`,
-        { action: { label: "Review now →", onClick: () => router.push("/today") } },
-      );
-    } catch {
-      toast.error("Could not add flashcards — try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <button
       type="button"
-      onClick={() => void handleClick()}
-      disabled={loading || saved}
-      aria-label="Add flashcards from this message"
+      onClick={onClick}
+      aria-label={
+        isSaved
+          ? "Flashcards already saved from this message"
+          : "Make flashcards from this message"
+      }
+      aria-pressed={isSaved}
       data-testid="flashcard-button"
       className={cn(
         "inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
-        saved
-          ? "text-green-600 cursor-default"
+        isSaved
+          ? "text-green-600"
           : "text-muted-foreground hover:bg-muted hover:text-foreground",
-        "disabled:opacity-50",
       )}
     >
-      {loading ? (
-        <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-      ) : saved ? (
+      {isSaved ? (
         <Check className="h-3.5 w-3.5" aria-hidden="true" />
       ) : (
         <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
       )}
-      {saved ? "Saved" : "Flashcards"}
+      {isSaved ? "Saved" : "Flashcards"}
     </button>
   );
 }
@@ -1531,6 +1557,8 @@ function AssistantBubble({
   onSaveToNotebook,
   isSaved = false,
   onQuizMe,
+  onMakeFlashcards,
+  flashcardsSaved = false,
   truncated = false,
   dbMessageId,
   onContinue,
@@ -1575,6 +1603,10 @@ function AssistantBubble({
   isSaved?: boolean;
   // P3-3 — quiz me button callback. Undefined for live-streaming bubbles.
   onQuizMe?: (messageId: string, content: string) => void;
+  // P-Today3 — open MakeFlashcardsModal. Omitted for live-streaming bubbles.
+  // `flashcardsSaved` mirrors `isSaved` semantics for the flashcards button.
+  onMakeFlashcards?: () => void;
+  flashcardsSaved?: boolean;
   // Long-answer continuation. Set when the backend hit its token budget.
   truncated?: boolean;
   // Server-assigned DB message id — needed to reference the row for continuation.
@@ -1665,7 +1697,12 @@ function AssistantBubble({
             aria-label="Message actions"
           >
             <CopyMessageButton content={content} />
-            <FlashcardButton messageId={messageId} content={content} />
+            {onMakeFlashcards && (
+              <FlashcardButton
+                onClick={onMakeFlashcards}
+                isSaved={flashcardsSaved}
+              />
+            )}
             {onQuizMe && (
               <button
                 type="button"
@@ -1795,10 +1832,13 @@ function ContextPickerPopover({
   const [data, setData] = useState<ContextSuggestionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let alive = true;
+    setLoading(true);
+    setError(null);
     (async () => {
       try {
         const res = await chatApi.getContextSuggestions();
@@ -1806,7 +1846,8 @@ function ContextPickerPopover({
         setData(res);
       } catch (err) {
         if (!alive) return;
-        setError(err instanceof Error ? err.message : "Failed to load");
+        console.error("[chat] context suggestions failed", err);
+        setError(translateError(err));
       } finally {
         if (alive) setLoading(false);
       }
@@ -1814,7 +1855,7 @@ function ContextPickerPopover({
     return () => {
       alive = false;
     };
-  }, []);
+  }, [retryCount]);
 
   // Click-outside dismiss.
   useEffect(() => {
@@ -1840,7 +1881,13 @@ function ContextPickerPopover({
       {loading ? (
         <div className="p-4 text-muted-foreground">Loading…</div>
       ) : error ? (
-        <div className="p-4 text-destructive">{error}</div>
+        <div className="p-4">
+          <GracefulFailureMessage
+            userMessage={error}
+            onRetry={() => setRetryCount((n) => n + 1)}
+            className="text-sm"
+          />
+        </div>
       ) : data ? (
         <div className="py-2">
           {data.submissions.length > 0 && (
@@ -2145,13 +2192,14 @@ function InputBar({
   };
 
   return (
-    <div className="shrink-0 px-4 pb-4 pt-2">
+    <div className="shrink-0 px-6 pb-5 pt-3">
       <div
         className={cn(
-          "max-w-5xl mx-auto rounded-3xl border bg-card shadow-lg transition-shadow",
-          "focus-within:shadow-xl focus-within:border-primary/40",
+          "w-full mx-auto rounded-3xl border bg-card transition-shadow",
+          "shadow-[0_2px_8px_rgba(0,0,0,0.05)]",
+          "focus-within:shadow-[0_4px_16px_rgba(0,0,0,0.08)]",
           isStreaming ? "border-primary/30" : "border-border/60",
-          isDragging && "ring-2 ring-primary/40",
+          isDragging && "ring-1 ring-primary/30",
         )}
         onDragOver={(e) => {
           e.preventDefault();
@@ -2302,7 +2350,8 @@ function InputBar({
             rows={1}
             disabled={isStreaming}
             aria-label="Message input"
-            className="w-full resize-none bg-transparent px-5 pt-4 pb-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground/50 disabled:opacity-60 max-h-[160px] overflow-y-auto"
+            className="w-full resize-none bg-transparent px-5 pt-4 pb-2 text-sm leading-relaxed outline-none focus:outline-none focus-visible:outline-none placeholder:text-muted-foreground/50 disabled:opacity-60 max-h-[160px] overflow-y-auto"
+            style={{ outline: "none" }}
           />
         </div>
         <div className="flex items-center justify-between px-4 pb-3 gap-3">
@@ -2492,7 +2541,7 @@ function ErrorBanner({ error, isStreaming, onRetry }: {
   };
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-6 pt-3" role="alert">
+    <div className="mx-auto w-full px-6 pt-3" role="alert">
       <div className="flex items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
         <div className="flex items-center gap-2">
           <Icon className="h-4 w-4 shrink-0" aria-hidden />
@@ -2568,10 +2617,16 @@ function ChatArea({
       persistedIdSet.add(dbId);
       // Fire-and-forget: pre-generate 3 quiz versions for every persisted
       // assistant message so Quiz Me is instant on the first click.
+      //
+      // Audit finding (2026-05-13): only fire when content is non-empty.
+      // Backend's QuizGenerateRequest enforces `content: min_length=1`;
+      // a race between persistence and streaming completion can leave
+      // msg.content empty momentarily, producing a noisy 422 in browser
+      // DevTools on every chat send.
       const msg = messages.find(
         (m) => m.id === ephemeralId && m.role === "assistant",
       );
-      if (msg) {
+      if (msg && msg.content.trim().length > 0) {
         chatApi.triggerQuizPregenerate(dbId, msg.content);
       }
     },
@@ -2898,25 +2953,72 @@ function ChatArea({
   // P3-4 — tracks which message ids have been bookmarked this session.
   const [savedMessageIds, setSavedMessageIds] = useState<Set<string>>(new Set());
 
+  // P-Today2 (2026-04-26) — bookmark now opens the SaveNoteModal instead of
+  // firing an immediate POST. The modal handles summarization, edit, and the
+  // actual saveToNotebook call; it tells us via `onSaved` so we can mark the
+  // message as bookmarked in this session.
+  const [savePromptTarget, setSavePromptTarget] = useState<{
+    messageId: string;
+    content: string;
+    userQuestion: string | undefined;
+  } | null>(null);
+
   const handleSaveToNotebook = useCallback(
-    async (messageId: string, msgContent: string): Promise<void> => {
+    (messageId: string, msgContent: string): void => {
       if (!conversationId) return;
-      try {
-        await chatApi.saveToNotebook({
-          messageId,
-          conversationId,
-          content: msgContent,
-        });
-        setSavedMessageIds((prev) => new Set([...prev, messageId]));
-        toast.success("Saved to notebook");
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error("[chat] save to notebook failed", err);
-        toast.error("Could not save — try again");
+      // Find the immediately preceding user turn to give the summarizer
+      // (and the title heuristic) better context. Fall back to undefined
+      // when the assistant message is somehow first in the list.
+      const idx = messages.findIndex((m) => m.id === messageId);
+      let userQuestion: string | undefined;
+      for (let i = idx - 1; i >= 0; i--) {
+        if (messages[i]?.role === "user") {
+          userQuestion = messages[i]?.content;
+          break;
+        }
       }
+      setSavePromptTarget({
+        messageId,
+        content: msgContent,
+        userQuestion,
+      });
+    },
+    [conversationId, messages],
+  );
+
+  const handleNoteSaved = useCallback(
+    (_entryId: string) => {
+      const target = savePromptTarget;
+      if (target) {
+        setSavedMessageIds((prev) => new Set([...prev, target.messageId]));
+      }
+    },
+    [savePromptTarget],
+  );
+
+  // P-Today3 — flashcards modal target + per-session saved set.
+  const [flashcardTarget, setFlashcardTarget] = useState<{
+    messageId: string;
+    content: string;
+  } | null>(null);
+  const [flashcardsSavedIds, setFlashcardsSavedIds] = useState<Set<string>>(
+    new Set(),
+  );
+
+  const handleMakeFlashcards = useCallback(
+    (messageId: string, msgContent: string): void => {
+      if (!conversationId) return;
+      setFlashcardTarget({ messageId, content: msgContent });
     },
     [conversationId],
   );
+
+  const handleFlashcardsSaved = useCallback(() => {
+    const target = flashcardTarget;
+    if (target) {
+      setFlashcardsSavedIds((prev) => new Set([...prev, target.messageId]));
+    }
+  }, [flashcardTarget]);
 
   // P3-3 — quiz panel state. Non-null when the quiz panel is open.
   const [quizPanel, setQuizPanel] = useState<{
@@ -3031,7 +3133,13 @@ function ChatArea({
         (initialMessages?.length ?? 0) === 0 &&
         messages.length === 1
       ) {
-        onFirstMessage(last.content.slice(0, 60), mode.agentName ?? undefined);
+        // PR1/A5.1 — sanitize raw markdown before it becomes a sidebar
+        // title. Without this, a question like `**why does \`asyncio.gather\`
+        // ...**` ships its `**` and backticks into the conversation list.
+        onFirstMessage(
+          truncateAtWord(stripMarkdownToText(last.content), 60),
+          mode.agentName ?? undefined,
+        );
       }
       lastReportedLength.current = messages.length;
     }
@@ -3184,7 +3292,7 @@ function ChatArea({
         {messages.length === 0 ? (
           <WelcomeScreen mode={mode} onPrompt={setInput} />
         ) : (
-          <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
+          <div className="w-full mx-auto px-6 py-6 space-y-6">
             {messages.map((msg, i) => {
               const isLast = i === messages.length - 1;
               // P1-1 — a message is "persisted" (has a real server id the
@@ -3240,6 +3348,13 @@ function ChatArea({
                         : undefined
                     }
                     isSaved={savedMessageIds.has(msg.id)}
+                    // P-Today3 — flashcards modal opener.
+                    onMakeFlashcards={
+                      isPersisted
+                        ? () => handleMakeFlashcards(msg.id, msg.content)
+                        : undefined
+                    }
+                    flashcardsSaved={flashcardsSavedIds.has(msg.id)}
                     // Long-answer continuation.
                     truncated={msg.truncated}
                     dbMessageId={msg.dbMessageId}
@@ -3260,9 +3375,15 @@ function ChatArea({
           type="button"
           onClick={jumpToBottom}
           aria-label="Jump to bottom"
-          className="absolute bottom-28 right-6 z-10 h-9 w-9 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:opacity-90 transition-opacity"
+          className={cn(
+            "absolute bottom-28 left-1/2 -translate-x-1/2 z-10 h-8 w-8 rounded-full",
+            "bg-primary/15 backdrop-blur-sm border border-primary/25 text-primary",
+            "flex items-center justify-center",
+            "opacity-75 hover:opacity-100 hover:bg-primary/25 hover:border-primary/40",
+            "transition-all duration-150",
+          )}
         >
-          <ArrowDown className="h-4 w-4" aria-hidden="true" />
+          <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
       )}
 
@@ -3274,7 +3395,7 @@ function ChatArea({
           remaining count AND the user is near the limit, so it doesn't
           distract during normal use. Non-interactive — purely informational. */}
       {rateLimitRemaining != null && rateLimitRemaining < 5 ? (
-        <div className="mx-auto w-full max-w-5xl px-6 pt-2" aria-live="polite">
+        <div className="mx-auto w-full px-6 pt-2" aria-live="polite">
           <span
             data-testid="rate-limit-pill"
             className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-3 py-1 text-xs text-muted-foreground"
@@ -3327,6 +3448,33 @@ function ChatArea({
           panel={quizPanel}
           onClose={() => setQuizPanel(null)}
           onUpdatePanel={setQuizPanel}
+        />
+      )}
+
+      {savePromptTarget && conversationId && (
+        <SaveNoteModal
+          open={true}
+          onOpenChange={(next) => {
+            if (!next) setSavePromptTarget(null);
+          }}
+          messageId={savePromptTarget.messageId}
+          conversationId={conversationId}
+          content={savePromptTarget.content}
+          userQuestion={savePromptTarget.userQuestion}
+          onSaved={handleNoteSaved}
+        />
+      )}
+
+      {flashcardTarget && conversationId && (
+        <MakeFlashcardsModal
+          open={true}
+          onOpenChange={(next) => {
+            if (!next) setFlashcardTarget(null);
+          }}
+          messageId={flashcardTarget.messageId}
+          conversationId={conversationId}
+          content={flashcardTarget.content}
+          onSaved={handleFlashcardsSaved}
         />
       )}
 
@@ -3818,6 +3966,14 @@ function ChatPageInner() {
   const [startNewOpen, setStartNewOpen] = useState<boolean>(false);
   const prefillLoadedFor = useRef<string | null>(null);
   const initialConvApplied = useRef(false);
+  // P-Tutor3 (2026-04-26) — clicking "+ New" on `/chat?c=ABC` races: state
+  // updates clear `activeConvId` synchronously, but `router.replace("/chat")`
+  // updates `searchParams` asynchronously. The URL-sync effect would then
+  // see `urlConvId="ABC"` + `activeConvId=null` and re-open the conversation
+  // we just left. This ref tells the URL-sync effect to ignore one stale
+  // urlConvId tick after a manual clear. We unset it once urlConvId actually
+  // transitions to null.
+  const manualClearPending = useRef(false);
   // Same-tick cache for the first-message preview/agent so we can synthesize
   // a sidebar entry when the server id arrives in the first SSE event.
   const pendingFirstMessageRef = useRef<{ preview: string; agent: string | undefined } | null>(null);
@@ -3913,9 +4069,17 @@ function ChatPageInner() {
         }
       } catch {
         // Fall back to a fresh conversation if the server returns 404/403.
+        // Also strip `?c=` from the URL so a refresh doesn't re-fire the
+        // doomed request (audit 2026-05-13: stale IDs in localStorage or
+        // shared links produced noisy 404s in DevTools on every page load).
         setHydratedMessages(undefined);
         setActiveConvId(null);
         writeLastViewedId(null);
+        // Always strip `?c=` on 404/403 — including initial mount where
+        // pushUrl is false — so a refresh doesn't re-fire the doomed
+        // request. The 404 itself still logs to DevTools once (browser
+        // built-in; cannot suppress), but subsequent navigations are clean.
+        router.replace("/chat");
       }
     },
     [router],
@@ -3934,6 +4098,8 @@ function ChatPageInner() {
   useEffect(() => {
     if (!initialConvApplied.current) return;
     if (!urlConvId) {
+      // The URL has caught up to a manual clear — drop the guard.
+      manualClearPending.current = false;
       if (activeConvId !== null) {
         setActiveConvId(null);
         setHydratedMessages(undefined);
@@ -3941,6 +4107,9 @@ function ChatPageInner() {
       }
       return;
     }
+    // P-Tutor3 — ignore a stale `?c=` tick that lingers after `handleNew`
+    // until Next.js commits the `router.replace("/chat")` navigation.
+    if (manualClearPending.current) return;
     if (urlConvId === activeConvId) return;
     void openConversation(urlConvId, { pushUrl: false });
   }, [urlConvId, activeConvId, openConversation]);
@@ -3968,6 +4137,10 @@ function ChatPageInner() {
     setHydratedMessages(undefined);
     setComposerInput("");
     writeLastViewedId(null);
+    // P-Tutor3 — block the URL-sync effect from re-opening the old
+    // conversation while `searchParams` still holds the stale `?c=` value
+    // (Next.js commits the navigation on the next tick, not synchronously).
+    manualClearPending.current = true;
     router.replace("/chat");
     setChatKey((k) => k + 1);
   };
@@ -4014,6 +4187,8 @@ function ChatPageInner() {
     setHydratedMessages(undefined);
     setComposerInput("");
     writeLastViewedId(null);
+    // P-Tutor3 — see handleNew for why this guard is needed.
+    manualClearPending.current = true;
     router.replace("/chat");
     setChatKey((k) => k + 1);
   }, [router]);
@@ -4227,93 +4402,61 @@ function ChatPageInner() {
     }
   };
 
+  // P-Tutor1 (2026-04-26) — `isEmpty` controls whether TutorScreen shows
+  // the editorial opener cards. We're empty when there's no active
+  // conversation AND no hydrated history — which matches "fresh thread,
+  // nothing typed yet". Once a stream starts, ChatArea owns the messages
+  // and the opener row collapses naturally on the next render.
+  const tutorIsEmpty =
+    activeConvId === null && (!hydratedMessages || hydratedMessages.length === 0);
+
+  // P-Tutor1 — opener click pre-fills the existing composer. ChatArea reads
+  // `initialInput` only on mount, so we bump `chatKey` to force a remount
+  // and seed the composer with the prompt text. Cheap (the page is empty
+  // when opener cards are visible, so there's no streaming state to lose).
+  const handleOpenerPrompt = (text: string) => {
+    setComposerInput(text);
+    setHydratedMessages(undefined);
+    setActiveConvId(null);
+    setChatKey((k) => k + 1);
+  };
+
   return (
-    <div className="flex h-full overflow-hidden bg-background">
-      {/* Desktop sidebar — unchanged visual layout */}
-      <aside className="hidden lg:flex flex-col w-64 xl:w-72 border-r bg-card/50 shrink-0">
-        <ChatSidebar {...sidebarProps} />
-      </aside>
-
-      {/* P2-6 — mobile drawer overlay. Only mounted while open so we
-          don't duplicate the sidebar DOM (the desktop `<aside>` above is
-          `hidden lg:flex` via CSS only — it is still in the DOM). The
-          `translate-x-*` classes drive the slide-in animation; hidden
-          entirely on desktop via `lg:hidden`. */}
-      {drawerOpen && (
-        <div
-          className="lg:hidden fixed inset-0 z-40"
-          data-testid="mobile-drawer-overlay"
-        >
-          {/* Backdrop — tap to close */}
-          <button
-            type="button"
-            aria-label="Close conversations"
-            onClick={() => setDrawerOpen(false)}
-            className="absolute inset-0 bg-black/50 transition-opacity duration-200"
-          />
-          {/* Slide-in drawer */}
-          <aside
-            data-testid="mobile-conversations-drawer"
-            onTouchStart={handleDrawerTouchStart}
-            onTouchEnd={handleDrawerTouchEnd}
-            className={cn(
-              "absolute left-0 top-0 h-full w-80 max-w-[85vw] border-r bg-card shadow-xl",
-              "transition-transform duration-200 ease-out will-change-transform translate-x-0",
-            )}
-          >
-            <ChatSidebar {...sidebarProps} />
-          </aside>
-        </div>
-      )}
-
-      <div className="flex flex-col flex-1 overflow-hidden min-w-0">
-        {/* Mobile top bar */}
-        <header className="lg:hidden flex items-center justify-between h-14 px-4 border-b bg-card/80 backdrop-blur shrink-0">
-          <div className="flex items-center gap-2">
-            {/* P2-6 — hamburger opens the conversations drawer */}
-            <button
-              type="button"
-              onClick={() => setDrawerOpen(true)}
-              aria-label="Open conversations"
-              className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground"
-            >
-              <Menu className="h-4 w-4" aria-hidden="true" />
-            </button>
-            <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
-              <Bot className="h-4 w-4 text-white" aria-hidden="true" />
-            </div>
-            <span className="font-semibold text-sm">AI Tutor</span>
-          </div>
-          <button onClick={handleNew} aria-label="New conversation" className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground">
-            <Plus className="h-4 w-4" aria-hidden="true" />
-          </button>
-        </header>
-
-        <div className="flex-1 overflow-hidden">
-          <ChatArea
-            key={chatKey}
-            mode={currentMode}
-            onFirstMessage={handleFirstMessage}
-            onConversationId={handleConversationId}
-            onModeChange={handleModeChange}
-            onRequestStartNew={handleRequestStartNew}
-            prefill={prefill}
-            initialMessages={hydratedMessages}
-            initialConversationId={activeConvId ?? undefined}
-            initialInput={composerInput}
-            onInputChange={setComposerInput}
-          />
-        </div>
-      </div>
+    <>
+      <TutorScreen
+        conversations={conversations}
+        conversationsLoading={conversationsLoading}
+        activeConversationId={activeConvId}
+        onSelectConversation={handleSelectConversation}
+        onNewConversation={handleNew}
+        mode={activeMode}
+        onModeChange={handleModeChange as (next: string | null) => void}
+        isEmpty={tutorIsEmpty}
+        onOpenerPrompt={handleOpenerPrompt}
+      >
+        <ChatArea
+          key={chatKey}
+          mode={currentMode}
+          onFirstMessage={handleFirstMessage}
+          onConversationId={handleConversationId}
+          onModeChange={handleModeChange}
+          onRequestStartNew={handleRequestStartNew}
+          prefill={prefill}
+          initialMessages={hydratedMessages}
+          initialConversationId={activeConvId ?? undefined}
+          initialInput={composerInput}
+          onInputChange={setComposerInput}
+        />
+      </TutorScreen>
 
       {/* P2-10 — confirm dialog for the composer's ⊕ "Start new conversation"
-          affordance. Rendered at the page root so it overlays the sidebar + the
-          transcript regardless of scroll position. */}
+          affordance. Rendered as a sibling so it overlays the editorial
+          shell + the transcript regardless of scroll position. */}
       <ConfirmStartNewDialog
         open={startNewOpen}
         onConfirm={handleConfirmStartNew}
         onCancel={handleCancelStartNew}
       />
-    </div>
+    </>
   );
 }

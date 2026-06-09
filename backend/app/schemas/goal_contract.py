@@ -15,6 +15,7 @@ class GoalContractBase(BaseModel):
     deadline_months: int = Field(ge=1, le=60)
     success_statement: str = Field(min_length=10, max_length=500)
     weekly_hours: WeeklyHours | None = None
+    target_role: str | None = Field(default=None, max_length=128)
 
 
 class GoalContractCreate(GoalContractBase):
@@ -26,6 +27,7 @@ class GoalContractUpdate(BaseModel):
     deadline_months: int | None = Field(default=None, ge=1, le=60)
     success_statement: str | None = Field(default=None, min_length=10, max_length=500)
     weekly_hours: WeeklyHours | None = None
+    target_role: str | None = Field(default=None, max_length=128)
 
 
 class GoalContractResponse(GoalContractBase):
@@ -35,3 +37,4 @@ class GoalContractResponse(GoalContractBase):
     user_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
+    days_remaining: int = 0

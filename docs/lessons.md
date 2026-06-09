@@ -1,8 +1,13 @@
-# Lessons Learned
+# Lessons Learned (ARCHIVED)
 
-This file is updated by Claude Code after every correction.
-When Claude makes a mistake and gets corrected, the lesson is recorded here
-so it never repeats the same mistake.
+> **Archived 2026-06-09.** Project learnings are now captured automatically via
+> Auto Memory (`~/.claude/projects/<repo>/memory/`), and durable code-level
+> gotchas live in path-scoped rules: `.claude/rules/backend-gotchas.md` and
+> `.claude/rules/frontend-gotchas.md`. This file is kept for historical
+> reference and is no longer eager-loaded by `CLAUDE.md`.
+
+Historical record: when Claude made a mistake and was corrected, the lesson was
+recorded here so it wouldn't repeat.
 
 Format:
 ```

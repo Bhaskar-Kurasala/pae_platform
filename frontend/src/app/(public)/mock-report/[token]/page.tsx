@@ -32,7 +32,7 @@ export default function PublicMockReportPage({ params }: PageProps) {
             fontWeight: 700,
           }}
         >
-          CareerForge · Shared mock interview report
+          AI Career OS · Shared mock interview report
         </div>
         <h1
           style={{

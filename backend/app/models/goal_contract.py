@@ -24,3 +24,6 @@ class GoalContract(Base, UUIDMixin, TimestampMixin):
     weekly_hours: Mapped[str | None] = mapped_column(
         String(16), nullable=True
     )
+    target_role: Mapped[str | None] = mapped_column(
+        String(128), nullable=True
+    )

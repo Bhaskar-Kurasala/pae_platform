@@ -52,8 +52,18 @@ class InterviewSession(Base):
         server_default=sa.func.now(),
         nullable=False,
     )
-    updated_at: Mapped[datetime | None] = mapped_column(
+    # BUG-CP1D fix (2026-05-09): live schema is NOT NULL DEFAULT now()
+    # but the model previously declared nullable=True without
+    # server_default. SQLAlchemy then INSERTed explicit NULL, overriding
+    # the DB default — every mock interview start hit a 500 on the
+    # NotNullViolationError. Aligning the ORM to schema:
+    #   * nullable=False matches the schema constraint.
+    #   * server_default=sa.func.now() means SA omits the column from
+    #     INSERT when unset, letting the DB apply the default.
+    #   * onupdate=sa.func.now() preserves the auto-touch on UPDATE.
+    updated_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True),
+        server_default=sa.func.now(),
         onupdate=sa.func.now(),
-        nullable=True,
+        nullable=False,
     )

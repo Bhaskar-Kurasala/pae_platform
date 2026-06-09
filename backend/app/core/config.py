@@ -1,6 +1,29 @@
 from functools import lru_cache
 
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# PR3/D2.2 — values that look like dev defaults and must NOT appear in
+# production. Any of these substrings (case-insensitive) in a critical
+# secret will refuse the boot when ENVIRONMENT=production.
+#
+# Kept tight — we want false negatives ("this looks like prod, OK") not
+# false positives ("strong random key flagged as dev"). Each substring
+# is one we ourselves shipped in code as a placeholder, so a prod secret
+# containing any of them is unambiguously a misconfiguration.
+_DEV_DEFAULT_FRAGMENTS: tuple[str, ...] = (
+    "changeme",
+    "test-secret",
+    "dev-secret",
+    "local-dev",
+    "sk-test-mock",
+    "postgres:postgres",  # the docker-compose dev DB credential
+    "masterkey123",
+)
+
+# Minimum length for the JWT secret_key. 32 bytes (256 bits) is the
+# documented HS256 minimum; anything shorter is a weakness.
+_MIN_SECRET_KEY_LEN = 32
 
 
 class Settings(BaseSettings):
@@ -70,6 +93,14 @@ class Settings(BaseSettings):
     sendgrid_api_key: str = ""
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
+    # Razorpay (Catalog refactor 2026-04-26). Defaults are non-functional
+    # placeholders so the app still starts in dev without secrets.
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = ""
+    razorpay_webhook_secret: str = ""
+    # Frontend uses ONLY the public key id (NEXT_PUBLIC_RAZORPAY_KEY_ID).
+    payments_default_provider: str = "razorpay"
+    payments_default_currency: str = "INR"
     github_token: str = ""
     pinecone_api_key: str = ""
     meilisearch_host: str = "http://localhost:7700"
@@ -88,13 +119,71 @@ class Settings(BaseSettings):
     # SendGrid
     sendgrid_from_email: str = "noreply@pae.dev"
 
-    # CORS
+    # Batch 1 / D-E — base URL for constructing auth email links.
+    # Dev default: localhost:3002 (docker-compose maps 3000 → 3002).
+    # Production: set to the public-facing HTTPS URL (e.g. https://pae.dev).
+    # Used in password-reset and email-verification link construction;
+    # never hardcode localhost in email_service auth methods.
+    public_base_url: str = "http://localhost:3002"
+
+    # Batch 1 / D-E — smoke-send target for development verification.
+    # Empty → send_test_email.py prints a no-op message and exits cleanly.
+    # Set to a real inbox address to verify SendGrid delivery end-to-end.
+    test_email_recipient: str = ""
+
+    # CORS — PR3/D3.1 allowlist driven by `CORS_ORIGINS` env var.
+    #
+    # Env-var form: comma-separated list of origins, e.g.
+    #   CORS_ORIGINS=https://app.example.com,https://admin.example.com
+    #
+    # JSON-array form is ALSO accepted for compatibility with Pydantic's
+    # native list parser:
+    #   CORS_ORIGINS=["https://app.example.com","https://admin.example.com"]
+    #
+    # Wildcard (`*`) is allowed for dev only — in production, the
+    # `production_required` validator (D2.2) will fail the boot if you
+    # ship `*` because `allow_credentials=True` makes that a CORS spec
+    # violation that browsers will silently reject anyway.
     cors_origins: list[str] = ["http://localhost:3000"]
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _parse_cors_origins(cls, value: object) -> object:
+        """Accept either a JSON array OR a comma-separated string.
+
+        Fly secrets / .env files default to the latter —
+        `CORS_ORIGINS=https://a.com,https://b.com` is the natural way to
+        set this and Pydantic's native parser would reject it as
+        invalid JSON. We normalize both forms to a `list[str]` here so
+        downstream code never has to second-guess."""
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return []
+            if stripped.startswith("["):
+                # JSON-array form: parse it ourselves so this validator
+                # always returns a list (Pydantic's `mode='before'`
+                # then sees a list and skips its own list-parsing path).
+                import json
+
+                try:
+                    parsed = json.loads(stripped)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"CORS_ORIGINS looks like JSON but didn't parse: {exc}") from exc
+                if not isinstance(parsed, list):
+                    raise ValueError("CORS_ORIGINS JSON must decode to a list")
+                return [str(item) for item in parsed]
+            # Comma-separated form.
+            return [item.strip() for item in stripped.split(",") if item.strip()]
+        return value
 
     # Feature flags
     feature_tailored_resume_agent: bool = False
-    feature_readiness_diagnostic: bool = False
-    feature_jd_decoder: bool = False
+    # Defaults flipped to True 2026-04-26 with the readiness workspace
+    # production refactor — these are no longer experimental. Set the env
+    # vars to "false" to use the legacy fallback paths.
+    feature_readiness_diagnostic: bool = True
+    feature_jd_decoder: bool = True
 
     # Chat attachments (P1-6). Local dev stores attachment bytes on disk under
     # `attachments_dir`; created lazily on first upload. In production this
@@ -111,6 +200,101 @@ class Settings(BaseSettings):
     github_content_repo: str = ""  # e.g. "your-username/pae-course-content"
     github_content_branch: str = "main"
 
+    # ---- Lesson player: Mux video + R2 notebook hosting ---------------
+    # Mux is the video host. The token id/secret pair is the API
+    # credential (used for upload / metadata reads). The signing key id
+    # + private key are the JWT signing material used to mint short-
+    # lived playback tokens — every <MuxPlayer> playback URL is signed
+    # with this key, so revoking entitlement instantly cuts off video
+    # access at the next token refresh. Defaults are empty so the app
+    # boots without secrets in dev; mint_playback_token() degrades to
+    # an unsigned URL when the keys are missing (dev only — production
+    # validator below refuses to boot without them).
+    mux_token_id: str = ""
+    mux_token_secret: str = ""
+    mux_signing_key_id: str = ""
+    # PEM-encoded RSA private key. In prod, set via Fly secrets (escape
+    # newlines as \n in the env var; we re-expand below).
+    mux_signing_key_private: str = ""
+    mux_webhook_secret: str = ""
+    # Token TTL for the signed playback JWT. 4h is generous enough for
+    # one sit-down lesson without forcing a re-mint mid-watch, short
+    # enough that a refund-revoke takes effect within the same session.
+    mux_playback_token_ttl_seconds: int = 4 * 60 * 60
+
+    # R2 (Cloudflare) holds the .ipynb files for runnable notebooks.
+    # We never serve notebook content directly — every fetch goes
+    # through a 5-minute presigned GET minted server-side after the
+    # entitlement + prerequisite check. Endpoint is the S3-compatible
+    # R2 URL (https://<account>.r2.cloudflarestorage.com); region is
+    # always "auto" for R2.
+    r2_account_id: str = ""
+    r2_access_key: str = ""
+    r2_secret_key: str = ""
+    r2_bucket: str = "pae-course-assets"
+    r2_endpoint: str = ""
+    r2_region: str = "auto"
+    # Presigned GET TTL — 5 min is enough for the browser to fetch the
+    # notebook into JupyterLite; short enough that a leaked URL stops
+    # working before it can be redistributed.
+    r2_signed_url_ttl_seconds: int = 5 * 60
+
+    # JupyterLite kernel — embedded via iframe. URL points at our
+    # statically-hosted JupyterLite build. Path-only assets work in
+    # both dev (next dev) and prod (CDN-hosted). Override per-env if
+    # you host JupyterLite elsewhere.
+    jupyterlite_base_url: str = "/jupyterlite"
+
+    # Agentic OS — embeddings for the memory primitive.
+    # Voyage-3 is the default provider (1024 native dims, padded to
+    # 1536 in app.agents.primitives.embeddings to fit the migration's
+    # vector(1536) column). When voyage_api_key is unset the layer
+    # falls back to a deterministic hash function so dev / CI work
+    # without an external API. The full ENABLE_* feature flags for the
+    # primitives layer land in a later deliverable (10) — this
+    # commit only adds the two settings the embeddings helper reads.
+    voyage_api_key: str = ""
+    embeddings_model: str = "voyage-3"
+
+    # Agentic OS — escalation limiter backend (D5+Track 2).
+    #
+    # `redis` (default): per-agent sliding-window sorted-set in Redis.
+    #   Multi-worker safe: every Celery worker / FastAPI worker
+    #   shares the same bucket so the configured limit is the
+    #   actual cap on admin notifications.
+    #
+    # `in_memory`: process-local deque. Pre-Track-2 default;
+    #   over-grants by Nx where N = worker count. Kept as the
+    #   fallback path for tests and dev environments without
+    #   Redis (and as the fail-open destination when Redis is
+    #   unreachable at runtime).
+    #
+    # Fail-open contract (load-bearing): when Redis is configured
+    # but unavailable, the limiter MUST degrade to permissive
+    # (escalate everything) with a loud warning, NOT block. A
+    # Redis incident is exactly when admins need the notification
+    # firehose; suppressing during failure is the unsafe default.
+    escalation_limiter_backend: str = "redis"
+
+    # Inter-agent call depth ceiling. Hard cap that prevents an
+    # agent that calls itself (or an unbounded chain) from hanging
+    # the request. Default 5: enough headroom for legitimate
+    # composition (root → 4 nested calls), tight enough to surface
+    # accidental fan-out before it eats wall-clock or token budget.
+    # Per-call timeouts ride on top of this via asyncio.wait_for.
+    agent_call_max_depth: int = 5
+    agent_call_timeout_seconds: float = 30.0
+
+    # Webhook secrets for the proactive primitive (D6).
+    #
+    # `github_webhook_secret` is distinct from `github_token` (a PAT
+    # used for API reads). Webhook secret is set inside GitHub's
+    # repo / org webhook UI; payloads are signed with HMAC-SHA256
+    # and we verify before routing. Empty = signature verification
+    # rejects all requests, which is the safe default for an
+    # unconfigured environment.
+    github_webhook_secret: str = ""
+
     # Celery — default to the same Redis as the app (host-aware) so docker
     # and local runs don't silently point the worker at localhost. Any env
     # override of celery_broker_url / celery_result_backend still wins.
@@ -122,6 +306,99 @@ class Settings(BaseSettings):
             self.celery_broker_url = f"redis://{self.redis_host}:{self.redis_port}/1"
         if not self.celery_result_backend:
             self.celery_result_backend = f"redis://{self.redis_host}:{self.redis_port}/2"
+
+    # PR3/D2.2 — production_required validator.
+    #
+    # Refuses to boot when ENVIRONMENT=production and any of the four
+    # critical secrets (JWT secret_key, Anthropic key, Postgres URL,
+    # Redis URL) is missing or matches a known dev default. The error
+    # message names every offending field at once — a partial fix that
+    # surfaces a new "still wrong" error on the next boot is wasted
+    # wall-clock during a deploy.
+    #
+    # Why `model_validator(mode="after")` (not a `@field_validator`):
+    #   - We need to read `environment` AND the four secrets on the
+    #     same instance, so a per-field validator would fire before
+    #     `environment` is bound and short-circuit incorrectly.
+    #   - We need access to derived properties (`database_url`,
+    #     `redis_url`) which only exist after model construction.
+    @model_validator(mode="after")
+    def _production_required(self) -> "Settings":
+        if self.environment.lower() != "production":
+            return self
+
+        problems: list[str] = []
+
+        if not self._is_strong_secret(self.secret_key, _MIN_SECRET_KEY_LEN):
+            problems.append(
+                "secret_key is missing, too short, or matches a dev default "
+                f"(min length {_MIN_SECRET_KEY_LEN}, must not contain a dev fragment)"
+            )
+
+        if not self._is_strong_secret(self.anthropic_api_key, min_len=8):
+            problems.append(
+                "anthropic_api_key is missing or matches a dev default "
+                "(must be a real Anthropic key starting with `sk-ant-…`)"
+            )
+
+        # database_url is a property derived from postgres_* fields. We
+        # check the constructed URL so a sneaky `postgres:postgres` host
+        # password gets caught even if the user split it across fields.
+        if not self._is_strong_secret(self.database_url, min_len=8):
+            problems.append(
+                "database_url is missing or matches a dev default "
+                "(set POSTGRES_HOST / POSTGRES_USER / POSTGRES_PASSWORD / "
+                "POSTGRES_DB to non-default values, OR provide a managed-DB "
+                "connection string in production)"
+            )
+
+        if not self._is_strong_secret(self.redis_url, min_len=8):
+            problems.append(
+                "redis_url is missing or matches a dev default "
+                "(set REDIS_HOST / REDIS_PORT to a managed Redis endpoint)"
+            )
+
+        # PR3/D3.1 — CORS wildcard in production is a CORS-spec
+        # violation when paired with `allow_credentials=True` (which
+        # we use). Browsers silently reject it, but better to fail
+        # loud at boot than ship a quietly-broken app.
+        if "*" in self.cors_origins:
+            problems.append(
+                "cors_origins contains '*' which is invalid in production "
+                "(allow_credentials=True forbids the wildcard). Set "
+                "CORS_ORIGINS to an explicit comma-separated list of HTTPS "
+                "origins."
+            )
+
+        if problems:
+            joined = "\n  - ".join(problems)
+            raise ValueError(
+                "Refusing to boot: ENVIRONMENT=production but critical "
+                "secrets are missing or look like dev defaults:\n  - "
+                + joined
+                + "\n\nFix by setting strong values in your production "
+                "environment (see docs/runbooks/secret-rotation.md). "
+                "This check is intentional — booting with dev defaults "
+                "in production is a security incident."
+            )
+
+        return self
+
+    @staticmethod
+    def _is_strong_secret(value: str, min_len: int) -> bool:
+        """Return True iff `value` is non-empty, ≥ min_len, and does not
+        contain any known dev-default fragment.
+
+        Comparison is case-insensitive — a prod operator who pastes
+        `ChangeMe-In-Production` should fail just as loudly as the
+        lower-cased default."""
+        if not value or len(value) < min_len:
+            return False
+        lowered = value.lower()
+        for fragment in _DEV_DEFAULT_FRAGMENTS:
+            if fragment in lowered:
+                return False
+        return True
 
 
 @lru_cache

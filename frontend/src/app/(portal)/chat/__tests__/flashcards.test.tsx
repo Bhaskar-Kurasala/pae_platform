@@ -16,6 +16,7 @@ import {
   type Mock,
 } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // ── Module mocks (hoisted) ───────────────────────────────────────
 
@@ -77,6 +78,9 @@ vi.mock("@/lib/chat-api", async () => {
       editMessage: vi.fn(),
       getMessage: vi.fn(),
       addFlashcards: vi.fn(),
+      // P-Today2 — opening the SaveNoteModal triggers summarize on mount.
+      // Not exercised here but the chat page's effect needs the symbol present.
+      summarizeForNotebook: vi.fn(),
       saveToNotebook: vi.fn(),
       listNotebook: vi.fn(),
       deleteNotebookEntry: vi.fn(),
@@ -217,53 +221,89 @@ describe("Chat page — P3-2 flashcard extraction", () => {
     mockedChatApi.getConversation.mockResolvedValue(
       makeConversationDetail("c1"),
     );
-    render(<ChatPage />);
+    // ChatSidebar uses useDueCards; the modal uses useMutation.
+    const qc = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <ChatPage />
+      </QueryClientProvider>,
+    );
     await waitFor(() => {
       expect(screen.getByText("Explain Python generators")).toBeInTheDocument();
     });
   }
 
+  // P-Today3 — bookmark click no longer fires `addFlashcards` directly;
+  // it opens MakeFlashcardsModal where the student writes 1–10 cards.
+
   it("shows the flashcard button on a hydrated assistant bubble", async () => {
     await renderHydrated();
 
     const flashcardBtns = await screen.findAllByRole("button", {
-      name: /add flashcards from this message/i,
+      name: /make flashcards from this message/i,
     });
     expect(flashcardBtns.length).toBeGreaterThan(0);
   });
 
-  it("calls addFlashcards with the message id and content on click", async () => {
-    mockedChatApi.addFlashcards.mockResolvedValue({ cards_added: 3 });
+  it("opens MakeFlashcardsModal on bookmark click (no immediate POST)", async () => {
     await renderHydrated();
 
     const flashcardBtn = await screen.findByRole("button", {
-      name: /add flashcards from this message/i,
+      name: /make flashcards from this message/i,
     });
     await act(async () => {
       fireEvent.click(flashcardBtn);
     });
 
+    // Modal title appears — bookmark didn't auto-POST.
     await waitFor(() => {
-      expect(mockedChatApi.addFlashcards).toHaveBeenCalledWith(
-        "m-asst-1",
-        "Generators are lazy iterators. Q: What is a generator? A: A lazy iterator.",
-      );
+      expect(
+        screen.getByRole("heading", { name: /make flashcards/i }),
+      ).toBeInTheDocument();
     });
+    expect(mockedChatApi.addFlashcards).not.toHaveBeenCalled();
   });
 
-  it("shows a success toast with the card count after adding flashcards", async () => {
-    mockedChatApi.addFlashcards.mockResolvedValue({ cards_added: 3 });
+  it("clicking Save in modal posts the user-authored cards", async () => {
+    mockedChatApi.addFlashcards.mockResolvedValue({
+      cards_added: 1,
+      cards: [{ question: "What is a generator?", answer: "A lazy iterator." }],
+      cards_trimmed: 0,
+    });
     await renderHydrated();
 
-    const flashcardBtn = await screen.findByRole("button", {
-      name: /add flashcards from this message/i,
-    });
     await act(async () => {
-      fireEvent.click(flashcardBtn);
+      fireEvent.click(
+        await screen.findByRole("button", {
+          name: /make flashcards from this message/i,
+        }),
+      );
+    });
+
+    const front = await screen.findByLabelText(/front · the cue/i);
+    const back = screen.getByLabelText(/back · your recall in 1.2 sentences/i);
+    await act(async () => {
+      fireEvent.change(front, { target: { value: "What is a generator?" } });
+      fireEvent.change(back, { target: { value: "A lazy iterator." } });
+    });
+
+    const saveBtn = await screen.findByRole("button", { name: /save 1 card/i });
+    await act(async () => {
+      fireEvent.click(saveBtn);
     });
 
     await waitFor(() => {
-      expect(mockToastSuccess).toHaveBeenCalledWith("3 cards added to review");
+      expect(mockedChatApi.addFlashcards).toHaveBeenCalledWith({
+        messageId: "m-asst-1",
+        conversationId: "c1",
+        cards: [{ front: "What is a generator?", back: "A lazy iterator." }],
+      });
+      expect(mockToastSuccess).toHaveBeenCalledWith("1 card added to review");
     });
   });
 });

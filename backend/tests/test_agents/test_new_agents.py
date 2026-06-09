@@ -73,21 +73,10 @@ async def test_mcq_factory_generates_questions() -> None:
     assert len(data) >= 1
 
 
-@pytest.mark.asyncio
-async def test_coding_assistant_returns_markdown() -> None:
-    from app.agents.coding_assistant import CodingAssistantAgent
-
-    agent = CodingAssistantAgent()
-    state = AgentState(
-        student_id="s1",
-        task="help with code",
-        context={"code": "def add(a, b):\n    return a + b"},
-    )
-    with patch.object(agent, "_build_llm", return_value=_mock_llm(
-        "Nice work! A few suggestions:\n\n**Line 1**: Add type hints → `def add(a: int, b: int) -> int:`"
-    )):
-        result = await agent.execute(state)
-    assert result.response is not None
+# test_coding_assistant_returns_markdown removed at D11 cutover
+# (Checkpoint 4) — coding_assistant absorbed into senior_engineer
+# per Pass 3c E2. The senior_engineer agent class is exercised by
+# tests/test_agents/test_senior_engineer.py + the schema/tool tests.
 
 
 @pytest.mark.asyncio
@@ -191,21 +180,12 @@ async def test_adaptive_path_calls_llm() -> None:
 
 # ── Analytics Agents ───────────────────────────────────────────────────────────
 
-@pytest.mark.asyncio
-async def test_project_evaluator_scores() -> None:
-    from app.agents.project_evaluator import ProjectEvaluatorAgent
-
-    agent = ProjectEvaluatorAgent()
-    state = AgentState(
-        student_id="s1",
-        task="evaluate my capstone",
-        context={"submission": "Built a RAG pipeline...", "rubric": {"correctness": 20}},
-    )
-    eval_resp = json.dumps({"score": 82, "summary": "Solid work.", "approved": True, "feedback": {}})
-    with patch.object(agent, "_build_llm", return_value=_mock_llm(eval_resp)):
-        result = await agent.execute(state)
-    evaluated = await agent.evaluate(result)
-    assert evaluated.evaluation_score == pytest.approx(0.82)
+# test_project_evaluator_scores — D14c CP4 cutover removed. The legacy
+# BaseAgent ProjectEvaluatorAgent class no longer exists; the
+# AgenticBaseAgent successor at app.agents.project_evaluator is
+# covered by tests/test_agents/test_project_evaluator_schema.py +
+# test_project_evaluator_stub_smoke.py + test_project_evaluator_schema_audit.py.
+# Mirrors the test-deletion discipline of D11/D12/D13 cutovers.
 
 
 @pytest.mark.asyncio
@@ -227,18 +207,14 @@ async def test_progress_report_generates_text() -> None:
 
 # ── Career Agents ──────────────────────────────────────────────────────────────
 
-@pytest.mark.asyncio
-async def test_mock_interview_asks_question() -> None:
-    from app.agents.mock_interview import MockInterviewAgent
-
-    agent = MockInterviewAgent()
-    state = AgentState(student_id="s1", task="start interview")
-    with patch.object(agent, "_build_llm", return_value=_mock_llm(
-        "Let's begin. Design a production RAG pipeline for a customer support chatbot. How would you handle document ingestion?"
-    )):
-        result = await agent.execute(state)
-    evaluated = await agent.evaluate(result)
-    assert evaluated.evaluation_score == 0.9  # Contains "?"
+# test_mock_interview_asks_question — D13 CP4 cutover (commit 5cd7760)
+# removed the legacy BaseAgent MockInterviewAgent. The class at
+# app.agents.mock_interview is now an AgenticBaseAgent (formerly
+# mock_interview_v2) registered via _agentic_registry; it has no
+# _build_llm method and its evaluation flow runs through Critic, not
+# the legacy evaluate() heuristic. Mirrors the test-deletion discipline
+# of D11/D12/D14c cutovers (see retirement comments above for
+# coding_assistant, project_evaluator).
 
 
 @pytest.mark.asyncio
@@ -354,12 +330,22 @@ async def test_all_agents_registered() -> None:
     from app.agents.registry import AGENT_REGISTRY, _ensure_registered
 
     _ensure_registered()
+    # code_review + coding_assistant — D11 cutover (Checkpoint 4)
+    # absorbed both into senior_engineer (which lives in
+    # _agentic_registry, not AGENT_REGISTRY). They were dropped from
+    # _ensure_registered at the same commit.
+    # mock_interview + project_evaluator removed from expected list at
+    # D13 CP4 (commit 5cd7760) and D14c CP4 cutovers respectively.
+    # Both were migrated from BaseAgent to AgenticBaseAgent and now
+    # live in _agentic_registry, not AGENT_REGISTRY. Same pattern as
+    # billing_support (D10), senior_engineer (D11), career bundle (D12)
+    # — all dropped from this expected list at their cutover.
     expected = [
-        "adaptive_path", "adaptive_quiz", "code_review", "coding_assistant",
+        "adaptive_path", "adaptive_quiz",
         "community_celebrator", "content_ingestion", "curriculum_mapper", "deep_capturer",
         "disrupt_prevention", "job_match", "knowledge_graph", "mcq_factory",
-        "mock_interview", "peer_matching", "portfolio_builder", "progress_report",
-        "project_evaluator", "socratic_tutor", "spaced_repetition", "student_buddy",
+        "peer_matching", "portfolio_builder", "progress_report",
+        "socratic_tutor", "spaced_repetition", "student_buddy",
     ]
     for name in expected:
         assert name in AGENT_REGISTRY, f"Agent '{name}' not in registry"
@@ -370,9 +356,20 @@ async def test_moa_keyword_routing() -> None:
     """MOA keyword router should correctly classify common patterns."""
     from app.agents.moa import _keyword_route
 
-    assert _keyword_route("review my code") == "code_review"
+    # "review my code" → previously routed to code_review via MOA;
+    # at D11 cutover the keyword map dropped that entry. Code-review-
+    # flavored requests reach senior_engineer via the canonical
+    # /api/v1/agentic/{flow}/chat endpoint instead. The keyword route
+    # falls through to None now, which signals the LLM-classifier
+    # fallback path.
+    assert _keyword_route("review my code") is None
     assert _keyword_route("quiz me on RAG") == "adaptive_quiz"
-    assert _keyword_route("mock interview please") == "mock_interview"
+    # "mock interview please" — D13 CP4 cutover (commit 5cd7760)
+    # dropped this keyword route. Interview-practice questions now
+    # reach the AgenticBaseAgent class via the canonical
+    # /api/v1/agentic/{flow}/chat endpoint. The keyword route falls
+    # through to None now (LLM-classifier fallback path).
+    assert _keyword_route("mock interview please") is None
     assert _keyword_route("find jobs in AI") == "job_match"
     assert _keyword_route("find peer to study with") == "peer_matching"
     # Should return None for unknown intent (falls back to LLM)

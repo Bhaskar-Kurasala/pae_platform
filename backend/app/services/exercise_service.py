@@ -88,6 +88,32 @@ class ExerciseService:
                 student_id=str(student.id),
                 length=len(self_explanation),
             )
+
+        # Emit a cohort_event when a capstone gets shipped, so the
+        # admin "Live event feed" picks it up. We only fire on the
+        # first attempt of a capstone — re-submitting the same
+        # capstone shouldn't spam the feed.
+        if exercise.is_capstone and attempt == 1:
+            try:
+                from app.services.cohort_event_service import (
+                    mask_handle,
+                    record_event,
+                )
+
+                await record_event(
+                    self.submission_repo.db,
+                    kind="capstone_shipped",
+                    actor=student,
+                    label=f"{mask_handle(student.full_name)} shipped '{exercise.title}'",
+                    payload={"exercise_id": str(exercise.id)},
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "exercise.cohort_event_failed",
+                    exercise_id=str(exercise.id),
+                    error=str(exc),
+                )
+
         schedule_grading(submission.id)
         return submission
 

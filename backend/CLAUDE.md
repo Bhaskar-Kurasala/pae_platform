@@ -29,9 +29,11 @@ app/
 ├── api/v1/routes/          # Route handlers (thin — delegate to services)
 ├── core/                   # Config, security, database, redis, celery
 ├── services/               # Business logic (agent orchestrator, payments, etc.)
-├── agents/                 # All 18+ AI agents (each extends BaseAgent)
-│   ├── base_agent.py       # Abstract base with execute(), evaluate(), log()
-│   ├── moa.py              # Master Orchestrator Agent (LangGraph)
+├── agents/                 # ~28 AI agents (dual registry: BaseAgent + AgenticBaseAgent)
+│   ├── base_agent.py       # Legacy abstract base — execute(), evaluate(), log()
+│   ├── agentic_base.py     # AgenticBaseAgent — auto-registered agentic agents
+│   ├── moa.py              # Master Orchestrator Agent (LangGraph, legacy path)
+│   ├── _agentic_loader.py  # Loads/registers AgenticBaseAgent subclasses
 │   └── prompts/            # System prompts for each agent (markdown files)
 ├── models/                 # SQLAlchemy models
 ├── schemas/                # Pydantic request/response schemas
@@ -43,7 +45,7 @@ app/
 - ALL functions MUST have type hints (mypy strict mode, no `Any`).
 - ALL DB calls MUST be async (AsyncSession from SQLAlchemy 2.0).
 - ALL external API calls MUST have retry logic (tenacity decorator).
-- ALL agents MUST extend `BaseAgent` and implement `async execute()`.
+- Agents extend either `BaseAgent` (legacy `@register` path, implements `async execute()`) or `AgenticBaseAgent` (agentic path, auto-registered via `__init_subclass__`).
 - NEVER import from routes in services (clean dependency direction).
 - Use `structlog` for ALL logging — never `print()` or `logging.getLogger()`.
 - Use FastAPI dependency injection for services and repositories.

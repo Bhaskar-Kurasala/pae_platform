@@ -57,6 +57,9 @@ class ProgressService:
         lesson_status: dict[uuid.UUID, str] = {
             rec.lesson_id: rec.status for rec in progress_records
         }
+        progress_by_lesson: dict[uuid.UUID, StudentProgress] = {
+            rec.lesson_id: rec for rec in progress_records
+        }
 
         # 3. Build CourseProgress for each enrolled course
         course_progresses: list[CourseProgress] = []
@@ -108,12 +111,64 @@ class ProgressService:
                 )
             )
 
-        # 4. Overall progress = average of per-course percentages
+        # 4. Overall progress = WEIGHTED across lessons (Bug F).
+        #    Mean-of-percentages overweights small courses; sum/sum is the
+        #    honest "% of all lessons done across what you've enrolled in".
+        lessons_total = sum(c.total_lessons for c in course_progresses)
+        lessons_completed_total = sum(
+            c.completed_lessons for c in course_progresses
+        )
         overall = (
-            round(sum(c.progress_percentage for c in course_progresses) / len(course_progresses), 1)
-            if course_progresses
+            round(lessons_completed_total / lessons_total * 100, 1)
+            if lessons_total > 0
             else 0.0
         )
+
+        # Active course = the one with the most-recently-touched lesson
+        # (StudentProgress.updated_at). Falls back to the first enrolled
+        # course so the UI always has something to point at.
+        course_by_id = {c.course_id: c for c in course_progresses}
+        active_course_id: uuid.UUID | None = None
+        if progress_records:
+            recent_records = sorted(
+                progress_records,
+                key=lambda r: r.updated_at or r.created_at,
+                reverse=True,
+            )
+            for rec in recent_records:
+                lessons_for_course = await self.db.execute(
+                    select(Lesson.course_id).where(Lesson.id == rec.lesson_id)
+                )
+                row = lessons_for_course.first()
+                if row is None:
+                    continue
+                cid = row[0]
+                if cid in course_by_id:
+                    active_course_id = cid
+                    break
+        if active_course_id is None and course_progresses:
+            active_course_id = course_progresses[0].course_id
+        active_course = (
+            course_by_id.get(active_course_id) if active_course_id else None
+        )
+
+        next_lesson_id = active_course.next_lesson_id if active_course else None
+        next_lesson_title = (
+            active_course.next_lesson_title if active_course else None
+        )
+
+        # Today unlock % = approximate progress kick from finishing the next
+        # lesson in the active course. Capped at 25% so a tiny course doesn't
+        # claim a 100% jump.
+        today_unlock_percentage = 0.0
+        if active_course and active_course.total_lessons > 0:
+            remaining = (
+                active_course.total_lessons - active_course.completed_lessons
+            )
+            if remaining > 0:
+                today_unlock_percentage = round(
+                    min(25.0, 100.0 / active_course.total_lessons), 1
+                )
 
         # 5. Aggregate cross-cutting KPIs: exercise completion, watch time,
         #    and per-day completion buckets for the activity calendar + weekly
@@ -125,9 +180,11 @@ class ProgressService:
         enrolled_course_ids = [course.id for _, course in enrollment_rows]
         total_exercises = 0
         exercises_completed = 0
+        # Per-exercise pass thresholds so we honor the per-exercise pass_score
+        # column instead of a magic 70 (Bug G).
         if enrolled_course_ids:
             total_ex_res = await self.db.execute(
-                select(Exercise)
+                select(Exercise.id, Exercise.pass_score)
                 .join(Lesson, Exercise.lesson_id == Lesson.id)
                 .where(
                     Lesson.course_id.in_(enrolled_course_ids),
@@ -135,10 +192,12 @@ class ProgressService:
                     Lesson.is_deleted.is_(False),
                 )
             )
-            total_exercises = len(list(total_ex_res.scalars().all()))
+            pass_thresholds: dict[uuid.UUID, int] = {
+                ex_id: int(pass_score)
+                for ex_id, pass_score in total_ex_res.all()
+            }
+            total_exercises = len(pass_thresholds)
 
-            # A student has "completed" an exercise when ANY of their submissions
-            # for it is `graded` with score >= 70 (matches the rubric pass bar).
             sub_res = await self.db.execute(
                 select(ExerciseSubmission.exercise_id, ExerciseSubmission.score)
                 .where(
@@ -148,7 +207,8 @@ class ProgressService:
             )
             passed_ids: set[uuid.UUID] = set()
             for ex_id, score in sub_res.all():
-                if score is not None and score >= 70:
+                threshold = pass_thresholds.get(ex_id, 70)
+                if score is not None and score >= threshold:
                     passed_ids.add(ex_id)
             exercises_completed = len(passed_ids)
 
@@ -181,11 +241,18 @@ class ProgressService:
         return ProgressResponse(
             courses=course_progresses,
             overall_progress=overall,
+            lessons_completed_total=lessons_completed_total,
+            lessons_total=lessons_total,
             exercises_completed=exercises_completed,
             total_exercises=total_exercises,
             exercise_completion_rate=ex_rate,
             watch_time_minutes=watch_minutes,
             completions_by_day=completions_by_day,
+            active_course_id=active_course_id,
+            active_course_title=active_course.course_title if active_course else None,
+            next_lesson_id=next_lesson_id,
+            next_lesson_title=next_lesson_title,
+            today_unlock_percentage=today_unlock_percentage,
         )
 
     async def complete_lesson(self, lesson_id: str | uuid.UUID, student: User) -> StudentProgress:
@@ -323,11 +390,22 @@ class ProgressService:
             f"Recall — {lesson.title}. In one or two sentences, what is the "
             "core idea and when would you reach for it?"
         )
+        # Pull answer/hint from the lesson's authored content where available;
+        # fall back to a sensible default so the UI reveal always has copy.
+        answer = (lesson.description or "").strip()
+        if not answer:
+            answer = (
+                "Restate the core idea in your own words and name one place "
+                "you'd reach for it."
+            )
+        hint = "Say the idea out loud first, then click reveal."
         try:
             await SRSService(self.db).upsert_card(
                 user_id=student_id,
                 concept_key=concept_key,
                 prompt=prompt,
+                answer=answer,
+                hint=hint,
             )
         except Exception as exc:
             # SRS is a nice-to-have on the completion path — never fail the

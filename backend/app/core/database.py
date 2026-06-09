@@ -1,5 +1,12 @@
 from collections.abc import AsyncGenerator
+from time import perf_counter
+from typing import Any
 
+import structlog
+from sqlalchemy import event
+from sqlalchemy.engine import Connection
+from sqlalchemy.engine.cursor import CursorResult
+from sqlalchemy.engine.interfaces import ExecutionContext
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -9,10 +16,37 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
 
+log = structlog.get_logger()
+
 
 class Base(DeclarativeBase):
     pass
 
+
+# PR2/B5.2 — Postgres `statement_timeout`. Caps any single SQL statement
+# at 5 seconds wall-clock. A runaway query can no longer pin a worker
+# indefinitely; the request fails fast with a SQLAlchemy
+# `OperationalError: canceling statement due to statement timeout`,
+# which our global exception handler (PR2/B4.1) wraps in the stable
+# error envelope.
+#
+# 5s is generous for our app shape — the slowest aggregator (Today)
+# completes in <300ms p95 against the demo dataset. Anything taking 5s
+# is an indexing bug or a runaway scan.
+#
+# Passed via asyncpg's `server_settings` connect arg, which executes
+# `SET statement_timeout = '5s'` on every new connection.
+_DB_STATEMENT_TIMEOUT_MS = 5000
+
+# PR3/C8.1 — Slow-query threshold. Anything that takes longer than this
+# emits a `slow_query` structlog warning with the SQL, parameters
+# (truncated), and duration. 500ms is loud-enough to fire on real
+# regressions but quiet-enough not to spam under normal load — most
+# aggregator queries finish in <100ms. Tunable via env if it turns out
+# to need adjusting; for now a constant is simpler.
+SLOW_QUERY_THRESHOLD_MS = 500
+_SQL_PREVIEW_MAX_CHARS = 500
+_PARAMS_PREVIEW_MAX_CHARS = 200
 
 engine = create_async_engine(
     settings.database_url,
@@ -22,7 +56,143 @@ engine = create_async_engine(
     max_overflow=settings.db_max_overflow,
     pool_timeout=settings.db_pool_timeout,
     pool_recycle=settings.db_pool_recycle,
+    connect_args={
+        "server_settings": {
+            "statement_timeout": str(_DB_STATEMENT_TIMEOUT_MS),
+        },
+    },
 )
+
+
+def _truncate(text: str, max_chars: int) -> str:
+    """Truncate with a sentinel suffix so log readers can spot truncation."""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + f"…[+{len(text) - max_chars} chars]"
+
+
+def _attach_slow_query_logger(sync_engine: Any) -> None:
+    """Wire `before/after_cursor_execute` events to log slow queries.
+
+    SQLAlchemy emits these events on the *sync* engine even when the
+    outer engine is async — `AsyncEngine.sync_engine` is the listener
+    target. We stash a perf_counter timestamp in `context._query_start`
+    on `before_cursor_execute` and emit the structlog warning on
+    `after_cursor_execute` if the elapsed time crossed the threshold.
+
+    Logs SQL + parameters (both truncated) so the on-call can copy-paste
+    into psql to reproduce. We intentionally do NOT log result rows — a
+    1MB result set in a log line is pure noise.
+    """
+
+    @event.listens_for(sync_engine, "before_cursor_execute")
+    def _before_cursor_execute(
+        conn: Connection,
+        cursor: Any,
+        statement: str,
+        parameters: Any,
+        context: ExecutionContext,
+        executemany: bool,
+    ) -> None:
+        # Stash on `context` so it survives until after_cursor_execute
+        # for the same statement on the same connection.
+        context._query_start_perf = perf_counter()  # type: ignore[attr-defined]
+
+    @event.listens_for(sync_engine, "after_cursor_execute")
+    def _after_cursor_execute(
+        conn: Connection,
+        cursor: Any,
+        statement: str,
+        parameters: Any,
+        context: ExecutionContext,
+        executemany: bool,
+    ) -> None:
+        start = getattr(context, "_query_start_perf", None)
+        if start is None:
+            return  # paranoia: someone set up the engine without our listener
+        duration_seconds = perf_counter() - start
+        duration_ms = duration_seconds * 1000.0
+
+        # D19.1 CP2 — D-D canonical DB metric. query_type is derived
+        # from the leading SQL keyword and bucketed into a tiny
+        # bounded enum (select / insert / update / delete / other).
+        try:
+            from app.core.metrics import DB_QUERY_DURATION_SECONDS
+
+            DB_QUERY_DURATION_SECONDS.labels(
+                query_type=_classify_sql(statement)
+            ).observe(duration_seconds)
+        except Exception:  # noqa: BLE001
+            pass
+
+        if duration_ms < SLOW_QUERY_THRESHOLD_MS:
+            return
+        log.warning(
+            "slow_query",
+            duration_ms=round(duration_ms, 2),
+            threshold_ms=SLOW_QUERY_THRESHOLD_MS,
+            sql=_truncate(statement, _SQL_PREVIEW_MAX_CHARS),
+            params=_truncate(repr(parameters), _PARAMS_PREVIEW_MAX_CHARS),
+            executemany=executemany,
+        )
+
+
+def _classify_sql(statement: str) -> str:
+    """Map a SQL statement to a small bounded query-type enum.
+
+    Cardinality discipline (D-C): the metric label space is fixed
+    at the 5 values returned here, regardless of SQL volume. We
+    classify by the leading non-whitespace token; ``WITH ... SELECT``
+    and similarly-shaped CTEs are bucketed under their actual
+    leading keyword (``with``) for honesty.
+    """
+    if not statement:
+        return "other"
+    head = statement.lstrip()[:8].lower()
+    if head.startswith("select"):
+        return "select"
+    if head.startswith("insert"):
+        return "insert"
+    if head.startswith("update"):
+        return "update"
+    if head.startswith("delete"):
+        return "delete"
+    return "other"
+
+
+def _attach_pool_metrics(sync_engine: Any) -> None:
+    """Update aicareeros_db_pool_connections_in_use on every checkout
+    / checkin. The gauge tracks "currently checked out" by reading
+    SQLAlchemy's pool counter directly — robust to async / thread
+    contexts because the underlying pool is sync.
+    """
+
+    def _refresh(*_args: Any, **_kwargs: Any) -> None:
+        try:
+            from app.core.metrics import DB_POOL_CONNECTIONS_IN_USE
+
+            pool = sync_engine.pool
+            # checkedout() returns the count of outstanding
+            # connections; available on QueuePool + StaticPool.
+            checked_out = pool.checkedout() if hasattr(pool, "checkedout") else 0
+            DB_POOL_CONNECTIONS_IN_USE.set(int(checked_out))
+        except Exception:  # noqa: BLE001
+            pass
+
+    event.listen(sync_engine, "checkout", _refresh)
+    event.listen(sync_engine, "checkin", _refresh)
+
+
+# Wire the slow-query logger to the *sync* facet of the async engine —
+# SQLAlchemy 2.0 dispatches cursor events on the sync engine for both
+# sync and async usage. Idempotent: SQLAlchemy dedupes identical
+# listeners, but importing this module once at startup is the contract.
+_attach_slow_query_logger(engine.sync_engine)
+
+# D19.1 CP2 — pool gauge instrumentation. Same listener convention
+# as the slow-query logger; piggybacks on SQLAlchemy's pool events.
+_attach_pool_metrics(engine.sync_engine)
+
 
 AsyncSessionLocal = async_sessionmaker(
     engine,
@@ -39,3 +209,14 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+
+
+# Re-exported so tests / callers can read the threshold without importing
+# the private constant. Type kept as `int` for clarity.
+__all__ = [
+    "AsyncSessionLocal",
+    "Base",
+    "SLOW_QUERY_THRESHOLD_MS",
+    "engine",
+    "get_db",
+]

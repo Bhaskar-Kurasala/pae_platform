@@ -1,0 +1,932 @@
+"use client";
+
+/**
+ * <StudentDetailPanel> — the canonical 5-card admin operator surface
+ * for a single student. Used in two places:
+ *
+ *   1. /admin/students/[id]/page.tsx   — the full-page route view
+ *      (good for direct links, sharing, bookmarking)
+ *   2. <StudentDetailDrawer>           — the side-panel triage view
+ *      from the /admin overview (the operator's daily workflow)
+ *
+ * Same business logic, same five operator cards, same hooks, same
+ * tone & layout — guaranteed by the single shared component.
+ *
+ * Cards (top → bottom):
+ *   • Trigger agent + Schedule call (DISC-57 + F10)
+ *   • Refund offer (F11, only when student is in paid_silent panel)
+ *   • Admin notes (F2)
+ *   • Direct message (F8)
+ *   • Activity timeline (DISC-55 + F14 paginated)
+ */
+
+import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
+import { useImpersonationStore } from "@/stores/impersonation-store";
+import {
+  AlertTriangle,
+  Bot,
+  CalendarPlus,
+  CheckCircle2,
+  Clock,
+  FileCode2,
+  LogIn,
+  MessageCircle,
+  MessageSquare,
+  NotebookPen,
+  Play,
+  Sparkles,
+} from "lucide-react";
+import {
+  useAdminStudents,
+  useCreateStudentNote,
+  useLogManualOutreach,
+  useRefundOffers,
+  useRiskPanels,
+  useSendRefundOffer,
+  useStudentNotes,
+  useStudentTimeline,
+  useStudentTimelineOlder,
+  useTriggerAgent,
+  type ManualOutreachChannel,
+  type StudentTimelineEvent,
+} from "@/lib/hooks/use-admin";
+import {
+  useAdminMessagesForStudent,
+  useSendAdminMessage,
+} from "@/lib/hooks/use-messages";
+import { buildCallInviteMailto } from "@/lib/calendar-mailto";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+// Two-tier labels — the primary is human prose (renders in Inter),
+// the key is the technical agent name (renders in JetBrains Mono as a
+// caption). Keeps the dropdown readable while admins still see the
+// canonical key that lands in the audit log.
+const TRIGGERABLE_AGENTS = [
+  { name: "disrupt_prevention", label: "Re-engage" },
+  { name: "progress_report", label: "Weekly progress report" },
+  { name: "adaptive_path", label: "Suggest learning path" },
+  { name: "community_celebrator", label: "Celebrate milestone" },
+] as const;
+
+function TimelineIcon({ kind }: { kind: string }) {
+  const base = "h-4 w-4 shrink-0";
+  switch (kind) {
+    case "login":
+      return <LogIn className={base} aria-hidden="true" />;
+    case "lesson_completed":
+      return <CheckCircle2 className={base} aria-hidden="true" />;
+    case "submission":
+      return <FileCode2 className={base} aria-hidden="true" />;
+    case "outreach":
+      // D16/CP3.3 — outreach gets the chat icon; the channel pill below
+      // the summary distinguishes whatsapp / phone / email / in_app.
+      return <MessageCircle className={base} aria-hidden="true" />;
+    default:
+      return <Bot className={base} aria-hidden="true" />;
+  }
+}
+
+// D16/CP3.3 — channel pill rendered inline on outreach timeline rows.
+// Color choices: WhatsApp green for whatsapp; neutral slate for phone
+// (voice has no canonical color); blue for email; muted for in_app DM.
+// All have AA-contrast text on their background in light + dark.
+function ChannelBadge({ channel }: { channel: string }) {
+  const lower = channel.toLowerCase();
+  const palette: Record<string, string> = {
+    whatsapp:
+      "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900/40",
+    phone:
+      "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-900/40 dark:text-slate-300 dark:border-slate-800",
+    email:
+      "bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-900/40",
+    in_app:
+      "bg-muted text-muted-foreground border-border",
+  };
+  const classes = palette[lower] ?? palette.in_app;
+  const label = lower === "in_app" ? "in-app" : lower;
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-1.5 py-0 text-[10px] font-medium uppercase tracking-wide ${classes}`}
+      data-testid={`channel-badge-${lower}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+/**
+ * Card header in cockpit tone — small uppercase mono eyebrow, then a
+ * Fraunces serif title with the icon inline. Used by every operator
+ * card so the panel reads as part of the cockpit's typographic system
+ * (Fraunces hero · JetBrains eyebrow · Inter prose) instead of a
+ * generic shadcn card.
+ *
+ * Body text below the title stays Inter — Fraunces would be wrong for
+ * a paragraph of helper copy. Numerics elsewhere in the panel pick up
+ * mono via the modal's `.tabular-nums` style override.
+ */
+/**
+ * Card header in v8/cockpit tone — eyebrow with leading dot, Fraunces
+ * serif title at 22px with -0.03em tracking, generous body text. The
+ * full set of typographic variables matches the /path screen so the
+ * modal feels made of the same parts as the rest of the app.
+ *
+ *   ┌─────────────────────────────────────────────
+ *   │ ● AGENT         (10px, 0.2em, weight 700, mint dot ::before)
+ *   │ Trigger agent   (Fraunces 22px, weight 500, -0.03em)
+ *   │ Runs on behalf… (14px, line-height 1.65, muted)
+ *   └─────────────────────────────────────────────
+ *
+ * Body description uses 14px (not 12px) — at 12px Fraunces titles tower
+ * over the prose and the rhythm breaks. The /path screen runs body at
+ * 13-15px next to 22px serifs and that's what reads premium.
+ */
+function CardEyebrowHeader({
+  eyebrow,
+  title,
+  icon,
+  description,
+  iconClassName,
+}: {
+  eyebrow: string;
+  title: string;
+  icon: React.ReactNode;
+  description?: string;
+  iconClassName?: string;
+}) {
+  return (
+    <>
+      <div className="cf-card-eyebrow">
+        {eyebrow}
+      </div>
+      <h2
+        className="cf-card-title flex items-center gap-3"
+        style={{
+          fontFamily: "var(--font-fraunces), Georgia, serif",
+        }}
+      >
+        <span
+          className={`cf-card-title-icon ${iconClassName ?? ""}`}
+          aria-hidden="true"
+        >
+          {icon}
+        </span>
+        {title}
+      </h2>
+      {description ? (
+        <p className="cf-card-prose">{description}</p>
+      ) : null}
+    </>
+  );
+}
+
+interface StudentDetailPanelProps {
+  studentId: string | null;
+  /**
+   * When `true` the component renders without the header (caller is
+   * already showing student name/email in a wrapping chrome — e.g.
+   * the side-drawer header). When `false` (default) the header is
+   * rendered inline like the route page does.
+   */
+  hideHeader?: boolean;
+  /**
+   * Tightens spacing for the drawer rendering (cards stack with less
+   * padding so more content fits in the viewport).
+   */
+  compact?: boolean;
+}
+
+export function StudentDetailPanel({
+  studentId,
+  hideHeader = false,
+  compact = false,
+}: StudentDetailPanelProps) {
+  const { data: students } = useAdminStudents();
+  const student = useMemo(
+    () => students?.find((s) => s.id === studentId) ?? null,
+    [students, studentId],
+  );
+
+  const { data: timeline = [], isLoading: timelineLoading } =
+    useStudentTimeline(studentId);
+  const { data: notes = [], isLoading: notesLoading } =
+    useStudentNotes(studentId);
+  const createNote = useCreateStudentNote(studentId);
+  const trigger = useTriggerAgent();
+
+  // View-as-student: sets the impersonation store + navigates to /path
+  // so the admin lands on the same first screen the student would see.
+  // Cache reset prevents the admin's own data from flashing during the
+  // route transition. The banner mounts automatically in the portal
+  // layout once the store has a target.
+  const router = useRouter();
+  const startImpersonation = useImpersonationStore((s) => s.start);
+  const handleViewAsStudent = () => {
+    if (!student) return;
+    queryClient.clear();
+    startImpersonation({
+      studentId: student.id,
+      studentEmail: student.email,
+      studentName: student.full_name || student.email,
+    });
+    router.push("/path");
+  };
+
+  // F11 — Refund offer card surfaces only when the student is in
+  // the paid_silent risk panel (Slip 4). useRiskPanels hits the same
+  // endpoint as /admin so it'll usually be cached by the time we
+  // land here, making the conditional render free.
+  const { data: riskPanels } = useRiskPanels();
+  const paidSilentMatch = useMemo(() => {
+    if (!studentId || !riskPanels) return null;
+    return (
+      riskPanels.paid_silent.students.find((s) => s.user_id === studentId) ??
+      null
+    );
+  }, [riskPanels, studentId]);
+  const { data: refundOffers = [] } = useRefundOffers(studentId);
+  const sendRefundOffer = useSendRefundOffer(studentId);
+
+  // F8 — admin↔student in-app DM thread.
+  const { data: dmMessages = [], isLoading: dmLoading } =
+    useAdminMessagesForStudent(studentId);
+  const sendDm = useSendAdminMessage(studentId);
+  const dmThreadId = dmMessages[0]?.thread_id;
+
+  const [selectedAgent, setSelectedAgent] = useState<string>(
+    TRIGGERABLE_AGENTS[0].name,
+  );
+  const [triggerResult, setTriggerResult] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState<string>("");
+  const [refundReason, setRefundReason] = useState<string>("");
+  const [refundFlash, setRefundFlash] = useState<string | null>(null);
+  const [dmDraft, setDmDraft] = useState<string>("");
+
+  // D16/CP3.2 — manual outreach (WhatsApp / phone) state.
+  const logOutreach = useLogManualOutreach(studentId);
+  const [outreachChannel, setOutreachChannel] =
+    useState<ManualOutreachChannel>("whatsapp");
+  const [outreachNote, setOutreachNote] = useState<string>("");
+  const [outreachFlash, setOutreachFlash] = useState<string | null>(null);
+
+  // F14 — pagination state for older timeline events.
+  const PAGE_SIZE = 50;
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
+  const activeCursor = cursorStack[cursorStack.length - 1] ?? null;
+  const olderQuery = useStudentTimelineOlder(studentId, activeCursor);
+  const queryClient = useQueryClient();
+
+  const olderQueryData = olderQuery.data;
+  const olderPages: StudentTimelineEvent[][] = useMemo(() => {
+    if (!studentId) return [];
+    void olderQueryData;
+    return cursorStack
+      .map((c) =>
+        queryClient.getQueryData<StudentTimelineEvent[]>([
+          "admin",
+          "students",
+          studentId,
+          "timeline",
+          "before",
+          c,
+        ]),
+      )
+      .filter((p): p is StudentTimelineEvent[] => Array.isArray(p));
+  }, [cursorStack, studentId, queryClient, olderQueryData]);
+
+  const endReached =
+    cursorStack.length > 0 &&
+    olderQuery.isSuccess &&
+    (olderQuery.data?.length ?? 0) < PAGE_SIZE;
+
+  const allEvents: StudentTimelineEvent[] = useMemo(
+    () => [...timeline, ...olderPages.flat()],
+    [timeline, olderPages],
+  );
+
+  function handleLoadOlder() {
+    if (allEvents.length === 0) return;
+    const oldest = allEvents[allEvents.length - 1];
+    if (oldest.at === activeCursor) return;
+    setCursorStack((prev) => [...prev, oldest.at]);
+  }
+
+  async function handleSendRefundOffer() {
+    if (!studentId) return;
+    setRefundFlash(null);
+    try {
+      const offer = await sendRefundOffer.mutateAsync({
+        reason: refundReason.trim() || null,
+      });
+      setRefundReason("");
+      setRefundFlash(
+        offer.status === "sent"
+          ? "Offer sent — outreach_log row written."
+          : `Offer status: ${offer.status}. Retry available if needed.`,
+      );
+    } catch (err) {
+      setRefundFlash(`Failed: ${(err as Error).message}`);
+    }
+  }
+
+  async function handleAddNote() {
+    const trimmed = noteDraft.trim();
+    if (!trimmed || !studentId) return;
+    try {
+      await createNote.mutateAsync(trimmed);
+      setNoteDraft("");
+    } catch {
+      // global toast handles failure
+    }
+  }
+
+  async function handleSendDm() {
+    const trimmed = dmDraft.trim();
+    if (!trimmed || !studentId) return;
+    try {
+      await sendDm.mutateAsync({ body: trimmed, thread_id: dmThreadId });
+      setDmDraft("");
+    } catch {
+      // global toast handles failure
+    }
+  }
+
+  // D16/CP3.2 — admin recorded a manual outreach (WhatsApp / phone).
+  // Body preview optional; channel defaults to whatsapp because that's
+  // the founder-reframe primary use case. The deep link itself opens
+  // in a new tab via the wa.me anchor — this handler only writes the
+  // outreach_log row for audit.
+  async function handleLogOutreach() {
+    if (!studentId) return;
+    setOutreachFlash(null);
+    try {
+      const row = await logOutreach.mutateAsync({
+        channel: outreachChannel,
+        body_preview: outreachNote.trim() || undefined,
+      });
+      setOutreachNote("");
+      setOutreachFlash(
+        `Logged ${row.channel} contact · ${new Date(row.sent_at).toLocaleString()}`,
+      );
+    } catch (err) {
+      setOutreachFlash(`Failed: ${(err as Error).message}`);
+    }
+  }
+
+  async function handleTrigger() {
+    if (!studentId) return;
+    setTriggerResult(null);
+    try {
+      const res = await trigger.mutateAsync({
+        agentName: selectedAgent,
+        studentId,
+      });
+      setTriggerResult(
+        `✓ ${res.agent_name} · ${res.duration_ms}ms — ${res.response_preview || "(no response)"}`,
+      );
+    } catch (err) {
+      setTriggerResult(`✗ ${(err as Error).message}`);
+    }
+  }
+
+  const spacing = compact ? "space-y-4" : "space-y-6";
+
+  return (
+    <div className={spacing}>
+      {!hideHeader && (
+        <div>
+          {/* Eyebrow — v8 .eyebrow: Inter 10px/700/0.2em/uppercase */}
+          <div className="text-[10px] font-bold tracking-[0.2em] uppercase mb-2 text-primary">
+            Student profile
+          </div>
+          {/* Name — v8 .section-title h4: Fraunces 24px/500/-0.04em */}
+          <h1
+            className="font-medium leading-[1.1]"
+            style={{
+              fontFamily: "var(--font-fraunces), 'Fraunces', Georgia, serif",
+              fontSize: "24px",
+              letterSpacing: "-0.04em",
+            }}
+          >
+            {student?.full_name ?? "Student"}
+          </h1>
+          {/* Email — v8 .step-card p: Inter 13px/1.58/muted */}
+          <p className="text-muted-foreground mt-1 text-[13px] leading-[1.58]">
+            {student?.email ?? studentId}
+          </p>
+          {student && (
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              {/* Stats row — v8 .step-meta + .mini-chip: Inter 11px/700/999px */}
+              <span
+                className={`inline-flex items-center px-[9px] py-[5px] rounded-full text-[11px] font-bold leading-none ${
+                  student.is_active
+                    ? "bg-emerald-100 text-emerald-700"
+                    : "bg-muted text-muted-foreground"
+                }`}
+              >
+                {student.is_active ? "Active" : "Inactive"}
+              </span>
+              <span className="inline-flex items-center px-[9px] py-[5px] rounded-full text-[11px] font-bold leading-none bg-muted/60 text-foreground">
+                {student.lessons_completed} lessons
+              </span>
+              <span className="inline-flex items-center px-[9px] py-[5px] rounded-full text-[11px] font-bold leading-none bg-muted/60 text-foreground">
+                {student.agent_interactions} chats
+              </span>
+              <span className="inline-flex items-center px-[9px] py-[5px] rounded-full text-[11px] font-bold leading-none bg-muted/60 text-muted-foreground">
+                Joined {new Date(student.created_at).toLocaleDateString()}
+              </span>
+              {/* View-as-student CTA — opens the portal as this student
+                  in read-only impersonation mode. The banner in the
+                  portal layout makes the mode visually unambiguous. */}
+              <button
+                type="button"
+                onClick={handleViewAsStudent}
+                className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-semibold leading-none border border-primary text-primary hover:bg-primary hover:text-primary-foreground transition-colors"
+                title={`Open the portal as ${student.full_name || student.email}`}
+              >
+                <span aria-hidden>👁</span>
+                View as student
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* DISC-57 — admin agent trigger panel */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardEyebrowHeader
+            eyebrow="Agent"
+            title="Trigger agent"
+            icon={<Sparkles className="h-4 w-4" aria-hidden="true" />}
+            iconClassName="text-primary"
+            description="Runs on behalf of this student. Logged with your admin identity in the audit log."
+          />
+        </CardHeader>
+        <CardContent className="flex flex-col md:flex-row gap-3">
+          {/* shadcn Select (base-ui combobox) — fully styled, portal-rendered.
+              Replaces the native <select> which had a white-flash on
+              open in dark mode (OS popup briefly painted in default
+              scheme before color-scheme: dark could apply). */}
+          <Select
+            value={selectedAgent}
+            onValueChange={(v) => v !== null && setSelectedAgent(v)}
+          >
+            <SelectTrigger
+              aria-label="Agent to trigger"
+              className="cf-agent-trigger min-w-[260px]"
+            >
+              {/* Pure prose label — the technical agent key still lands
+                  in the audit log on submit, but admins only see the
+                  human verb in the UI. Single typeface (Inter), no
+                  underscores anywhere. */}
+              <SelectValue>
+                {(value) =>
+                  TRIGGERABLE_AGENTS.find((a) => a.name === value)?.label ??
+                  value
+                }
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {TRIGGERABLE_AGENTS.map((a) => (
+                <SelectItem key={a.name} value={a.name}>
+                  {a.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <button
+            type="button"
+            onClick={() => void handleTrigger()}
+            disabled={trigger.isPending || !studentId}
+            className="inline-flex items-center gap-1.5 h-9 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+          >
+            <Play className="h-3.5 w-3.5" aria-hidden="true" />
+            {trigger.isPending ? "Running…" : "Run"}
+          </button>
+          {triggerResult && (
+            <p className="text-xs text-muted-foreground self-center break-words max-w-xl">
+              {triggerResult}
+            </p>
+          )}
+          {/* F10 — Schedule call mailto-shim. */}
+          {student?.email && (
+            <a
+              href={buildCallInviteMailto({
+                studentEmail: student.email,
+                studentName: student.full_name,
+                slipType: paidSilentMatch ? "paid_silent" : null,
+                riskReason: paidSilentMatch?.risk_reason ?? null,
+              })}
+              className="inline-flex items-center gap-1.5 h-9 rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted/50"
+            >
+              <CalendarPlus className="h-3.5 w-3.5" aria-hidden="true" />
+              Schedule call
+            </a>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* D16/CP3.2 — Manual outreach card (WhatsApp + phone). Distinct
+          from in-app DM because the contact happens outside the platform;
+          the admin clicks the wa.me deep link (their own WhatsApp opens),
+          types the message there, then records what happened here so the
+          retention audit + timeline see the contact. */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardEyebrowHeader
+            eyebrow="Manual outreach · WhatsApp / phone"
+            title="Reach out off-platform"
+            icon={<MessageCircle className="h-4 w-4" aria-hidden="true" />}
+            description={
+              student?.whatsapp_number
+                ? "Open WhatsApp directly, or log a phone call after the fact. Either records to outreach_log so the timeline + retention engine see the contact."
+                : "No WhatsApp number on file for this student. Phone calls can still be logged below."
+            }
+          />
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {student?.whatsapp_number && (
+            <a
+              href={`https://wa.me/${student.whatsapp_number.replace(/\D/g, "")}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 h-9 rounded-lg border border-emerald-500/40 bg-emerald-50 px-3 text-sm font-medium text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-300 dark:hover:bg-emerald-950/50"
+              data-testid="whatsapp-deep-link"
+            >
+              <MessageCircle className="h-3.5 w-3.5" aria-hidden="true" />
+              Open WhatsApp · {student.whatsapp_number}
+            </a>
+          )}
+          <div className="flex items-center gap-2 text-xs">
+            <label htmlFor="outreach-channel" className="text-muted-foreground">
+              Channel
+            </label>
+            <select
+              id="outreach-channel"
+              value={outreachChannel}
+              onChange={(e) =>
+                setOutreachChannel(e.target.value as ManualOutreachChannel)
+              }
+              className="h-8 rounded-md border border-border bg-background px-2"
+              disabled={logOutreach.isPending}
+            >
+              <option value="whatsapp">WhatsApp</option>
+              <option value="phone">Phone call</option>
+            </select>
+          </div>
+          <textarea
+            value={outreachNote}
+            onChange={(e) => setOutreachNote(e.target.value)}
+            placeholder="What happened? (optional, max 200 chars)"
+            maxLength={200}
+            rows={2}
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+            aria-label="Outreach note"
+            disabled={logOutreach.isPending}
+          />
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-muted-foreground">
+              Goes to outreach_log; respects throttle for future system sends.
+            </span>
+            <button
+              type="button"
+              onClick={() => void handleLogOutreach()}
+              disabled={logOutreach.isPending || !studentId}
+              className="rounded-lg bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+              data-testid="log-outreach-button"
+            >
+              {logOutreach.isPending ? "Logging…" : "Log this contact"}
+            </button>
+          </div>
+          {outreachFlash && (
+            <p className="text-xs text-muted-foreground" role="status">
+              {outreachFlash}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* F11 — Refund offer card */}
+      {paidSilentMatch && (
+        <Card className="border-red-200 bg-red-50/40 dark:border-red-900/40 dark:bg-red-950/20">
+          <CardHeader className="pb-2">
+            <CardEyebrowHeader
+              eyebrow="Refund · Slip 4 · day 14"
+              title="Refund offer"
+              icon={<AlertTriangle className="h-4 w-4" aria-hidden="true" />}
+              iconClassName="text-red-600"
+              description="Paid + silent crosses day 14 — refund risk territory. Sending the offer now beats waiting for them to ask."
+            />
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <textarea
+              value={refundReason}
+              onChange={(e) => setRefundReason(e.target.value)}
+              placeholder={
+                paidSilentMatch.risk_reason ??
+                "Quick context the operator can read on the email — e.g. 'no submissions in 14 days, day-3 nudge unread.'"
+              }
+              maxLength={500}
+              rows={3}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+              aria-label="Refund offer reason"
+              disabled={sendRefundOffer.isPending}
+            />
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground">
+                Optional. Echoes into the email body and the audit row.
+              </span>
+              <button
+                type="button"
+                onClick={() => void handleSendRefundOffer()}
+                disabled={sendRefundOffer.isPending || !studentId}
+                className="rounded-lg bg-red-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-red-700 disabled:opacity-50"
+              >
+                {sendRefundOffer.isPending ? "Sending…" : "Send refund offer"}
+              </button>
+            </div>
+            {refundFlash && (
+              <p className="text-xs text-muted-foreground" role="status">
+                {refundFlash}
+              </p>
+            )}
+
+            {refundOffers.length > 0 && (
+              <div className="pt-2">
+                <p className="mb-1 text-xs font-medium text-muted-foreground">
+                  Prior offers
+                </p>
+                <ol className="space-y-1.5">
+                  {refundOffers.map((o) => (
+                    <li
+                      key={o.id}
+                      className="rounded-md border border-border bg-background/60 px-3 py-2 text-xs"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium uppercase tracking-wide">
+                          {o.status}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {new Date(o.proposed_at).toLocaleString()}
+                        </span>
+                      </div>
+                      {o.reason && (
+                        <p className="mt-1 whitespace-pre-wrap text-muted-foreground">
+                          {o.reason}
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* F2 — Admin notes */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardEyebrowHeader
+            eyebrow="Notes · private"
+            title="Admin notes"
+            icon={<NotebookPen className="h-4 w-4" aria-hidden="true" />}
+            iconClassName="text-muted-foreground"
+            description="Private. Used to remember what was said to whom across rotations."
+          />
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div>
+            <textarea
+              value={noteDraft}
+              onChange={(e) => setNoteDraft(e.target.value)}
+              placeholder="e.g. Called Mon — said busy this week, will follow up Fri."
+              maxLength={2000}
+              rows={3}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              aria-label="New admin note"
+              disabled={createNote.isPending}
+            />
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground font-mono tabular-nums">
+                {noteDraft.length}/2000
+              </span>
+              <button
+                type="button"
+                onClick={() => void handleAddNote()}
+                disabled={
+                  !noteDraft.trim() || createNote.isPending || !studentId
+                }
+                className="rounded-lg bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+              >
+                {createNote.isPending ? "Saving…" : "Add note"}
+              </button>
+            </div>
+          </div>
+
+          {notesLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-12 animate-pulse rounded bg-muted" />
+              ))}
+            </div>
+          ) : notes.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              No notes yet. The first one is usually the most useful.
+            </p>
+          ) : (
+            <ol className="space-y-2">
+              {notes.map((n) => (
+                <li
+                  key={n.id}
+                  className="rounded-lg border border-border bg-background/50 px-3 py-2"
+                >
+                  {/* v8 .step-card p: Inter 13px/1.58 */}
+                  <p className="whitespace-pre-wrap text-[13px] leading-[1.58]">
+                    {n.body_md}
+                  </p>
+                  {/* v8 .eyebrow: 10px/700/0.2em/uppercase/Inter */}
+                  <p className="mt-1.5 text-[10px] font-bold tracking-[0.2em] uppercase text-muted-foreground">
+                    {new Date(n.created_at).toLocaleString()}
+                  </p>
+                </li>
+              ))}
+            </ol>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* F8 — Direct message */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardEyebrowHeader
+            eyebrow="Outreach"
+            title="Direct message"
+            icon={<MessageSquare className="h-4 w-4" aria-hidden="true" />}
+            iconClassName="text-primary"
+            description={
+              "Visible to the student in their inbox. Replies flip the most recent outreach to “responded.”"
+            }
+          />
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div>
+            <textarea
+              value={dmDraft}
+              onChange={(e) => setDmDraft(e.target.value)}
+              placeholder="e.g. Hey — saw you haven't been on this week. Anything blocking? Reply here anytime."
+              maxLength={5000}
+              rows={3}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              aria-label="New direct message to student"
+              disabled={sendDm.isPending}
+            />
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground font-mono tabular-nums">
+                {dmDraft.length}/5000
+              </span>
+              <button
+                type="button"
+                onClick={() => void handleSendDm()}
+                disabled={!dmDraft.trim() || sendDm.isPending || !studentId}
+                className="rounded-lg bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+              >
+                {sendDm.isPending ? "Sending…" : "Send message"}
+              </button>
+            </div>
+          </div>
+
+          {dmLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 2 }).map((_, i) => (
+                <div key={i} className="h-12 animate-pulse rounded bg-muted" />
+              ))}
+            </div>
+          ) : dmMessages.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              No messages yet. The first one usually opens the door.
+            </p>
+          ) : (
+            <ol className="space-y-2">
+              {dmMessages.map((m) => (
+                <li
+                  key={m.id}
+                  className={
+                    m.sender_role === "admin"
+                      ? "rounded-lg border border-primary/30 bg-primary/5 px-3 py-2"
+                      : "rounded-lg border border-border bg-background/50 px-3 py-2"
+                  }
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    {/* v8 .step-state: 11px/800/0.12em/uppercase/Inter */}
+                    <span className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-foreground">
+                      {m.sender_role === "admin" ? "You" : "Student"}
+                    </span>
+                    {/* v8 .eyebrow: 10px/700/0.2em/uppercase/Inter */}
+                    <span className="text-[10px] font-bold tracking-[0.2em] uppercase text-muted-foreground">
+                      {new Date(m.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                  {/* v8 .step-card p: Inter 13px/1.58 */}
+                  <p className="whitespace-pre-wrap text-[13px] leading-[1.58]">
+                    {m.body}
+                  </p>
+                </li>
+              ))}
+            </ol>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* DISC-55 — Activity timeline */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardEyebrowHeader
+            eyebrow="Activity"
+            title="Activity timeline"
+            icon={<Clock className="h-4 w-4" aria-hidden="true" />}
+            iconClassName="text-muted-foreground"
+            description="Lessons, submissions, agent runs, and last login — newest first."
+          />
+        </CardHeader>
+        <CardContent>
+          {timelineLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-10 animate-pulse rounded bg-muted" />
+              ))}
+            </div>
+          ) : allEvents.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">
+              No activity yet.
+            </p>
+          ) : (
+            <>
+              <ol className="space-y-2.5">
+                {allEvents.map((ev, i) => (
+                  <li
+                    key={`${ev.kind}-${ev.at}-${i}`}
+                    className="flex items-start gap-3 text-sm"
+                  >
+                    <span className="mt-0.5 text-muted-foreground">
+                      <TimelineIcon kind={ev.kind} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      {/* Activity primary line — promoted to the
+                          serif/narrative register. The cockpit treats
+                          activity as a "diary" of the student's
+                          journey, so Fraunces reads truer than Inter.
+                          The modal CSS picks up `.cf-activity-summary`
+                          and renders it in Fraunces 16px medium. */}
+                      <p className="cf-activity-summary">
+                        {ev.summary}
+                        {ev.kind === "outreach" &&
+                          typeof ev.detail?.channel === "string" && (
+                            <>
+                              {" "}
+                              <ChannelBadge channel={ev.detail.channel} />
+                              {ev.detail?.replied_at ? (
+                                <span className="ml-1 text-[10px] text-emerald-600 dark:text-emerald-400">
+                                  · replied
+                                </span>
+                              ) : null}
+                            </>
+                          )}
+                      </p>
+                      <p className="cf-activity-time">
+                        {new Date(ev.at).toLocaleString()}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+              {!endReached && (
+                <div className="mt-4 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={handleLoadOlder}
+                    disabled={olderQuery.isFetching}
+                    className="rounded-lg border border-border px-4 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-muted/50 disabled:opacity-50"
+                  >
+                    {olderQuery.isFetching ? "Loading…" : "Load older"}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

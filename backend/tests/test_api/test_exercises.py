@@ -7,11 +7,11 @@ from httpx import AsyncClient
 async def _register_and_login(client: AsyncClient, email: str, role: str = "student") -> str:
     await client.post(
         "/api/v1/auth/register",
-        json={"email": email, "full_name": "Test", "password": "pass1234", "role": role},
+        json={"email": email, "full_name": "Test", "password": "pass12345678", "role": role},
     )
     resp = await client.post(
         "/api/v1/auth/login",
-        json={"email": email, "password": "pass1234"},
+        json={"email": email, "password": "pass12345678"},
     )
     return resp.json()["access_token"]
 

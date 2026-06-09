@@ -28,6 +28,7 @@ from app.core.database import AsyncSessionLocal
 from app.models.growth_snapshot import GrowthSnapshot
 from app.models.notification import Notification
 from app.models.user import User
+from app.services import outreach_service
 from app.services.email_service import EmailService
 
 log = structlog.get_logger()
@@ -87,6 +88,9 @@ async def _compose_letter(
         conversation_history=[],
         task=f"Weekly letter for week ending {snap.week_ending.isoformat()}",
         context={
+            "actor_role": "system",
+            "actor_id": None,
+            "on_behalf_of": str(user.id),
             "lessons_completed": snap.lessons_completed,
             "skills_touched": snap.skills_touched,
             "streak_days": snap.streak_days,
@@ -157,6 +161,34 @@ async def _deliver_letter(
         except Exception as exc:  # noqa: BLE001
             log.error(
                 "weekly_letter.email_failed",
+                user_id=str(user.id),
+                error=str(exc),
+            )
+
+    # 3. outreach_log audit (D16/CP2.i — closes the gap where weekly
+    # letters bypassed the per-student outreach feed). Recorded on
+    # email success only; if SendGrid call failed, the email_failed
+    # log line above is the audit trail. Throttle/retry isn't needed
+    # because _already_sent() above gates on Notification idempotency
+    # for the same week_ending.
+    if email_ok:
+        try:
+            async with AsyncSessionLocal() as db:
+                await outreach_service.record(
+                    db,
+                    user_id=user.id,
+                    channel="email",
+                    template_key="weekly_letter",
+                    slip_type=None,
+                    triggered_by="system_weekly_letters",
+                    body_preview=body[:200] if body else None,
+                    status="sent",
+                )
+                await db.commit()
+        except Exception as exc:  # noqa: BLE001
+            # Audit-log failure shouldn't fail the user-visible delivery.
+            log.error(
+                "weekly_letter.outreach_log_failed",
                 user_id=str(user.id),
                 error=str(exc),
             )

@@ -3,6 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api._deprecated import deprecated
 from app.core.database import get_db
 from app.core.security import get_current_user, get_current_user_optional
 from app.models.course import Course
@@ -41,6 +42,7 @@ async def get_course(
 
 
 @router.post("", response_model=CourseResponse, status_code=201)
+@deprecated(sunset="2026-07-01", reason="admin uses POST /admin/courses instead")
 async def create_course(
     payload: CourseCreate,
     service: CourseService = Depends(get_service),
@@ -50,6 +52,7 @@ async def create_course(
 
 
 @router.put("/{course_id}", response_model=CourseResponse)
+@deprecated(sunset="2026-07-01", reason="admin uses PATCH /admin/courses/{id} instead")
 async def update_course(
     course_id: uuid.UUID,
     payload: CourseUpdate,
@@ -60,6 +63,7 @@ async def update_course(
 
 
 @router.delete("/{course_id}", status_code=204)
+@deprecated(sunset="2026-07-01", reason="admin uses DELETE via admin route")
 async def delete_course(
     course_id: uuid.UUID,
     service: CourseService = Depends(get_service),

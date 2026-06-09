@@ -2,9 +2,10 @@
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
+from app.core.rate_limit import limiter
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services.quality_service import analyze_quality
@@ -47,7 +48,9 @@ class ExecuteResponse(BaseModel):
 
 
 @router.post("", response_model=ExecuteResponse)
+@limiter.limit("5/minute")
 async def execute_code(
+    request: Request,
     payload: ExecuteRequest,
     current_user: User = Depends(get_current_user),
 ) -> ExecuteResponse:

@@ -3,6 +3,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { authApi, type UserResponse } from "@/lib/api-client";
+import { trackSignedIn, trackSignedUp } from "@/lib/analytics-events";
+import { reset as telemetryReset } from "@/lib/telemetry";
 
 export interface User {
   id: string;
@@ -21,7 +23,12 @@ interface AuthState {
   setAuth: (user: User, token: string, refreshToken: string) => void;
   clearAuth: () => void;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, fullName: string, password: string) => Promise<void>;
+  register: (
+    email: string,
+    fullName: string,
+    password: string,
+    whatsappNumber?: string,
+  ) => Promise<void>;
   logout: () => void;
   refreshMe: () => Promise<boolean>;
   setHasHydrated: (v: boolean) => void;
@@ -90,6 +97,11 @@ export const useAuthStore = create<AuthState>()(
           const user = toUser(userResp);
           set({ user });
           setRoleCookie(user.role);
+          // PR3/C3.2 — identify the PostHog session with the user
+          // id so server-side llm.call events (PR3/C7.1) and client
+          // events share a distinct_id. No-op when posthog isn't
+          // configured.
+          trackSignedIn(user.id);
         } catch (err) {
           // If /me fails we have a zombie-auth state — roll back so guards
           // don't hang on an infinite spinner (DISC-52).
@@ -104,29 +116,18 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      register: async (email, fullName, password) => {
-        await authApi.register({ email, full_name: fullName, password });
-        const tokens = await authApi.login({ email, password });
-        set({
-          token: tokens.access_token,
-          refreshToken: tokens.refresh_token,
-          isAuthenticated: true,
+      register: async (email, fullName, password, whatsappNumber) => {
+        // D-B: register always returns 202 with a neutral message.
+        // No auto-login: the user must verify their email before login is allowed.
+        await authApi.register({
+          email,
+          full_name: fullName,
+          password,
+          // D16/CP3.1 — only include the field when non-empty so the
+          // backend stores NULL (not an empty string) when student
+          // skips the optional input.
+          ...(whatsappNumber ? { whatsapp_number: whatsappNumber } : {}),
         });
-        try {
-          const userResp = await authApi.me();
-          const user = toUser(userResp);
-          set({ user });
-          setRoleCookie(user.role);
-        } catch (err) {
-          set({
-            user: null,
-            token: null,
-            refreshToken: null,
-            isAuthenticated: false,
-          });
-          setRoleCookie(null);
-          throw err;
-        }
       },
 
       logout: () => {
@@ -137,6 +138,9 @@ export const useAuthStore = create<AuthState>()(
           isAuthenticated: false,
         });
         setRoleCookie(null);
+        // PR3/C3.2 — drop PostHog session state so the next login is
+        // a fresh distinct_id. No-op when telemetry is disabled.
+        telemetryReset();
       },
 
       refreshMe: async () => {

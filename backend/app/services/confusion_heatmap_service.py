@@ -45,11 +45,14 @@ log = structlog.get_logger()
 
 # Help-oriented agents whose invocations count as a "student asked for help".
 # Creation / analytics / admin agents are excluded so we don't inflate the signal.
+# D11 cutover (Checkpoint 4) absorbed coding_assistant + code_review
+# into senior_engineer (Pass 3c E2). The 0059 data migration
+# consolidates historical agent_actions rows so this query matches
+# pre-cutover activity too.
 HELP_AGENTS: tuple[str, ...] = (
     "socratic_tutor",
-    "coding_assistant",
+    "senior_engineer",
     "student_buddy",
-    "code_review",
     "project_evaluator",
 )
 

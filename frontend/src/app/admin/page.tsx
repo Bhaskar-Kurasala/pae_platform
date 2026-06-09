@@ -1,9 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
-import { useAuthStore } from "@/stores/auth-store";
+import { buildCallInviteMailto } from "@/lib/calendar-mailto";
+import { AdminTopbar } from "./_components/admin-topbar";
+import { HealthStrip } from "./_components/health-strip";
+import { HealthDetailModal } from "./_components/health-detail-modal";
+import { RetentionPanels } from "./_components/retention-panels";
+import { StudentDetailModal } from "./_components/student-detail-modal";
+import { useRiskPanels } from "@/lib/hooks/use-admin";
+import { useAdminTheme } from "@/lib/hooks/use-admin-theme";
 import styles from "./console.module.css";
 
 // The admin console is the canonical /admin entry — single production-quality
@@ -114,10 +121,17 @@ function initials(name: string): string {
     .join("")
     .toUpperCase();
 }
+// Tier thresholds aligned to the F1 score formula in
+// risk_scoring_service.py — base scores are paid_silent=80,
+// capstone_stalled=70, streak_broken=55, promotion_avoidant=45,
+// unpaid_stalled=35, cold_signup=25. Anything F1 has flagged
+// (risk > 0) deserves at least a "Watch" tier; risk=0 is genuinely
+// healthy. Severe = paid+silent territory; High = capstone or
+// streak; Watch = newer slip patterns + cold signups.
 function riskTier(r: number): "severe" | "high" | "med" | "low" {
   if (r >= 75) return "severe";
   if (r >= 50) return "high";
-  if (r >= 30) return "med";
+  if (r > 0) return "med";
   return "low";
 }
 function riskLabel(r: number): string {
@@ -145,7 +159,24 @@ function sparkPath(data: number[], w = 120, h = 24): { line: string; area: strin
   return { line, area };
 }
 
-type FilterKey = "all" | "severe" | "high" | "paid-stalled" | "thriving" | "new";
+// Filter chips. The first 6 are general-purpose (risk tier / paid /
+// thriving / recently joined). The "slip:*" prefixed keys correspond
+// to the F1 retention slip patterns and are added by the retention
+// panels' "See all N →" buttons (which scroll the operator down to
+// this filter row + auto-apply the matching chip — no nav).
+type FilterKey =
+  | "all"
+  | "severe"
+  | "high"
+  | "paid-stalled"
+  | "thriving"
+  | "new"
+  | "slip:paid_silent"
+  | "slip:capstone_stalled"
+  | "slip:streak_broken"
+  | "slip:promotion_avoidant"
+  | "slip:cold_signup"
+  | "slip:unpaid_stalled";
 type SortKey = "name" | "role" | "stage" | "progress" | "streak" | "last" | "risk";
 type SortDir = "asc" | "desc";
 
@@ -160,36 +191,131 @@ const TAG_LABELS: Record<string, string> = {
 // ── Page ────────────────────────────────────────────────────────────────
 
 export default function AdminConsoleV1Page() {
-  const { user } = useAuthStore();
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  // Theme persists in localStorage and broadcasts to the student
+  // detail modal so the cockpit's choice follows the operator
+  // everywhere in the admin section. The shared <AdminTopbar> reads
+  // the same hook for its own toggle button — we only consume `theme`
+  // here so we can decorate the cockpit shell with the right palette
+  // (data-theme attribute drives `console.module.css` rules).
+  const { theme } = useAdminTheme();
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "risk", dir: "desc" });
   const [search, setSearch] = useState("");
-  const [openStudentId, setOpenStudentId] = useState<string | null>(null);
+  // Pulse-strip window selector. Drives the "Platform pulse" section's
+  // tab pills and round-trips to /console/v1?window=...
+  const [pulseWindow, setPulseWindow] = useState<"24h" | "7d" | "30d">("24h");
+  const [healthMetricKey, setHealthMetricKey] = useState<string | null>(null);
+
+  // Side-drawer triage state. Replaces the previous full-page navigate
+  // — clicking a student card / roster row now opens a slide-in panel
+  // with all 5 operator cards (Trigger agent, Refund offer, Admin
+  // notes, Direct message, Activity timeline). The /admin/students/[id]
+  // route still exists for direct links / bookmarks; the drawer header
+  // exposes a "Full page ↗" link to it.
+  const [drawerStudentId, setDrawerStudentId] = useState<string | null>(null);
+
+  function openStudentDrawer(studentId: string) {
+    setDrawerStudentId(studentId);
+  }
+  function closeStudentDrawer() {
+    setDrawerStudentId(null);
+  }
 
   const { data, isLoading, isError } = useQuery<ConsoleResponse>({
-    queryKey: ["admin", "console", "v1"],
-    queryFn: () => api.get<ConsoleResponse>("/api/v1/admin/console/v1"),
+    queryKey: ["admin", "console", "v1", pulseWindow],
+    queryFn: () =>
+      api.get<ConsoleResponse>(
+        `/api/v1/admin/console/v1?window=${pulseWindow}`,
+      ),
     refetchInterval: 60_000,
     staleTime: 30_000,
+    // Keep showing the previous window's data while the new one
+    // loads. Without this, switching tabs flashes the loading
+    // skeleton and the page jumps back to the top.
+    placeholderData: (previous) => previous,
   });
 
   const students = data?.students ?? [];
 
+  // Top 3 at-risk students for the action-band cards.
   const topRisk = useMemo(
-    () => [...students].sort((a, b) => b.risk - a.risk).slice(0, 3),
+    () =>
+      [...students]
+        .filter((s) => s.risk > 0)
+        .sort((a, b) => b.risk - a.risk)
+        .slice(0, 3),
     [students],
   );
 
+  // Total flagged students — drives the action-band headline count
+  // ("47 students need a personal nudge") rather than always "3".
+  const flaggedCount = useMemo(
+    () => students.filter((s) => s.risk > 0).length,
+    [students],
+  );
+
+  // Risk panel data — the F1 slip patterns. Used to drive the
+  // slip-type filter chips on the roster (so "See all 92 →" can
+  // apply a slip filter without leaving the page) and to count
+  // students per slip pattern for the chip labels.
+  const { data: riskPanelsData } = useRiskPanels();
+  const slipUserIds = useMemo(() => {
+    const out: Record<string, Set<string>> = {};
+    if (!riskPanelsData) return out;
+    for (const slipKey of [
+      "paid_silent",
+      "capstone_stalled",
+      "streak_broken",
+      "promotion_avoidant",
+      "cold_signup",
+    ] as const) {
+      const panel = riskPanelsData[slipKey];
+      out[slipKey] = new Set((panel?.students ?? []).map((s) => s.user_id));
+    }
+    return out;
+  }, [riskPanelsData]);
+  const slipCounts = useMemo(() => {
+    const out: Record<string, number> = {};
+    if (!riskPanelsData) return out;
+    for (const slipKey of [
+      "paid_silent",
+      "capstone_stalled",
+      "streak_broken",
+      "promotion_avoidant",
+      "cold_signup",
+    ] as const) {
+      out[slipKey] = riskPanelsData[slipKey]?.total ?? 0;
+    }
+    return out;
+  }, [riskPanelsData]);
+
   const filtered = useMemo(() => {
     let list = [...students];
+    // Filters use the same risk thresholds as riskTier() so the tier
+    // labels in the rightmost column ("Severe", "High", "Watch",
+    // "Healthy") line up with the chip the operator clicks.
     if (filter === "severe") list = list.filter((s) => s.risk >= 75);
     else if (filter === "high") list = list.filter((s) => s.risk >= 50 && s.risk < 75);
     else if (filter === "paid-stalled") list = list.filter((s) => s.paid && s.last_seen >= 5);
-    else if (filter === "thriving") list = list.filter((s) => s.risk < 30);
+    // "Thriving" = no slip pattern flagged at all (F1 hasn't given
+    // them a risk signal). Anything > 0 is at least "Watch".
+    else if (filter === "thriving") list = list.filter((s) => s.risk === 0);
+    // "Joined < 7d" is computed from the days-since-signup, not from
+    // a hardcoded date list (was a demo-data leftover).
     else if (filter === "new") {
-      const newJoiners = ["Apr 19", "Apr 21", "Apr 22"];
-      list = list.filter((s) => newJoiners.includes(s.joined));
+      const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      list = list.filter((s) => {
+        const joinedDate = new Date(`${s.joined} ${new Date().getFullYear()}`);
+        return !isNaN(joinedDate.valueOf()) && joinedDate.getTime() >= sevenDaysAgo;
+      });
+    }
+    // Slip-pattern filter chips driven by F1 retention engine. Match
+    // by user_id against the panel's student list (loaded via the
+    // already-cached useRiskPanels hook).
+    else if (filter.startsWith("slip:")) {
+      const slipKey = filter.slice(5);
+      const ids = slipUserIds[slipKey];
+      if (ids) list = list.filter((s) => ids.has(s.id));
     }
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -207,11 +333,7 @@ export default function AdminConsoleV1Page() {
       return (a.risk - b.risk) * dir;
     });
     return list;
-  }, [students, filter, search, sort]);
-
-  const openStudent = openStudentId
-    ? students.find((s) => s.id === openStudentId) ?? null
-    : null;
+  }, [students, filter, search, sort, slipUserIds]);
 
   const onSortClick = (k: SortKey) => {
     setSort((cur) => {
@@ -222,61 +344,16 @@ export default function AdminConsoleV1Page() {
     });
   };
 
-  const adminInitials = initials(user?.full_name ?? "Admin");
+  // The cockpit's "synced HH:MM" indicator depends on the data
+  // payload, so it's computed here and passed to the shared topbar.
+  const liveLabel = data
+    ? `LIVE · synced ${new Date(data.synced_at).toLocaleTimeString()}`
+    : "LIVE · syncing…";
 
   return (
     <div className={styles.root} data-theme={theme}>
-      {/* TOP BAR */}
-      <header className={styles.topbar}>
-        <div className={styles.brand}>
-          <b>
-            Career<i>Forge</i>
-          </b>
-          <span className={styles.consoleTag}>Admin</span>
-        </div>
-        <div className={styles.tbDivider} />
-        <div className={styles.tbSearch}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.3-4.3" />
-          </svg>
-          <input
-            type="search"
-            aria-label="Search"
-            placeholder="Search students, capstones, or events…"
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <div className={styles.tbSpacer} />
-        <div className={styles.livePulse}>
-          <span className={styles.liveDot} />
-          LIVE · {data ? `synced ${new Date(data.synced_at).toLocaleTimeString()}` : "syncing…"}
-        </div>
-        <div className={styles.adminId}>
-          <div className={styles.adminAvatar}>{adminInitials}</div>
-          <div className={styles.adminName}>
-            <b>{user?.full_name ?? "Admin"}</b>
-            <span>{user?.role === "admin" ? "Founder · Admin" : "Member"}</span>
-          </div>
-        </div>
-        <button
-          className={styles.themeToggle}
-          aria-label="Toggle theme"
-          onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
-        >
-          <span className={`${styles.themeOpt} ${theme === "light" ? styles.active : ""}`}>
-            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-              <circle cx="7" cy="7" r="2.4" />
-              <path d="M7 1v1.4M7 11.6V13M1 7h1.4M11.6 7H13M2.6 2.6l1 1M10.4 10.4l1 1M2.6 11.4l1-1M10.4 3.6l1-1" />
-            </svg>
-          </span>
-          <span className={`${styles.themeOpt} ${theme === "dark" ? styles.active : ""}`}>
-            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M11.5 8.5A4.5 4.5 0 015.5 2.5a5 5 0 106 6z" />
-            </svg>
-          </span>
-        </button>
-      </header>
+      <AdminTopbar liveLabel={liveLabel} onSearchChange={setSearch} />
+      <HealthStrip pageTheme={theme} onTileClick={(k) => setHealthMetricKey(k)} />
 
       {isLoading ? (
         <div className={styles.skeleton}>Loading admin console…</div>
@@ -285,6 +362,30 @@ export default function AdminConsoleV1Page() {
       ) : !data ? null : (
         <div className={styles.layout}>
           <main>
+            {/* F4 — Retention engine: real, query-driven slip-pattern panels.
+                Sits above the legacy ACTION BAND (which still renders mock
+                "call list" data from admin_console_profiles). The legacy
+                section will be removed once admins are using the
+                retention engine for triage; until then both are visible
+                so the cohort behavior data still shows up while we
+                accumulate real signals. */}
+            <section style={{ marginBottom: 32 }}>
+              <RetentionPanels
+                onSeeAll={(slipKey) => {
+                  // Apply the matching slip-type filter chip on the
+                  // roster + smooth-scroll the operator down to it.
+                  // No nav, no separate page — the operator stays
+                  // in the cockpit context.
+                  setFilter(`slip:${slipKey}` as FilterKey);
+                  setSort({ key: "risk", dir: "desc" });
+                  document
+                    .getElementById("studentSection")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+                onOpenStudent={(id) => openStudentDrawer(id)}
+              />
+            </section>
+
             {/* ACTION BAND */}
             <section className={styles.actionBand}>
               <div className={styles.abTop}>
@@ -294,7 +395,7 @@ export default function AdminConsoleV1Page() {
                     This week&apos;s call list
                   </div>
                   <h2 className={styles.abTitle}>
-                    <b>{topRisk.length} students</b> need a personal nudge.
+                    <b>{flaggedCount} {flaggedCount === 1 ? "student" : "students"}</b> need a personal nudge.
                   </h2>
                   <p className={styles.abSub}>
                     These are the learners whose momentum has slipped most against their own
@@ -304,7 +405,14 @@ export default function AdminConsoleV1Page() {
                 <button
                   className={styles.abBtn}
                   onClick={() => {
-                    setFilter("severe");
+                    // Scroll to the roster with "All" filter selected
+                    // and the default risk-DESC sort. The action band's
+                    // top-3 cards will be at the top of the roster
+                    // (same sort order), so the operator sees the
+                    // continuous tail of "everyone else who needs a
+                    // nudge" right below them.
+                    setFilter("all");
+                    setSort({ key: "risk", dir: "desc" });
                     document
                       .getElementById("studentSection")
                       ?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -321,7 +429,7 @@ export default function AdminConsoleV1Page() {
                   <div
                     key={s.id}
                     className={`${styles.riskCard} ${styles.severe}`}
-                    onClick={() => setOpenStudentId(s.id)}
+                    onClick={() => openStudentDrawer(s.id)}
                   >
                     <div className={styles.rcHead}>
                       <div className={styles.rcAvatar} style={{ background: avatarBg(s.id) }}>
@@ -349,17 +457,31 @@ export default function AdminConsoleV1Page() {
                         className={`${styles.rcBtn} ${styles.primary}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          setOpenStudentId(s.id);
+                          openStudentDrawer(s.id);
                         }}
                       >
                         Open profile
                       </button>
-                      <button
+                      <a
                         className={`${styles.rcBtn} ${styles.ghost}`}
+                        // F10 — opens the operator's mail client with
+                        // a pre-filled invite. Stops propagation so
+                        // clicking the link doesn't also open the
+                        // student profile modal underneath.
+                        href={
+                          s.email
+                            ? buildCallInviteMailto({
+                                studentEmail: s.email,
+                                studentName: s.name,
+                                riskReason: s.risk_reason,
+                              })
+                            : undefined
+                        }
+                        aria-disabled={!s.email}
                         onClick={(e) => e.stopPropagation()}
                       >
                         Schedule call
-                      </button>
+                      </a>
                     </div>
                   </div>
                 ))}
@@ -370,13 +492,30 @@ export default function AdminConsoleV1Page() {
             <section className={styles.section}>
               <div className={styles.sectionHead}>
                 <div>
-                  <div className={styles.sectionEyebrow}>Platform pulse · last 24 hours</div>
+                  <div className={styles.sectionEyebrow}>
+                    Platform pulse ·{" "}
+                    {pulseWindow === "24h"
+                      ? "last 24 hours"
+                      : pulseWindow === "7d"
+                      ? "last 7 days"
+                      : "last 30 days"}
+                  </div>
                   <div className={styles.sectionTitle}>How we&apos;re doing right now</div>
                 </div>
                 <div className={styles.sectionActions}>
-                  <button className={`${styles.tabPill} ${styles.on}`}>24h</button>
-                  <button className={styles.tabPill}>7d</button>
-                  <button className={styles.tabPill}>30d</button>
+                  {(["24h", "7d", "30d"] as const).map((w) => (
+                    <button
+                      key={w}
+                      type="button"
+                      onClick={() => setPulseWindow(w)}
+                      aria-pressed={pulseWindow === w}
+                      className={`${styles.tabPill} ${
+                        pulseWindow === w ? styles.on : ""
+                      }`}
+                    >
+                      {w}
+                    </button>
+                  ))}
                 </div>
               </div>
               <div className={styles.pulseStrip}>
@@ -505,27 +644,55 @@ export default function AdminConsoleV1Page() {
               <div className={styles.tableCard}>
                 <div className={styles.tableToolbar}>
                   <div className={styles.ttFilter}>
+                    {/* Risk-tier + general chips. */}
                     {(
                       [
-                        ["all", "All"],
-                        ["severe", "Severe risk"],
-                        ["high", "High risk"],
-                        ["paid-stalled", "Paid + stalled"],
-                        ["thriving", "Thriving"],
-                        ["new", "Joined < 7d"],
+                        ["all", "All", students.length],
+                        ["severe", "Severe risk", null],
+                        ["high", "High risk", null],
+                        ["paid-stalled", "Paid + stalled", null],
+                        ["thriving", "Thriving", null],
+                        ["new", "Joined < 7d", null],
                       ] as const
-                    ).map(([key, label]) => (
+                    ).map(([key, label, count]) => (
                       <button
                         key={key}
                         className={`${styles.filterChip} ${filter === key ? styles.on : ""}`}
                         onClick={() => setFilter(key)}
                       >
                         {label}
-                        {key === "all" && (
-                          <span className={styles.ttCount}>{students.length}</span>
+                        {count !== null && (
+                          <span className={styles.ttCount}>{count}</span>
                         )}
                       </button>
                     ))}
+                    {/* Slip-pattern chips — only render when the F1
+                        nightly task has flagged at least one student
+                        with this pattern. Keeps the chip row clean
+                        in early days when most patterns are empty. */}
+                    {(
+                      [
+                        ["slip:paid_silent", "Paid + silent"],
+                        ["slip:capstone_stalled", "Capstone stalled"],
+                        ["slip:streak_broken", "Streak broken"],
+                        ["slip:promotion_avoidant", "Ready but stalled"],
+                        ["slip:cold_signup", "Never returned"],
+                      ] as const
+                    ).map(([key, label]) => {
+                      const slipKey = key.slice(5);
+                      const count = slipCounts[slipKey] ?? 0;
+                      if (count === 0) return null;
+                      return (
+                        <button
+                          key={key}
+                          className={`${styles.filterChip} ${filter === key ? styles.on : ""}`}
+                          onClick={() => setFilter(key)}
+                        >
+                          {label}
+                          <span className={styles.ttCount}>{count}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                   <div className={styles.ttSearch}>
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -541,9 +708,16 @@ export default function AdminConsoleV1Page() {
                     />
                   </div>
                 </div>
-                <div style={{ overflowX: "auto" }}>
+                <div
+                  className="cf-roster-scroll"
+                  style={{
+                    overflowX: "auto",
+                    overflowY: "auto",
+                    maxHeight: "60vh",
+                  }}
+                >
                   <table className={styles.studentsTable}>
-                    <thead>
+                    <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
                       <tr>
                         {(
                           [
@@ -582,7 +756,7 @@ export default function AdminConsoleV1Page() {
                         </tr>
                       ) : (
                         filtered.map((s) => (
-                          <tr key={s.id} onClick={() => setOpenStudentId(s.id)}>
+                          <tr key={s.id} onClick={() => openStudentDrawer(s.id)}>
                             <td>
                               <div className={styles.trName}>
                                 <div
@@ -647,7 +821,7 @@ export default function AdminConsoleV1Page() {
                                 className={styles.trActionBtn}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setOpenStudentId(s.id);
+                                  openStudentDrawer(s.id);
                                 }}
                               >
                                 Open
@@ -658,6 +832,21 @@ export default function AdminConsoleV1Page() {
                       )}
                     </tbody>
                   </table>
+                </div>
+                <div
+                  style={{
+                    padding: "10px 16px",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: "0.18em",
+                    textTransform: "uppercase",
+                    color: "var(--muted)",
+                    borderTop: "1px solid var(--line)",
+                    background: "var(--panel-2)",
+                  }}
+                >
+                  Showing {filtered.length} of {students.length} learners
+                  {filtered.length > 20 ? " · scroll for more" : ""}
                 </div>
               </div>
             </section>
@@ -679,7 +868,7 @@ export default function AdminConsoleV1Page() {
                     <div
                       key={c.student_id + c.time}
                       className={styles.callItem}
-                      onClick={() => setOpenStudentId(c.student_id)}
+                      onClick={() => openStudentDrawer(c.student_id)}
                     >
                       <div className={styles.callTime}>{c.time}</div>
                       <div className={styles.callInfo}>
@@ -705,21 +894,43 @@ export default function AdminConsoleV1Page() {
                 </div>
               </div>
               <div className={styles.eventFeed}>
-                {data.events.map((e, i) => (
-                  <div key={i} className={styles.event}>
-                    <div className={styles.eventTime}>{e.time_label}</div>
-                    <div className={styles.eventContent}>
-                      <span
-                        className={`${styles.eventTag} ${
-                          styles[e.kind as keyof typeof styles] ?? ""
-                        }`}
-                      >
-                        {TAG_LABELS[e.kind] ?? e.kind}
-                      </span>
-                      <span dangerouslySetInnerHTML={{ __html: e.text }} />
-                    </div>
+                {data.events.length === 0 ? (
+                  <div
+                    style={{
+                      padding: "16px 4px",
+                      fontSize: 12,
+                      color: "var(--muted)",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    No cohort activity yet. Events appear here as
+                    students sign up, ship capstones, and earn
+                    promotions.
                   </div>
-                ))}
+                ) : (
+                  data.events.map((e, i) => (
+                    <div key={i} className={styles.event}>
+                      <div className={styles.eventTime}>{e.time_label}</div>
+                      <div className={styles.eventContent}>
+                        <span
+                          className={`${styles.eventTag} ${
+                            styles[e.kind as keyof typeof styles] ?? ""
+                          }`}
+                        >
+                          {TAG_LABELS[e.kind] ?? e.kind}
+                        </span>
+                        {/* Audit 2026-05-13: event.text is composed
+                            from user-controlled fields (full_name,
+                            exercise.title) in services/{auth,exercise,
+                            promotion_summary}.py. dangerouslySetInnerHTML
+                            here would let a registering student inject
+                            HTML into every admin's dashboard. Render as
+                            text — no intentional HTML in these labels. */}
+                        <span>{e.text}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
 
@@ -750,10 +961,24 @@ export default function AdminConsoleV1Page() {
         </div>
       )}
 
-      {/* MODAL */}
-      <StudentModal
-        student={openStudent}
-        onClose={() => setOpenStudentId(null)}
+      {/* Student detail modal — centered popup that rises into focus
+          when the admin clicks any student card / roster row.
+          Replaces the full-page navigate so the operator can act on
+          one student at a time without losing the cockpit context.
+          Theme-aware: matches the page's light/dark setting. */}
+      <StudentDetailModal
+        studentId={drawerStudentId}
+        open={drawerStudentId !== null}
+        onOpenChange={(o) => {
+          if (!o) closeStudentDrawer();
+        }}
+        pageTheme={theme}
+      />
+      <HealthDetailModal
+        open={healthMetricKey !== null}
+        metricKey={healthMetricKey}
+        onClose={() => setHealthMetricKey(null)}
+        pageTheme={theme}
       />
     </div>
   );
@@ -956,278 +1181,4 @@ function FeatureIcon({ featureKey }: { featureKey: string }) {
         </svg>
       );
   }
-}
-
-// ── Modal ───────────────────────────────────────────────────────────────
-
-interface TimelineEvent {
-  time: string;
-  text: string;
-  cls?: "danger" | "gold";
-}
-function buildTimeline(s: ConsoleStudent): TimelineEvent[] {
-  if (s.risk >= 75) {
-    return [
-      { time: "today", text: "<b>No activity.</b>", cls: "danger" },
-      {
-        time: `${s.last_seen}d ago`,
-        text: `Last login — opened <b>${s.stage}</b> for 4 minutes, no actions taken.`,
-        cls: "danger",
-      },
-      {
-        time: `${s.last_seen + 3}d ago`,
-        text: "Failed Lab B test cases on third attempt. Did not request review.",
-      },
-      {
-        time: `${s.last_seen + 5}d ago`,
-        text: 'Asked agent: <i>"why does my retry decorator not work"</i>',
-      },
-      {
-        time: `${s.last_seen + 9}d ago`,
-        text: "Streak broken (was 6d).",
-        cls: "danger",
-      },
-      {
-        time: `${s.last_seen + 12}d ago`,
-        text: `Purchased <b>${s.track}</b> track ($89).`,
-        cls: "gold",
-      },
-      { time: `Joined ${s.joined}`, text: "Account created." },
-    ];
-  }
-  if (s.risk >= 50) {
-    return [
-      { time: "today", text: `Opened <b>${s.stage}</b>, completed 1 flashcard set.` },
-      { time: "2d ago", text: "Asked agent 2 questions about async retry logic." },
-      { time: "4d ago", text: "Submitted Lab A — passed 4/5 tests." },
-      { time: "6d ago", text: "Streak dropped from 5d to 1d.", cls: "danger" },
-      { time: "9d ago", text: "Capstone draft started." },
-      {
-        time: "14d ago",
-        text: "Promoted from <b>Onboarding</b> to <b>Today</b>.",
-        cls: "gold",
-      },
-      { time: `Joined ${s.joined}`, text: "Account created." },
-    ];
-  }
-  if (s.risk < 30) {
-    return [
-      { time: "today", text: `Completed Lesson 4 · <b>+5%</b> readiness.` },
-      { time: "today", text: "Submitted senior review on rate-limit lab." },
-      {
-        time: "1d ago",
-        text: `<b>${s.flashcards} flashcards</b> reviewed across 2 sessions.`,
-      },
-      { time: "2d ago", text: `Asked agent about <i>vector embeddings</i>.` },
-      {
-        time: "3d ago",
-        text: `Capstone draft milestone — Production readiness <b>72</b>.`,
-        cls: "gold",
-      },
-      { time: "5d ago", text: `Streak reached <b>${s.streak}d</b>.`, cls: "gold" },
-      { time: `Joined ${s.joined}`, text: "Account created." },
-    ];
-  }
-  return [
-    { time: "today", text: `Completed warm-up · ${(s.flashcards % 8) + 4} cards.` },
-    { time: "1d ago", text: `Worked through Lab B for 35 min.` },
-    { time: "3d ago", text: "Submitted reflection note." },
-    { time: "5d ago", text: `Asked agent ${Math.max(1, s.agent_q - 3)} questions.` },
-    { time: "1w ago", text: `Started ${s.stage} phase.` },
-    { time: `Joined ${s.joined}`, text: "Account created." },
-  ];
-}
-
-function StudentModal({
-  student,
-  onClose,
-}: {
-  student: ConsoleStudent | null;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    if (!student) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [student, onClose]);
-
-  if (!student) {
-    return <div className={styles.modalBackdrop} aria-hidden />;
-  }
-  const timeline = buildTimeline(student);
-  const tier = riskTier(student.risk);
-  return (
-    <div className={`${styles.modalBackdrop} ${styles.open}`} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.modalHead}>
-          <div className={styles.mhAvatar} style={{ background: avatarBg(student.id) }}>
-            {initials(student.name)}
-          </div>
-          <div>
-            <div className={styles.mhName}>{student.name}</div>
-            <div className={styles.mhMeta}>
-              <span>{student.track}</span>
-              <span className="dot" />
-              <span>{student.stage}</span>
-              <span className="dot" />
-              <span>Joined {student.joined}</span>
-              <span className="dot" />
-              <span>
-                {student.paid
-                  ? `Paid · ${student.purchases > 1 ? "2 tracks" : "1 track"}`
-                  : "Free tier"}
-              </span>
-            </div>
-          </div>
-          <button className={styles.mhClose} onClick={onClose} aria-label="Close">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-        <div className={styles.modalBody}>
-          <div className={styles.mbGrid}>
-            <Stat
-              label="Risk"
-              value={String(student.risk)}
-              sub={riskLabel(student.risk)}
-              danger={tier === "severe" || tier === "high"}
-            />
-            <Stat
-              label="Progress"
-              value={`${student.progress}%`}
-              sub="to next role"
-            />
-            <Stat
-              label="Streak"
-              value={`${student.streak}d`}
-              sub={
-                student.streak > 5
-                  ? "strong"
-                  : student.streak > 0
-                  ? "building"
-                  : "broken"
-              }
-            />
-            <Stat
-              label="Last seen"
-              value={lastSeenText(student.last_seen)}
-              sub={`${student.sessions14} sessions · 14d`}
-              danger={student.last_seen >= 7}
-            />
-          </div>
-
-          <div className={styles.mbSection}>
-            <div className={styles.mbSectionTitle}>Platform usage · last 14 days</div>
-            <div className={styles.usageGrid}>
-              <UsageTile num={student.flashcards} name="Flashcards reviewed" />
-              <UsageTile num={student.agent_q} name="Agent questions" />
-              <UsageTile num={student.reviews} name="Senior reviews" />
-              <UsageTile num={student.notes} name="Notes graduated" />
-              <UsageTile num={student.labs} name="Labs completed" />
-              <UsageTile num={student.capstones} name="Capstones shipped" />
-            </div>
-          </div>
-
-          <div className={styles.mbSection}>
-            <div className={styles.mbSectionTitle}>Activity timeline</div>
-            <div style={{ position: "relative", paddingLeft: 18 }}>
-              <div
-                style={{
-                  position: "absolute",
-                  left: 5,
-                  top: 8,
-                  bottom: 8,
-                  width: 1,
-                  background: "var(--line-2)",
-                }}
-              />
-              {timeline.map((t, i) => (
-                <div
-                  key={i}
-                  style={{
-                    position: "relative",
-                    padding: "8px 0 12px",
-                    display: "flex",
-                    gap: 14,
-                    fontSize: 12,
-                  }}
-                >
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: -18,
-                      top: 13,
-                      width: 11,
-                      height: 11,
-                      borderRadius: "50%",
-                      background: "var(--panel)",
-                      border: `2px solid ${
-                        t.cls === "danger"
-                          ? "var(--red-2)"
-                          : t.cls === "gold"
-                          ? "var(--gold)"
-                          : "var(--forest-3)"
-                      }`,
-                    }}
-                  />
-                  <div
-                    style={{
-                      fontFamily: "var(--mono)",
-                      fontSize: 11,
-                      color: "var(--muted)",
-                      minWidth: 90,
-                    }}
-                  >
-                    {t.time}
-                  </div>
-                  <div
-                    style={{ color: "var(--ink-2)", lineHeight: 1.5 }}
-                    dangerouslySetInnerHTML={{ __html: t.text }}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className={styles.modalFoot}>
-          <button className={`${styles.btn} ${styles.ghost}`}>Send DM</button>
-          <button className={`${styles.btn} ${styles.ghost}`}>Add note</button>
-          <button className={`${styles.btn} ${styles.primary}`}>Schedule call</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  sub,
-  danger = false,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-  danger?: boolean;
-}) {
-  return (
-    <div className={styles.mbStat}>
-      <div className={styles.mbStatLabel}>{label}</div>
-      <div className={`${styles.mbStatVal} ${danger ? styles.danger : ""}`}>{value}</div>
-      <div className={styles.mbStatSub}>{sub}</div>
-    </div>
-  );
-}
-
-function UsageTile({ num, name }: { num: number; name: string }) {
-  return (
-    <div className={styles.usageTile}>
-      <div className={styles.usageNum}>{num}</div>
-      <div className={styles.usageName}>{name}</div>
-    </div>
-  );
 }

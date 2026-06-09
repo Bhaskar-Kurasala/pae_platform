@@ -1,0 +1,100 @@
+{
+  "id": "operational",
+  "title": "Operational",
+  "owner": "engineering",
+  "description": "Celery queue depth + task success rate + batch flakiness. Trend-shape window — operational issues compound over hours.",
+  "runbook": "../runbooks.md#operational",
+  "time_range_default": "24h",
+  "panels": [
+    {
+      "id": "celery-task-rate-by-name",
+      "title": "Celery task rate by name (tasks/min)",
+      "panel_type": "counter_rate",
+      "description": "Per-task completion rate. Drift signals a beat schedule misalignment or a queue backlog.",
+      "query": {
+        "metric": "aicareeros_celery_tasks",
+        "aggregation": "rate",
+        "rate_window": "1m",
+        "by": ["task_name"]
+      }
+    },
+    {
+      "id": "celery-success-rate",
+      "title": "Celery task success rate by name",
+      "panel_type": "counter_rate",
+      "description": "Success / total ratio per task. Below 0.9 sustained = investigate.",
+      "query": {
+        "metric": "aicareeros_celery_tasks",
+        "aggregation": "rate",
+        "rate_window": "5m",
+        "by": ["task_name"],
+        "filter": {"outcome": "success"}
+      }
+    },
+    {
+      "id": "celery-error-rate",
+      "title": "Celery task error rate by name",
+      "panel_type": "counter_rate",
+      "description": "Error rate per task. Outcome label = 'error'. Alert source for D19.2.",
+      "query": {
+        "metric": "aicareeros_celery_tasks",
+        "aggregation": "rate",
+        "rate_window": "5m",
+        "by": ["task_name"],
+        "filter": {"outcome": "error"}
+      }
+    },
+    {
+      "id": "celery-retry-rate",
+      "title": "Celery retry rate by name",
+      "panel_type": "counter_rate",
+      "description": "Retry events per task. Spike = transient downstream failure (Redis, LLM, external).",
+      "query": {
+        "metric": "aicareeros_celery_tasks",
+        "aggregation": "rate",
+        "rate_window": "5m",
+        "by": ["task_name"],
+        "filter": {"outcome": "retry"}
+      }
+    },
+    {
+      "id": "memory-recall-hit-rate",
+      "title": "Memory recall hit rate",
+      "panel_type": "counter_rate",
+      "description": "Recalled rows per second by mode (semantic / lexical). Low hit rate suggests embeddings drift or DB index regression.",
+      "query": {
+        "metric": "aicareeros_agent_memory_recall_hits",
+        "aggregation": "rate",
+        "rate_window": "5m",
+        "by": ["mode"]
+      }
+    },
+    {
+      "id": "memory-write-rate",
+      "title": "Memory write rate",
+      "panel_type": "counter_rate",
+      "description": "Memories written per second by scope. Sudden zero = consumer drift; sudden spike = unbounded write loop.",
+      "query": {
+        "metric": "aicareeros_agent_memory_writes",
+        "aggregation": "rate",
+        "rate_window": "5m",
+        "by": ["scope"]
+      }
+    },
+    {
+      "id": "tool-call-latency-p95",
+      "title": "Tool call p95 latency by tool (seconds)",
+      "panel_type": "histogram_quantile",
+      "description": "p95 latency for each registered tool. Tool latency dominates agent-invocation latency for tool-heavy specialists.",
+      "query": {
+        "metric": "aicareeros_agent_tool_call_duration_seconds",
+        "aggregation": "quantile",
+        "quantile": 0.95,
+        "by": ["tool"]
+      }
+    }
+  ],
+  "notes": [
+    "D18 Phase B closure documented batch-flakiness under real-LLM load (~1-3 transient flakes per full-suite run). D19.1 CP3 closure surfaced 2 additional batch-flake instances (see docs/followups/cp3-traceability-supervisor-flake.md). The split between 'rate-limit retry' and 'contract failure' (per D-A operational note) lives in logs / spans — log query on event='agent.run.error' grouped by error_type. Surface as a dashboard placeholder rather than ship a wrong metric."
+  ]
+}

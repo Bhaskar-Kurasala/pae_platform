@@ -10,13 +10,14 @@ function RegisterForm() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [whatsappNumber, setWhatsappNumber] = useState("");
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
   const { register, isAuthenticated, _hasHydrated } = useAuthStore();
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextParam = sanitizeNext(searchParams?.get("next") ?? null);
-  const postRegisterLanding = nextParam ?? "/onboarding";
   const alreadyAuthedLanding = nextParam ?? "/today";
 
   useEffect(() => {
@@ -28,14 +29,14 @@ function RegisterForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
+    if (password.length < 12) {
+      setError("Password must be at least 12 characters.");
       return;
     }
     setLoading(true);
     try {
-      await register(email, fullName, password);
-      router.replace(postRegisterLanding);
+      await register(email, fullName, password, whatsappNumber.trim() || undefined);
+      setSuccess(true);
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -45,6 +46,28 @@ function RegisterForm() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (success) {
+    return (
+      <div className="min-h-[calc(100vh-8rem)] flex items-center justify-center px-4">
+        <div className="w-full max-w-md text-center space-y-4">
+          <div className="text-5xl">📬</div>
+          <h1 className="text-2xl font-bold">Check your inbox</h1>
+          <p className="text-muted-foreground">
+            We&apos;ve sent a verification link to <strong>{email}</strong>.
+            Click it to activate your account, then{" "}
+            <Link href="/login" className="text-primary hover:underline font-medium">
+              log in
+            </Link>
+            .
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Didn&apos;t get it? Check your spam folder. The link expires in 24 hours.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -106,12 +129,31 @@ function RegisterForm() {
               type="password"
               required
               autoComplete="new-password"
-              minLength={8}
+              minLength={12}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Min 8 characters"
+              placeholder="Min 12 characters"
               className="w-full h-10 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/50 transition"
             />
+            <p className="text-xs text-muted-foreground">Use at least 12 characters.</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <label htmlFor="whatsappNumber" className="text-sm font-medium">
+              WhatsApp number <span className="text-muted-foreground font-normal">(optional)</span>
+            </label>
+            <input
+              id="whatsappNumber"
+              type="tel"
+              autoComplete="tel"
+              value={whatsappNumber}
+              onChange={(e) => setWhatsappNumber(e.target.value)}
+              placeholder="+919876543210"
+              className="w-full h-10 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/50 transition"
+            />
+            <p className="text-xs text-muted-foreground">
+              Lets the team reach out directly on WhatsApp if you go quiet. We never auto-message.
+            </p>
           </div>
 
           <button

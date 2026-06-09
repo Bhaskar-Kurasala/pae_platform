@@ -59,6 +59,8 @@ async def _handle_github_push(payload: dict[str, Any]) -> None:
             student_id="system",
             task=f"Process GitHub push to {repo_name}",
             context={
+                "actor_role": "system",
+                "actor_id": None,
                 "github_commit": commit_sha,
                 "repo": repo_name,
                 "pusher": pusher,

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api._deprecated import deprecated
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.exercise import Exercise
@@ -70,6 +71,7 @@ async def get_submission(
 
 
 @router.get("/{exercise_id}/submissions/mine", response_model=list[SubmissionResponse])
+@deprecated(sunset="2026-07-01", reason="no caller -- Practice screen uses /submissions/{id}")
 async def list_my_submissions(
     exercise_id: uuid.UUID,
     limit: int = Query(default=20, ge=1, le=50),
@@ -165,6 +167,7 @@ async def submit_exercise(
     "/{exercise_id}/peer-gallery",
     response_model=list[PeerSubmissionItem],
 )
+@deprecated(sunset="2026-07-01", reason="peer-review feature not in v8")
 async def get_peer_gallery(
     exercise_id: uuid.UUID,
     limit: int = Query(default=20, ge=1, le=50),
@@ -182,6 +185,7 @@ async def get_peer_gallery(
     "/{exercise_id}/scaffold-envelope",
     response_model=FadedScaffoldResponse,
 )
+@deprecated(sunset="2026-07-01", reason="scaffolding UI not in v8")
 async def get_scaffold_envelope(
     exercise_id: uuid.UUID,
     service: ExerciseService = Depends(get_service),
@@ -212,6 +216,7 @@ async def get_scaffold_envelope(
     "/{exercise_id}/worked-example",
     response_model=WorkedExampleResponse,
 )
+@deprecated(sunset="2026-07-01", reason="worked-example UI not in v8")
 async def get_worked_example(
     exercise_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -244,6 +249,7 @@ async def get_worked_example(
     "/{exercise_id}/difficulty-recommendation",
     response_model=DifficultyRecommendationResponse,
 )
+@deprecated(sunset="2026-07-01", reason="interleaving feature not in v8")
 async def get_difficulty_recommendation(
     exercise_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -272,6 +278,7 @@ async def get_difficulty_recommendation(
     "/interleaving/suggestion",
     response_model=InterleavingSuggestionResponse,
 )
+@deprecated(sunset="2026-07-01", reason="interleaving feature not in v8")
 async def get_interleaving_suggestion(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -326,6 +333,7 @@ async def update_share_settings(
     "/peer-reviews/pending",
     response_model=PendingReviewsResponse,
 )
+@deprecated(sunset="2026-07-01", reason="peer-review feature not in v8")
 async def get_pending_peer_reviews(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -341,6 +349,7 @@ async def get_pending_peer_reviews(
     "/peer-reviews/{assignment_id}",
     response_model=PeerReviewAssignmentItem,
 )
+@deprecated(sunset="2026-07-01", reason="peer-review feature not in v8")
 async def submit_peer_review(
     assignment_id: uuid.UUID,
     payload: PeerReviewSubmit,
@@ -368,6 +377,7 @@ async def submit_peer_review(
     "/submissions/{submission_id}/peer-reviews",
     response_model=SubmissionPeerReviewsResponse,
 )
+@deprecated(sunset="2026-07-01", reason="peer-review feature not in v8")
 async def get_submission_peer_reviews(
     submission_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),

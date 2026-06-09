@@ -13,6 +13,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from app.api._deprecated import deprecated
 from app.agents.base_agent import AgentState
 from app.core.rate_limit import limiter
 from app.schemas.agent import ChatResponse
@@ -31,6 +32,7 @@ class DemoChatRequest(BaseModel):
 
 @router.post("/chat", response_model=ChatResponse)
 @limiter.limit("5/hour")
+@deprecated(sunset="2026-07-01", reason="demo screen never wired in v8")
 async def demo_chat(
     request: Request,
     payload: DemoChatRequest,

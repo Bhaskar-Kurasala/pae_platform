@@ -104,13 +104,13 @@ def test_format_markdown_passes_through_markdown_in_assistant_content() -> None:
     conv = _mk_conv(title="Passthrough")
     raw_content = "## Inner heading\n\n```python\nprint('hi')\n```"
     messages = [
-        _mk_msg("assistant", raw_content, agent_name="coding_assistant"),
+        _mk_msg("assistant", raw_content, agent_name="senior_engineer"),
     ]
     out = format_conversation_markdown(conv, messages)
     # Content is preserved verbatim (no escaping of '##').
     assert raw_content in out
     # And the outer section header is still the Tutor one.
-    assert "## Tutor (coding_assistant)" in out
+    assert "## Tutor (senior_engineer)" in out
 
 
 def test_format_markdown_handles_empty_messages_list() -> None:
@@ -137,7 +137,7 @@ def test_format_markdown_mixed_agents_uses_mixed_label() -> None:
     conv = _mk_conv(title="Multi-agent")
     messages = [
         _mk_msg("assistant", "A", agent_name="socratic_tutor"),
-        _mk_msg("assistant", "B", agent_name="coding_assistant"),
+        _mk_msg("assistant", "B", agent_name="senior_engineer"),
     ]
     out = format_conversation_markdown(conv, messages)
     assert "Agent: Mixed" in out

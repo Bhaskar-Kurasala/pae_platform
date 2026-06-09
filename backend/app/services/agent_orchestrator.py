@@ -44,8 +44,15 @@ async def _load_history(
         raw = await redis.get(_conv_key(conversation_id))
         if raw:
             return json.loads(raw)
-    except Exception:
-        pass
+    except Exception as exc:
+        # PR3/C2.1 — Redis blip while loading conversation history is
+        # non-fatal: agent runs with empty history. Log so we can
+        # correlate degraded responses to infra incidents.
+        log.warning(
+            "agent_orchestrator.history_load_failed",
+            conversation_id=conversation_id,
+            error=str(exc),
+        )
     return []
 
 

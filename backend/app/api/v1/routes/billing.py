@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api._deprecated import deprecated
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
@@ -100,7 +101,10 @@ async def stripe_webhook(
     except ValueError as exc:
         log.warning("billing.webhook.invalid_signature", error=str(exc))
         # Return 400 for signature failures so Stripe knows the secret is wrong.
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Webhook signature verification failed.",
+        ) from exc
 
     event_type: str = event.get("event_type", "")
     data: dict[str, Any] = event.get("data", {})
@@ -245,6 +249,7 @@ async def _handle_subscription_deleted(
 
 
 @router.get("/portal", response_model=CustomerPortalResponse)
+@deprecated(sunset="2026-07-01", reason="Stripe customer portal not yet wired in v8")
 async def customer_portal(
     return_url: str = "http://localhost:3000/dashboard",
     current_user: User = Depends(get_current_user),
@@ -282,6 +287,7 @@ async def customer_portal(
 
 
 @router.get("/subscription", response_model=SubscriptionInfo)
+@deprecated(sunset="2026-07-01", reason="subscriptions not yet wired in v8")
 async def get_subscription(
     current_user: User = Depends(get_current_user),
     stripe_svc: StripeService = Depends(get_stripe_service),

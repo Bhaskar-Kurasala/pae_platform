@@ -1,0 +1,193 @@
+# PR3/D7 — production deploy workflow.
+#
+# Triggers on **annotated git tags matching `v*`** (e.g. `v1.0.0`,
+# `v2026-04-29`). Tag-driven not main-driven because:
+#
+#   1. Every deploy is intentional. Merging to `main` shouldn't
+#      automatically push to prod — that pattern produces "I just
+#      wanted to merge a doc fix" surprise deploys.
+#   2. Tags are the natural artifact for the release-notes story.
+#      A tag's commit becomes the deploy's `BUILD_COMMIT_SHA`
+#      (PR3/C6.2) so /health/version reports it.
+#   3. Rollback is `git tag -d v1.2.3 && fly deploy --image <old-tag>`,
+#      not "revert main and re-merge."
+#
+# Required secrets (configure in repo Settings → Secrets and variables):
+#
+#   FLY_API_TOKEN          — fly tokens create deploy --org pae --name ci
+#   SENTRY_AUTH_TOKEN      — for source-map upload at build time (PR3/C4.1)
+#   SENTRY_ORG             — your Sentry org slug
+#   SENTRY_PROJECT_FRONTEND — pae-platform-web
+#
+# Manual-trigger fallback (workflow_dispatch) lets us redeploy a tag
+# without re-tagging — useful for "the deploy half-succeeded, retry the
+# frontend" scenarios.
+
+name: Deploy
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to redeploy (e.g. v1.0.0). Defaults to current ref."
+        required: false
+        default: ""
+
+# Concurrency: never let two deploys race for the same Fly app. A second
+# tag pushed while the first is mid-deploy waits in queue, doesn't cancel —
+# we never want to abandon a half-deployed app.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+jobs:
+  # ── Pre-deploy gate: full CI must pass on the tagged commit ─────────
+  # GitHub doesn't let us require an entire workflow as a "check" on a
+  # tag push the way it does for branches, so we replicate the gate
+  # here: re-run the lint + test + audit jobs against the tagged
+  # commit. If anything is red, no deploy.
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Backend lint + tests
+        run: |
+          cd backend
+          uv sync
+          uv run ruff check .
+          uv run mypy app/
+          # Skip the migrations-apply check here — same DB state as CI;
+          # if CI is green, tag is green on this dimension.
+          uv run pytest --cov=app --cov-fail-under=75 -x
+
+      - name: Frontend lint + tests + build
+        run: |
+          cd frontend
+          pnpm install --frozen-lockfile
+          pnpm tsc --noEmit
+          pnpm lint
+          pnpm test --run
+          pnpm build
+
+  # ── Deploy backend (API + workers) ─────────────────────────────────
+  deploy-api:
+    needs: preflight
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # PR3/C6.2 — bake the build provenance into the image so
+      # /health/version returns the exact deployed SHA.
+      - name: Deploy to Fly
+        run: |
+          flyctl deploy \
+            --config fly.toml \
+            --dockerfile backend/Dockerfile \
+            --build-arg BUILD_COMMIT_SHA=${{ github.sha }} \
+            --build-arg BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+            --strategy bluegreen \
+            --wait-timeout 300
+
+      # Post-deploy smoke: hit /health/ready on the deployed app and
+      # fail the run if it returns anything other than 200. This is
+      # the deploy-time equivalent of the CI E2E spec.
+      - name: Post-deploy /health/ready smoke
+        run: |
+          for i in {1..30}; do
+            status=$(curl -s -o /dev/null -w '%{http_code}' https://pae-platform.fly.dev/health/ready || echo "000")
+            if [ "$status" = "200" ]; then
+              echo "API healthy"
+              exit 0
+            fi
+            echo "attempt $i: status=$status"
+            sleep 5
+          done
+          echo "API failed health check after 150s"
+          exit 1
+
+  # ── Deploy frontend ────────────────────────────────────────────────
+  deploy-web:
+    needs: deploy-api
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # PR3/C4.1 — passing SENTRY_AUTH_TOKEN here triggers source-map
+      # upload at build time (the withSentryConfig() wrapper checks
+      # for the env var and skips upload if absent). Source maps are
+      # NOT shipped in the public bundle (`hideSourceMaps: true`
+      # equivalent) — Sentry has them server-side for symbolication.
+      - name: Deploy to Fly
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT_FRONTEND }}
+        run: |
+          flyctl deploy \
+            --config fly-frontend.toml \
+            --dockerfile frontend/Dockerfile \
+            --build-secret SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }} \
+            --strategy bluegreen \
+            --wait-timeout 300
+
+      - name: Post-deploy frontend smoke
+        run: |
+          for i in {1..30}; do
+            status=$(curl -s -o /dev/null -w '%{http_code}' https://pae-platform-web.fly.dev/ || echo "000")
+            if [ "$status" = "200" ]; then
+              echo "frontend healthy"
+              exit 0
+            fi
+            echo "attempt $i: status=$status"
+            sleep 5
+          done
+          echo "frontend failed homepage check after 150s"
+          exit 1
+
+  # ── Tag the Sentry release ─────────────────────────────────────────
+  # After both apps deploy successfully, tell Sentry about the release
+  # so events from the new version are correlated with the deploy event
+  # (which gives us "errors started after the v1.2.3 deploy" filtering
+  # in the Sentry issues board).
+  sentry-release:
+    needs: [deploy-api, deploy-web]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Sentry CLI walks history for commit-list
+
+      - name: Notify Sentry of release
+        uses: getsentry/action-release@v1
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+        with:
+          environment: production
+          version: ${{ github.sha }}
+          # Both projects share the release SHA so a single Sentry
+          # release marker lets on-call answer "did the API or web
+          # deploy cause this?" without bouncing between projects.
+          projects: pae-platform-backend pae-platform-web

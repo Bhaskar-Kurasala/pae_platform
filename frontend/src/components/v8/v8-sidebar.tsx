@@ -24,7 +24,7 @@ const NAV_GROUPS: ReadonlyArray<{
     items: [
       { href: "/today", label: "Today" },
       { href: "/path", label: "My path" },
-      { href: "/studio", label: "Studio" },
+      { href: "/practice", label: "Practice" },
       { href: "/promotion", label: "Promotion" },
     ],
   },
@@ -36,11 +36,8 @@ const NAV_GROUPS: ReadonlyArray<{
     ],
   },
   {
-    label: "Practice",
-    items: [
-      { href: "/chat", label: "AI Tutor" },
-      { href: "/exercises", label: "Exercises" },
-    ],
+    label: "Coach",
+    items: [{ href: "/chat", label: "AI Tutor" }],
   },
   {
     label: "Explore",
@@ -126,7 +123,7 @@ export function V8Sidebar() {
     <aside className="sidebar">
       <div className="brand reveal">
         <h1>
-          Career<i>Forge</i>
+          AI Career <i>OS</i>
         </h1>
         <p>Become. Do not just learn.</p>
       </div>
@@ -172,6 +169,36 @@ export function V8Sidebar() {
       </nav>
 
       <div className="sidebar-foot reveal delay-3">
+        {user?.role === "admin" && (
+          <a
+            href="/admin"
+            target="careeros-admin-console"
+            title="Open the admin console in its dedicated tab"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              marginBottom: 10,
+              padding: "7px 12px",
+              borderRadius: 8,
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: ".04em",
+              background: "rgba(184,134,45,0.18)",
+              color: "#d4a838",
+              border: "1px solid rgba(184,134,45,0.28)",
+              textDecoration: "none",
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <rect x="1.5" y="1.5" width="4" height="4" rx="1" />
+              <rect x="8.5" y="1.5" width="4" height="4" rx="1" />
+              <rect x="1.5" y="8.5" width="4" height="4" rx="1" />
+              <rect x="8.5" y="8.5" width="4" height="4" rx="1" />
+            </svg>
+            Admin console
+          </a>
+        )}
         <div className="student">
           <div className="avatar" aria-hidden>
             {initials(user?.full_name)}

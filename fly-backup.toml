@@ -1,0 +1,67 @@
+# PR3/D1.1 — Fly.io scheduled backup machine.
+#
+# This is a SECOND Fly app (separate from the main pae-platform app) whose
+# only job is to wake up once a day, run pg_dump → gzip → R2, and shut down.
+#
+# Why a separate app:
+#   - Isolates backup credentials (Neon URL, R2 keys) from the main app.
+#     A compromise of the API container does NOT leak the backup keys.
+#   - Lets us scale to zero — Fly bills per-second; 5 minutes/day = ~$0.10/mo.
+#   - Independent deploy lifecycle. The backup script can change without
+#     redeploying the API.
+#
+# Setup (one-time, by the human deploying):
+#   1. fly apps create pae-platform-backup
+#   2. fly secrets set --app pae-platform-backup \
+#        NEON_DATABASE_URL=postgres://… \
+#        R2_ACCOUNT_ID=… \
+#        R2_ACCESS_KEY_ID=… \
+#        R2_SECRET_ACCESS_KEY=… \
+#        R2_BUCKET=pae-backups
+#   3. fly deploy --config fly-backup.toml --dockerfile infra/backup/Dockerfile
+#
+# After deploy, Fly automatically schedules the machine per the [mounts] /
+# [[machines]] schedule below. Verify with `fly machines list -a pae-platform-backup`.
+
+app = "pae-platform-backup"
+primary_region = "iad"           # us-east — keep close to Neon's primary region
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "infra/backup/Dockerfile"
+
+# No HTTP service — this app never accepts traffic.
+# We declare zero processes and rely on the schedule below to spawn machines.
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512                # pg_dump + gzip + curl uploads fit easily
+
+# ── Schedule ───────────────────────────────────────────────────────────────
+# Fly's scheduled-machine syntax. Wakes a fresh machine, runs the entrypoint,
+# stops on exit-0. Restart-on-failure with backoff so a transient Neon blip
+# doesn't silently miss a night.
+#
+# "daily" → runs once every 24h, anchored to the deploy time.
+# Pin to 04:00 UTC by deploying around that wall-clock time, OR override
+# via `fly machine update <id> --schedule daily --restart on-fail` after
+# the first deploy.
+[processes]
+  backup = "/home/backup/backup.sh"
+
+[[machines]]
+  processes = ["backup"]
+  schedule = "daily"
+  auto_destroy = true            # remove the machine record after exit
+  restart_policy = "on-failure"
+  restart_max_retries = 3
+
+# ── Health & metrics ───────────────────────────────────────────────────────
+# Fly logs are the source of truth for this machine — we grep for the
+# `[backup] success` / `[backup] start` lines emitted by backup.sh.
+# Healthchecks.io ping wiring lives in docs/runbooks/oncall.md (PR3/D7.1).
+
+[env]
+  TZ = "UTC"                     # backup timestamps are always UTC

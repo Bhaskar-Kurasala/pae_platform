@@ -10,12 +10,15 @@ function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [errorKind, setErrorKind] = useState<"default" | "locked" | "unverified">("default");
   const [loading, setLoading] = useState(false);
-  const { login, isAuthenticated, _hasHydrated } = useAuthStore();
+  const { login, isAuthenticated, user, _hasHydrated } = useAuthStore();
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextParam = sanitizeNext(searchParams?.get("next") ?? null);
-  const landing = nextParam ?? "/today";
+  const roleLanding =
+    user?.role === "admin" || user?.role === "instructor" ? "/admin" : "/today";
+  const landing = nextParam ?? roleLanding;
 
   useEffect(() => {
     if (_hasHydrated && isAuthenticated) {
@@ -26,13 +29,26 @@ function LoginForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    setErrorKind("default");
     setLoading(true);
     try {
       await login(email, password);
-      router.replace(landing);
+      const fresh = useAuthStore.getState().user;
+      const postLoginLanding =
+        nextParam ??
+        (fresh?.role === "admin" || fresh?.role === "instructor" ? "/admin" : "/today");
+      router.replace(postLoginLanding);
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.message);
+        if (err.status === 423) {
+          setErrorKind("locked");
+          setError(err.message);
+        } else if (err.status === 403 && err.message.includes("not verified")) {
+          setErrorKind("unverified");
+          setError(err.message);
+        } else {
+          setError(err.message);
+        }
       } else {
         setError("Something went wrong. Please try again.");
       }
@@ -54,8 +70,18 @@ function LoginForm() {
           className="rounded-2xl border bg-card p-8 shadow-sm space-y-5"
         >
           {error && (
-            <div className="rounded-lg bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">
-              {error}
+            <div className="rounded-lg bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive space-y-1">
+              <p>{error}</p>
+              {errorKind === "unverified" && (
+                <p>
+                  <Link
+                    href={`/verify-email/resend?email=${encodeURIComponent(email)}`}
+                    className="underline font-medium hover:text-destructive/80"
+                  >
+                    Resend verification email
+                  </Link>
+                </p>
+              )}
             </div>
           )}
 
@@ -76,9 +102,17 @@ function LoginForm() {
           </div>
 
           <div className="space-y-1.5">
-            <label htmlFor="password" className="text-sm font-medium">
-              Password
-            </label>
+            <div className="flex items-center justify-between">
+              <label htmlFor="password" className="text-sm font-medium">
+                Password
+              </label>
+              <Link
+                href="/password-reset/request"
+                className="text-xs text-muted-foreground hover:text-primary transition-colors"
+              >
+                Forgot password?
+              </Link>
+            </div>
             <input
               id="password"
               type="password"
@@ -93,7 +127,7 @@ function LoginForm() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || errorKind === "locked"}
             className="w-full h-10 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-60 transition-colors"
           >
             {loading ? "Signing in…" : "Sign in"}

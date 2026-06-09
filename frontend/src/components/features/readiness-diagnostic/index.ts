@@ -17,8 +17,13 @@ export { diagnosticAnalytics } from "./analytics";
 /**
  * Feature-flag guard. Backend is the authoritative gate; frontend
  * flag is advisory for UI rendering.
+ *
+ * As of the 2026-04-26 readiness workspace refactor, default is ON.
+ * The flag now functions as a kill-switch — set
+ * `NEXT_PUBLIC_FEATURE_READINESS_DIAGNOSTIC=0` to fall back to the
+ * legacy placeholder view in environments that need it disabled.
  */
 export function isReadinessDiagnosticEnabled(): boolean {
-  if (typeof process === "undefined") return false;
-  return process.env.NEXT_PUBLIC_FEATURE_READINESS_DIAGNOSTIC === "1";
+  if (typeof process === "undefined") return true;
+  return process.env.NEXT_PUBLIC_FEATURE_READINESS_DIAGNOSTIC !== "0";
 }

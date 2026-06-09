@@ -8,6 +8,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api._deprecated import deprecated
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
@@ -41,11 +42,14 @@ async def create_card(
         user_id=current_user.id,
         concept_key=payload.concept_key,
         prompt=payload.prompt,
+        answer=payload.answer,
+        hint=payload.hint,
     )
     return SRSCardResponse.model_validate(card)
 
 
 @router.get("/review/weekly", response_model=WeeklyReviewResponse)
+@deprecated(sunset="2026-07-01", reason="weekly review widget not in v8")
 async def get_weekly_review(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

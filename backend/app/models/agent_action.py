@@ -1,6 +1,7 @@
 import uuid
+from decimal import Decimal
 
-from sqlalchemy import JSON, ForeignKey, String, Text
+from sqlalchemy import JSON, ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -22,6 +23,20 @@ class AgentAction(Base, UUIDMixin, TimestampMixin):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(nullable=True)
     tokens_used: Mapped[int | None] = mapped_column(nullable=True)
+
+    # cost_inr per Pass 3f §D.2 — added in migration 0057_entitlement_tier.
+    # The mv_student_daily_cost materialized view aggregates SUM(cost_inr)
+    # per (student, day) for the cost-ceiling enforcement at Layer 3
+    # of the entitlement model. Populated by:
+    #   • legacy BaseAgent.log_action via state.metadata.{input,output}_tokens
+    #     → estimate_cost_inr → telemetry only (NOT cost_inr column today)
+    #   • AgenticBaseAgent.execute via _track_llm_usage accumulator
+    #     → estimate_cost_inr → cost_inr column (D10 Checkpoint 3)
+    # NUMERIC(12,4) so sub-rupee per-call costs (Haiku is ~₹0.20) aren't
+    # lost to rounding.
+    cost_inr: Mapped[Decimal | None] = mapped_column(
+        Numeric(precision=12, scale=4), nullable=True
+    )
 
     # DISC-57 — actor identity so admin-triggered runs are distinguishable.
     # `actor_role` is denormalized on purpose: it survives a future role change

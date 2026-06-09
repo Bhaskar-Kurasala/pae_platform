@@ -218,6 +218,145 @@ def render_cover_letter_pdf(
     return _render_fallback_pdf(_cover_letter_text_lines(body, student))
 
 
+def _application_kit_text_lines(manifest: dict[str, Any]) -> list[str]:
+    """Flatten an application-kit manifest into a top-down list of text lines.
+
+    Layout:
+      - Cover: label, target role, built-at timestamp.
+      - Resume block: summary + bullets + skills (truncated).
+      - Tailored variant: JD excerpt + tailored summary/bullets if present.
+      - JD card: title/company/fit/verdict.
+      - Mock interview: headline + verdict + top strengths/weaknesses.
+      - Autopsy retro: headline + score + what worked / what to do differently.
+
+    Sections are skipped cleanly when their key is absent — never raises on
+    missing data. The fallback PDF backend renders this verbatim.
+    """
+    lines: list[str] = []
+
+    label = str(manifest.get("label") or "Application Kit")
+    lines.append(f"APPLICATION KIT: {label}")
+    if manifest.get("target_role"):
+        lines.append(f"Target role: {manifest['target_role']}")
+    if manifest.get("built_at"):
+        lines.append(f"Built at: {manifest['built_at']}")
+    lines.append("")
+
+    resume = manifest.get("resume")
+    if isinstance(resume, dict):
+        lines.append("RESUME")
+        if resume.get("title"):
+            lines.append(str(resume["title"]))
+        if resume.get("summary"):
+            lines.append(str(resume["summary"]))
+        bullets = resume.get("bullets") or []
+        if bullets:
+            lines.append("")
+            lines.append("Highlights:")
+            for b in bullets[:10]:
+                if isinstance(b, dict) and b.get("text"):
+                    lines.append(f"- {b['text']}")
+                elif isinstance(b, str):
+                    lines.append(f"- {b}")
+        skills = resume.get("skills_snapshot") or []
+        if skills:
+            lines.append("")
+            lines.append("Skills: " + ", ".join(str(s) for s in skills[:20]))
+        lines.append("")
+
+    tailored = manifest.get("tailored_resume")
+    if isinstance(tailored, dict):
+        lines.append("TAILORED VARIANT")
+        jd_excerpt = (tailored.get("jd_text") or "")[:240]
+        if jd_excerpt:
+            lines.append(f"JD: {jd_excerpt}")
+        content = tailored.get("content") or {}
+        if isinstance(content, dict):
+            if content.get("summary"):
+                lines.append(str(content["summary"]))
+            for b in (content.get("bullets") or [])[:8]:
+                if isinstance(b, dict) and b.get("text"):
+                    lines.append(f"- {b['text']}")
+                elif isinstance(b, str):
+                    lines.append(f"- {b}")
+        lines.append("")
+
+    jd = manifest.get("jd")
+    if isinstance(jd, dict):
+        lines.append("JOB DESCRIPTION")
+        title = jd.get("title") or "(untitled)"
+        company = jd.get("company") or ""
+        lines.append(f"{title}{' — ' + company if company else ''}")
+        if jd.get("fit_score") is not None:
+            lines.append(f"Fit score: {jd['fit_score']}")
+        if jd.get("verdict"):
+            lines.append(f"Verdict: {jd['verdict']}")
+        lines.append("")
+
+    mock = manifest.get("mock_report")
+    if isinstance(mock, dict):
+        lines.append("MOCK INTERVIEW")
+        if mock.get("headline"):
+            lines.append(str(mock["headline"]))
+        if mock.get("verdict"):
+            lines.append(f"Verdict: {mock['verdict']}")
+        strengths = mock.get("strengths") or []
+        if strengths:
+            lines.append("Strengths:")
+            for s in strengths[:5]:
+                lines.append(f"- {s}")
+        weaknesses = mock.get("weaknesses") or []
+        if weaknesses:
+            lines.append("Weaknesses:")
+            for w in weaknesses[:5]:
+                lines.append(f"- {w}")
+        lines.append("")
+
+    autopsy = manifest.get("autopsy")
+    if isinstance(autopsy, dict):
+        lines.append("PORTFOLIO AUTOPSY")
+        if autopsy.get("headline"):
+            lines.append(str(autopsy["headline"]))
+        if autopsy.get("overall_score") is not None:
+            lines.append(f"Overall score: {autopsy['overall_score']}")
+        worked = autopsy.get("what_worked") or []
+        if worked:
+            lines.append("What worked:")
+            for w in worked[:5]:
+                lines.append(f"- {w}")
+        differently = autopsy.get("what_to_do_differently") or []
+        if differently:
+            lines.append("What to do differently:")
+            for f in differently[:5]:
+                if isinstance(f, dict):
+                    issue = f.get("issue") or ""
+                    todo = f.get("what_to_do_differently") or ""
+                    lines.append(f"- {issue}: {todo}".rstrip(": "))
+                elif isinstance(f, str):
+                    lines.append(f"- {f}")
+        lines.append("")
+
+    return lines
+
+
+def render_application_kit(manifest: dict[str, Any]) -> bytes:
+    """Render an Application Kit manifest to a PDF.
+
+    Reuses the WeasyPrint+template pipeline when a Jinja template is
+    available (`templates/application_kit.html`), otherwise falls through to
+    the pure-Python text PDF backend so kits are still downloadable on dev
+    boxes lacking the GTK toolchain. Missing manifest sections are skipped
+    cleanly — the renderer must never crash on partial bundles.
+    """
+    html = _render_html("application_kit.html", manifest=manifest)
+    if html is not None:
+        pdf = _render_with_weasyprint(html)
+        if pdf is not None:
+            return pdf
+    log.info("pdf_renderer.using_fallback", artifact="application_kit")
+    return _render_fallback_pdf(_application_kit_text_lines(manifest))
+
+
 def extract_text(pdf_bytes: bytes) -> str:
     """Extract text from a PDF for ATS-recoverability tests.
 

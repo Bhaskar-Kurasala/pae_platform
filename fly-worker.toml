@@ -1,0 +1,113 @@
+# D16/CP2.l — Fly.io deploy config for the Celery worker app.
+#
+# This is the second Fly app in the Celery split: pae-platform-worker.
+# Runs the same backend image as the API (fly.toml), but starts the
+# Celery worker process instead of gunicorn. Beat is its own app
+# (fly-beat.toml) so a runaway task on the worker can't starve the
+# scheduler.
+#
+# Setup (one-time, by the human deploying):
+#   1. fly apps create pae-platform-worker
+#   2. Mirror secrets from the API app — the worker needs DATABASE_URL,
+#      REDIS_URL, ANTHROPIC_API_KEY, SECRET_KEY, SENDGRID_API_KEY,
+#      OUTREACH_AUTO_SEND, ENVIRONMENT, SENTRY_DSN, etc. Easiest:
+#
+#        fly secrets list --app pae-platform           # see what's set
+#        fly secrets set --app pae-platform-worker \
+#          DATABASE_URL=postgres://...  \
+#          REDIS_URL=redis://...         \
+#          SECRET_KEY=$(openssl rand -hex 32) \
+#          ANTHROPIC_API_KEY=...         \
+#          SENDGRID_API_KEY=...          \
+#          OUTREACH_AUTO_SEND=1          \
+#          ENVIRONMENT=production        \
+#          # ... full list in backend/.env.example
+#
+#   3. fly deploy --config fly-worker.toml --dockerfile backend/Dockerfile
+#
+# The same `production_required` validator that guards the API
+# (app/core/config.py PR3/D2.2) runs at worker boot — a misconfigured
+# worker fails loud before pulling tasks off the broker.
+
+app = "pae-platform-worker"
+
+# us-east — same region as Neon's default and the API app, so the
+# worker's DB latency matches the API's. Keeping all three in iad also
+# means Redis stays on a single region (no cross-region broker latency).
+primary_region = "iad"
+
+# Celery worker drain on SIGTERM: in-flight tasks finish (up to
+# kill_timeout); no new tasks are pulled. 30s matches the API.
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "backend/Dockerfile"
+
+# PR3/D2.2 — production-required env. Same envelope as the API so the
+# boot-time validator behaves identically.
+[env]
+  ENVIRONMENT = "production"
+  # OUTREACH_AUTO_SEND must be set to "1" via Fly secrets to let
+  # outreach_automation actually send (default is dry-run / would_send).
+
+# ─── No HTTP service ────────────────────────────────────────────────
+# The worker is broker-driven (Redis); it doesn't accept HTTP traffic.
+# No [http_service] block. No [[http_service.checks]] block. Fly
+# treats this as a worker-only app and won't try to route external
+# traffic to it.
+
+# ─── VM sizing ──────────────────────────────────────────────────────
+# 4096MB + concurrency=2 (in process command). NOT 512MB + default
+# concurrency. Read this block before "optimizing" either knob.
+#
+# The math is identical to the API side (fly.toml [[vm]] block),
+# repeated here so an operator looking at this file alone has the
+# full picture:
+#
+#   Microsoft Presidio + spaCy en_core_web_lg = ~750 MB resident per
+#   Python process. Every agent invocation through AgenticBaseAgent
+#   loads the safety primitive. So:
+#
+#     concurrency × 750 MB = baseline safety memory
+#     concurrency=2 → 1.5 GB safety
+#     concurrency=4 → 3.0 GB safety (risky at 4 GB cap)
+#     concurrency=8 → 6.0 GB → OOM
+#
+# Eager-loaded at worker boot via the @worker_process_init signal
+# handler in app/core/celery_app.py:156-182, so the memory profile is
+# deterministic from t=0 (not "fine until first task, then 1.4 GB
+# spike"). docs/followups/celery-safety-memory-bump.md item (c) is
+# RESOLVED via that handler.
+#
+# Why 4096 (not 2048): same answer as the API side. Realistic resident
+# at concurrency=2 is ~1.5 GB safety + 150 MB Python + 100 MB app +
+# transient task state + asyncpg/Redis pools = 2.0-2.5 GB. 2048 MB
+# leaves no headroom; 4096 leaves ~40-50% which absorbs traffic
+# spikes during the post-launch tuning window when we don't yet
+# know the real memory profile.
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 4096
+
+# ─── Process definition ─────────────────────────────────────────────
+# Override the Dockerfile's gunicorn CMD with the Celery worker
+# command. --concurrency=2 caps prefork pool size (see math above).
+# --loglevel=info matches the API's log verbosity for log aggregation.
+#
+# IMPORTANT — keep --concurrency=2 unless you've measured resident
+# memory under load and have data showing 4 fits within 4096 MB. The
+# table in docs/followups/celery-safety-memory-bump.md shows
+# concurrency=4 at ~10% headroom (3 GB Presidio against 4 GB cap),
+# which is too thin for production.
+[processes]
+  worker = "uv run celery -A app.core.celery_app worker --loglevel=info --concurrency=2"
+
+# ─── Why no min_machines_running override ───────────────────────────
+# Celery workers should always be warm — there's no cold-start
+# scenario for a broker-driven process; Fly's auto_stop_machines
+# applies to HTTP idleness which doesn't apply here. Default behavior
+# (machine stays running) is correct. If we ever add multiple worker
+# machines for horizontal scale, this stays the same: each runs its
+# own --concurrency=2 prefork pool, scaling independently.

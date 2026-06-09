@@ -18,10 +18,13 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.srs_card import SRSCard
+
+log = structlog.get_logger()
 
 MIN_EASE = 1.3
 MAX_EASE = 3.0
@@ -98,11 +101,15 @@ class SRSService:
         user_id: uuid.UUID,
         concept_key: str,
         prompt: str = "",
+        answer: str = "",
+        hint: str = "",
     ) -> SRSCard:
         """Add a card if it doesn't exist. Existing cards keep their SM-2 state.
 
         Useful for lesson completion / exercise submission flows that want to
         register a concept for review without clobbering prior progress.
+        Answer / hint are filled in only when blank so we never overwrite a
+        more carefully authored copy.
         """
         existing = (
             await self.db.execute(
@@ -113,8 +120,17 @@ class SRSService:
             )
         ).scalar_one_or_none()
         if existing is not None:
+            dirty = False
             if prompt and not existing.prompt:
                 existing.prompt = prompt[:512]
+                dirty = True
+            if answer and not existing.answer:
+                existing.answer = answer
+                dirty = True
+            if hint and not existing.hint:
+                existing.hint = hint
+                dirty = True
+            if dirty:
                 await self.db.commit()
                 await self.db.refresh(existing)
             return existing
@@ -123,6 +139,8 @@ class SRSService:
             user_id=user_id,
             concept_key=concept_key,
             prompt=prompt[:512],
+            answer=answer,
+            hint=hint,
             ease_factor=DEFAULT_EASE,
             interval_days=0,
             repetitions=0,
@@ -189,4 +207,24 @@ class SRSService:
 
         await self.db.commit()
         await self.db.refresh(card)
+
+        # Notebook-graduation hook: if this card backs a notebook entry that
+        # has now crossed the rep threshold, stamp `graduated_at` so the
+        # entry flips from "In review" to "Graduated" on the Notebook screen.
+        # Wrapped in try/except — we never want a graduation hiccup to roll
+        # back the SM-2 update the student just earned.
+        try:
+            from app.services.notebook_service import maybe_graduate_card
+
+            await maybe_graduate_card(self.db, card=card, now=reviewed_at)
+        except Exception as exc:
+            # PR3/C2.1 — keep at warning so a graduation regression
+            # surfaces in logs, but DO NOT re-raise (per the comment
+            # above: SM-2 update has higher priority than graduation).
+            log.warning(
+                "srs.notebook_graduation_hook_failed",
+                card_id=str(card.id),
+                error=str(exc),
+            )
+
         return card

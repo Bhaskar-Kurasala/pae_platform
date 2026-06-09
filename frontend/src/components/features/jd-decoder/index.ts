@@ -12,11 +12,12 @@ export { MatchScoreGauge } from "./match-score-gauge";
 export { jdDecoderAnalytics } from "./analytics";
 
 /**
- * Feature-flag guard. Defaults to the env var; consumers may override
- * for storybook / preview tooling. Frontend gating is advisory only —
- * the backend route is the authoritative gate.
+ * Feature-flag guard. As of the 2026-04-26 readiness workspace refactor,
+ * default is ON. Set `NEXT_PUBLIC_FEATURE_JD_DECODER=0` to fall back to
+ * the legacy placeholder view. Frontend gating is advisory only — the
+ * backend route is the authoritative gate.
  */
 export function isJdDecoderEnabled(): boolean {
-  if (typeof process === "undefined") return false;
-  return process.env.NEXT_PUBLIC_FEATURE_JD_DECODER === "1";
+  if (typeof process === "undefined") return true;
+  return process.env.NEXT_PUBLIC_FEATURE_JD_DECODER !== "0";
 }

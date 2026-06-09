@@ -9,7 +9,9 @@ import structlog
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api._deprecated import deprecated
 from app.core.database import get_db
+from app.core.impersonation import get_view_target_user
 from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.consistency import ConsistencyResponse
@@ -19,6 +21,7 @@ from app.schemas.daily_intention import (
 )
 from app.schemas.first_day_plan import FirstDayPlanResponse, PlannedActivityItem
 from app.schemas.micro_wins import MicroWinItem, MicroWinsResponse
+from app.schemas.today_summary import TodaySummaryResponse
 from app.schemas.weekly_intention import (
     WeeklyIntentionCreate,
     WeeklyIntentionItem,
@@ -32,7 +35,9 @@ from app.services.daily_intention_service import (
 )
 from app.services.first_day_plan_service import build_first_day_plan
 from app.services.goal_contract_service import GoalContractService
+from app.services.learning_session_service import mark_step
 from app.services.micro_wins_service import load_micro_wins
+from app.services.today_summary_service import build_today_summary
 from app.services.weekly_intention_service import (
     current_week_starting,
     load_weekly_intentions,
@@ -92,6 +97,7 @@ async def get_today_consistency(
 
 
 @router.post("/weekly-intentions", response_model=WeeklyIntentionsResponse)
+@deprecated(sunset="2026-07-01", reason="weekly intentions UI not in v8 Today")
 async def set_weekly_intentions(
     payload: WeeklyIntentionCreate,
     db: AsyncSession = Depends(get_db),
@@ -113,6 +119,7 @@ async def set_weekly_intentions(
 
 
 @router.get("/weekly-intentions", response_model=WeeklyIntentionsResponse)
+@deprecated(sunset="2026-07-01", reason="weekly intentions UI not in v8 Today")
 async def get_weekly_intentions(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -125,6 +132,7 @@ async def get_weekly_intentions(
 
 
 @router.get("/first-day-plan", response_model=FirstDayPlanResponse)
+@deprecated(sunset="2026-07-01", reason="first-day-plan widget not in v8 Today")
 async def get_first_day_plan(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -153,6 +161,63 @@ async def get_first_day_plan(
             for a in plan.activities
         ],
     )
+
+
+@router.get("/summary", response_model=TodaySummaryResponse)
+async def get_today_summary(
+    db: AsyncSession = Depends(get_db),
+    view_target: User = Depends(get_view_target_user),
+) -> TodaySummaryResponse:
+    """Single round-trip aggregator for the Today screen.
+
+    Honors admin impersonation so support can land on /today and see
+    exactly what the student sees (session ordinal, due cards, etc.).
+    """
+    summary = await build_today_summary(db, user=view_target)
+    log.info(
+        "today.summary_shown",
+        user_id=str(view_target.id),
+        session_ordinal=summary.session.ordinal,
+        due_cards=summary.due_card_count,
+    )
+    return summary
+
+
+@router.post("/session/step/{step}", response_model=TodaySummaryResponse)
+async def mark_session_step(
+    step: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> TodaySummaryResponse:
+    """Stamp warmup/lesson/reflect on the active session and return summary.
+
+    The returned summary's `session` block reflects the JUST-STAMPED row,
+    even when reflect closes the session — `build_today_summary` reads via
+    `latest_session` (no auto-open), so the closed row is what surfaces.
+    """
+    from app.schemas.today_summary import TodaySession
+
+    if step not in {"warmup", "lesson", "reflect"}:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=400, detail="invalid step")
+    stamped = await mark_step(db, user_id=current_user.id, step=step)  # type: ignore[arg-type]
+    summary = await build_today_summary(db, user=current_user)
+    # Pin the just-stamped session into the response so the client gets the
+    # exact row it acted on (not a freshly auto-opened next session).
+    summary = summary.model_copy(
+        update={
+            "session": TodaySession(
+                id=stamped.id,
+                ordinal=stamped.ordinal,
+                started_at=stamped.started_at,
+                warmup_done_at=stamped.warmup_done_at,
+                lesson_done_at=stamped.lesson_done_at,
+                reflect_done_at=stamped.reflect_done_at,
+            )
+        }
+    )
+    return summary
 
 
 @router.get("/micro-wins", response_model=MicroWinsResponse)

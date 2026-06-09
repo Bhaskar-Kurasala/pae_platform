@@ -106,13 +106,13 @@ async def _register_and_login(
         json={
             "email": email,
             "full_name": "Test User",
-            "password": "pass1234",
+            "password": "pass12345678",
             "role": role,
         },
     )
     resp = await client.post(
         "/api/v1/auth/login",
-        json={"email": email, "password": "pass1234"},
+        json={"email": email, "password": "pass12345678"},
     )
     return str(resp.json()["access_token"])
 
@@ -417,7 +417,9 @@ async def test_edit_original_again_after_fork(client: AsyncClient) -> None:
     assert first.status_code == 200
     first_id = first.json()["id"]
 
-    # Second edit pointing back at the ORIGINAL — branches off the same root.
+    # Second edit pointing back at the ORIGINAL — the downstream soft-delete
+    # removes first_id (everything after original.created_at), so only the
+    # original and this new edit remain live.
     replay = await client.post(
         f"/api/v1/chat/messages/{user_id}/edit",
         json={"content": "second edit on original"},
@@ -427,8 +429,8 @@ async def test_edit_original_again_after_fork(client: AsyncClient) -> None:
     second_id = replay.json()["id"]
     assert replay.json()["parent_id"] == user_id
 
-    # Canonical chain picks the latest (second edit) and exposes the full
-    # chain via sibling_ids: [original, first_edit, second_edit].
+    # Canonical chain picks the latest (second edit); sibling_ids contains
+    # [original, second_edit] — first_id was soft-deleted by the second edit.
     detail = await client.get(
         f"/api/v1/chat/conversations/{conv_id}",
         headers={"Authorization": f"Bearer {token}"},
@@ -436,7 +438,7 @@ async def test_edit_original_again_after_fork(client: AsyncClient) -> None:
     canonical = detail.json()["messages"]
     assert len(canonical) == 1
     assert canonical[0]["id"] == second_id
-    assert canonical[0]["sibling_ids"] == [user_id, first_id, second_id]
+    assert set(canonical[0]["sibling_ids"]) == {user_id, second_id}
 
 
 @pytest.mark.asyncio
