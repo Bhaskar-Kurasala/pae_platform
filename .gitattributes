@@ -1,0 +1,27 @@
+# Normalize line endings: store everything as LF in the repo, regardless of
+# the OS the file was edited on. Prevents the CRLF churn that flipped 351
+# files in the working tree.
+* text=auto eol=lf
+
+# Scripts must always be LF (CRLF breaks shebang execution).
+*.sh   text eol=lf
+*.bash text eol=lf
+
+# Treat these as binary so line-ending normalization never touches them.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.svg  binary
+*.pdf  binary
+*.woff  binary
+*.woff2 binary
+*.ttf  binary
+*.eot  binary
+*.otf  binary
+*.mp4  binary
+*.mov  binary
+*.zip  binary
+*.gz   binary
